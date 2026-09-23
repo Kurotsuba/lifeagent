@@ -1,0 +1,16 @@
+[package]
+name = "lifeagent-plugin-diet"
+version = "0.1.0"
+edition = "2021"
+description = "Diet tracking plugin: meal logging, nutrition targets, diet plan section."
+
+[dependencies]
+lifeagent-core = { workspace = true }
+lifeagent-llm = { workspace = true }
+tokio = { workspace = true }
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }

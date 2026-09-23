@@ -1,0 +1,19 @@
+[package]
+name = "lifeagent-cli"
+version = "0.1.0"
+edition = "2021"
+description = "Developer harness for LifeAgent: chat, plan, inspect data."
+
+[[bin]]
+name = "lifeagent-cli"
+path = "src/main.rs"
+
+[dependencies]
+lifeagent-core = { workspace = true }
+lifeagent-llm = { workspace = true }
+lifeagent-plugin-diet = { workspace = true }
+tokio = { workspace = true }
+clap = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }

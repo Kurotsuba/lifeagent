@@ -1,0 +1,14 @@
+[package]
+name = "lifeagent-llm"
+version = "0.1.0"
+edition = "2021"
+description = "Model abstraction, providers and role router for LifeAgent. No dependency on lifeagent-core."
+
+[dependencies]
+tokio = { workspace = true }
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+reqwest = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
