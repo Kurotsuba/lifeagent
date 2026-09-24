@@ -714,7 +714,8 @@ A tokio task started by the shell:
   existing empty state (`today_plan: None`) and its 立即生成 button cover that case.
 - Failure: emit `PlanFailed`, retry after 15 min, at most 3 attempts per target date
   (attempt counter in memory is fine).
-- Skip entirely if onboarding is not complete or `models` is not configured.
+- Skip plan generation if onboarding is not complete or `models` is not configured. The daily
+  DB backup (§12) is also run by this tick and runs regardless.
 
 ### 7.14 Today view
 
@@ -1195,9 +1196,22 @@ lifeagent-cli targets                   # prints NutritionTargets for today
 - What is sent to cloud models: the system prompt (profile summary, goals, summaries, memory
   notes), recent conversation, tool results, and planner inputs. Document this in the
   Settings page with one short paragraph.
-- Database opened with WAL mode and `foreign_keys=ON`; a daily backup copy of the DB file
-  (`lifeagent.db.bak`, keep last 7 dated copies) taken by the scheduler at first tick after
-  the day boundary.
+- Database opened with WAL mode and `foreign_keys=ON`.
+- Daily backup, taken by the scheduler (B4 in `docs/DECISIONS.md`):
+  - On every tick, if `{data_dir}/backups/lifeagent-YYYY-MM-DD.db` does not exist for the
+    current logical date, create it. The first tick after the day boundary therefore takes
+    the backup, and a restart never takes a second one the same day. No in-memory state is
+    needed.
+  - Create it with `VACUUM INTO`, never a file copy: under WAL, recent commits live in the
+    `-wal` file, so copying `lifeagent.db` alone gives a stale or torn backup. `VACUUM INTO`
+    writes a consistent snapshot that includes WAL contents. Bind the target path as a
+    parameter (`VACUUM INTO ?`), since SQLite accepts any string expression there. Write to
+    `lifeagent-YYYY-MM-DD.db.tmp` first (removing a leftover one), then rename, so a failed
+    run never leaves a partial file that blocks the next attempt.
+  - Keep the 7 newest `lifeagent-*.db` files by date in the name; delete older ones.
+  - On failure, log a warning and try again on the next tick. It does not emit `PlanFailed`.
+  - Backups run whether or not onboarding is complete or models are configured. §7.13's skip
+    condition applies only to plan generation, which needs a model; a backup doesn't.
 
 ## 13. Testing strategy
 
@@ -1210,6 +1224,9 @@ Required unit tests:
   relaunch shortly after midnight with plan_time already passed the previous evening (B3 in
   `docs/DECISIONS.md`) — the case that broke under the old "today's calendar date" wording.
 - Settings validation rejects `plan_time < day_boundary`.
+- Daily backup (§12): a backup opened as its own database contains a row written just before
+  it (still only in the `-wal` file); a second run on the same logical date doesn't replace
+  the file; only the 7 newest dated backups are kept; a leftover `.tmp` doesn't block a run.
 - Targets engine: male/female, each goal direction, rate cap, floor application, carbs
   minimum adjustment, goal reached → maintain, goal-weight anchor (target set vs. unset).
   Include at least one hand-computed example, plus a heavy-body-weight case that would have

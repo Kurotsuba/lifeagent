@@ -484,3 +484,36 @@ heavy-weight case asserting carbs > 0, the macro-feasibility floor, rate cap, 12
 goal reached → maintain), the sanity check (including wheat bran and fiber > carbs), the
 resolver (name hit, alias hit, miss → estimate → cached with no second LLM call), and parser
 validation and default meal type by time.
+
+## 2026-09-24 — B4 resolved: daily backup via `VACUUM INTO`, dated files, keep 7
+
+`docs/BLOCKERS.md`'s B4: §12 had the scheduler copy `lifeagent.db` once a day. The database runs
+in WAL mode, where recent commits live in the `-wal` file until a checkpoint, so a plain copy
+of the main file is stale or torn. The same sentence also contradicted itself: one fixed name,
+`lifeagent.db.bak`, but "keep last 7 dated copies".
+
+`BLOCKERS.md` flagged this as needing no judgment call, so it was resolved directly with its
+fix, plus the details it left open:
+
+- **`VACUUM INTO`** instead of a file copy. It writes a consistent snapshot, WAL contents
+  included, in one statement through `sqlx`. The target path is bound as a parameter
+  (`VACUUM INTO ?`, which SQLite accepts) rather than spliced into the SQL. sqlx 0.9 rejects
+  dynamically built SQL anyway.
+- **Dated files, 7 kept:** `{data_dir}/backups/lifeagent-YYYY-MM-DD.db`, named by logical
+  date; older ones beyond the newest 7 are deleted.
+- **Whether a backup is due comes from the file on disk**, not an in-memory flag: each tick
+  takes one if today's file doesn't exist yet. That gives "first tick after the day boundary"
+  exactly, survives restarts, and never takes two the same day.
+- **Write to `.tmp`, then rename.** `VACUUM INTO` fails if the target exists, so a crash
+  mid-write that left a partial file under the final name would block every later attempt.
+  A leftover `.tmp` is removed before each run.
+- **Failures** log a warning and retry on the next tick. They don't emit `PlanFailed`, which is
+  about plans and drives user notifications (§10.1).
+- **Backups run before onboarding and without models configured.** §7.13 said the scheduler
+  "skip[s] entirely" in that state. That now applies only to plan generation, since a backup
+  needs no model. §7.13 was amended to say so.
+
+Amended `docs/PHASE1_SPEC.md` §12, §7.13 and §13 (backup tests: a row still in the WAL is in
+the backup, one backup per logical day, retention of 7, a leftover `.tmp` doesn't block).
+`docs/BLOCKERS.md` now has no open blockers. No code changes yet: the backup is part of the
+scheduler, which is M5.
