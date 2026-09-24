@@ -6,7 +6,8 @@
 //! `docs/PHASE1_SPEC.md` §7: foundations (`clock`, `time`, `db`, `error`, `settings`,
 //! `secrets`, `profile`, `goals`, `events`, `memory`, `conversation`) landed in M1; the
 //! plugin API, tool registry and orchestrator (`plugin`, `tools`, `core_tools`, `context`,
-//! `app`) are M3; the plan service and scheduler (`plan`, `scheduler`, `usage`) are M5.
+//! `app`) landed in M3, along with `usage` (needed as soon as an `LlmRouter` can be built —
+//! see `usage.rs`'s doc comment); `plan` and `scheduler` are M5.
 
 pub mod app;
 pub mod clock;
@@ -24,6 +25,8 @@ pub mod profile;
 pub mod scheduler;
 pub mod secrets;
 pub mod settings;
+#[cfg(test)]
+pub(crate) mod test_support;
 pub mod time;
 pub mod tools;
 pub mod usage;

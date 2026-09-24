@@ -1,8 +1,7 @@
 //! `CoreError`: the error type shared by every service in this crate.
 //!
-//! Filled in during M1 per `docs/PHASE1_SPEC.md` §7. Grows a variant per external failure
-//! mode as later milestones add services (e.g. an `Llm` variant once the orchestrator, M3,
-//! starts calling `lifeagent-llm`).
+//! Filled in during M1 per `docs/PHASE1_SPEC.md` §7, plus the `Llm` variant added in M3 for
+//! the orchestrator's calls into `lifeagent-llm`.
 
 use thiserror::Error;
 
@@ -28,4 +27,7 @@ pub enum CoreError {
 
     #[error("secret store error: {0}")]
     Secret(String),
+
+    #[error("LLM error: {0}")]
+    Llm(#[from] lifeagent_llm::error::LlmError),
 }

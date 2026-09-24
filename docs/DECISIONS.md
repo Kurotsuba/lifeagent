@@ -146,3 +146,87 @@ mapping fixture tests, router role-resolution tests, and `complete_json` repair-
 the WebKit/GTK dev packages M0's `DECISIONS.md` entry lists (mirror snapshot mismatch, not a
 code issue); M2 doesn't touch `apps/desktop` or `lifeagent-core`'s M3+ modules, so this doesn't
 gate M2's own done-when criteria.
+
+## 2026-09-24 — M3: closed. Plugin API, tool registry, orchestrator, `CoreApp`
+
+`docs/PHASE1_SPEC.md` §14 M3 covers the `Plugin` trait, plugin migrations, the tool registry,
+core tools "except plan tools, stubbed", the context builder, the orchestrator loop, and
+`CoreAppBuilder`/`send_message`. Several shapes needed judgment calls beyond what §7 spells out:
+
+**Plan tools are not registered at all, not registered-and-erroring.** §14's parenthetical
+"(except plan tools, stubbed)" could mean either "register `core_get_plan` /
+`core_generate_plan` / `core_revise_plan` with handlers that return an error" or "don't register
+them yet." Chose the latter: there is no plan service (M5) for them to call into, so a
+registered-but-broken tool would just be a `PluginError::Unsupported` wrapped in ceremony, and
+an LLM that tries to call an unregistered tool already gets a graceful
+`{"error": "unknown tool ..."}` result through the normal `NotFound` path (§7.11's error
+handling covers it for free). Revisit when M5 adds the plan service: those three tools get real
+specs and handlers then.
+
+**`usage.rs` (`DbUsageSink`) was implemented now, not deferred to M5.** `lib.rs`'s M1-era doc
+comment groups `usage` with `plan`/`scheduler` as M5 work, but `LlmRouter::new` and
+`with_providers` both require a `UsageSink` to be constructed at all — including the
+`chat_model_override` / mock path tests use. Since the `llm_usage` table already exists from
+the M1 core migration, implementing the real sink (one `INSERT`, matching `EventStore`'s
+pattern) was less work and less indirection than a throwaway no-op sink that M5 would then
+delete. `lib.rs`'s module doc comment is updated accordingly.
+
+**`CoreApp.router` is `Option<Arc<LlmRouter>>`, not required.** Onboarding can leave `models`
+unset (§7.2: "none (onboarding required)"), and `CoreAppBuilder::build` must still succeed in
+that state — a fresh install has to reach the onboarding UI before any model exists to route
+to. `send_message` and the private `plugin_context()` helper both fail fast with
+`CoreError::Validation` when the router is `None`, which also means **no `PluginContext` can be
+constructed at all until models are configured** — so `today_view`/`today_card`-style read paths
+(M4) will hit the same wall even though they don't need the LLM themselves. Accepted for now
+because M3's actual surface (`send_message`) always needs the router anyway; if M4's `today_view`
+proves this too restrictive (e.g. the Today page should render before onboarding finishes
+model setup), the fix is to give `PluginContext.llm` its own `Option`-free "not configured" error
+path independent of `send_message`'s, not to change M3's code.
+
+**`PluginContext`'s spec-listed `profile: ProfileService // profile, active goals, latest
+weight` comment is realized as three fields, not one.** `ProfileService` (M1) only reads/writes
+the `Profile` struct; it has no notion of goals or weight. Rather than bloat `ProfileService`
+with unrelated responsibilities, `PluginContext` keeps `profile: ProfileService` for the profile
+itself and adds `goals: GoalsService` (already exists from M1) for active goals; latest weight
+is already reachable via `events.latest("body.weight_logged")`, also already on the context. Net
+effect is the same three pieces of data the spec's comment names, just not folded into a single
+field.
+
+**The tool-argument validator (§7.7) is intentionally shallow.** Implemented `object`, `string`,
+`number`, `integer`, `boolean`, `array` and `enum`, with recursion through `properties` and
+`items` — exactly the spec's list, no `oneOf`/`anyOf`/`pattern`/numeric bounds/etc. This is
+sufficient for every core and (planned) diet-plugin tool spec, which all validation happens
+against; extending it only becomes necessary if a future tool spec needs a schema feature these
+don't.
+
+**The context builder's "Plans" section (§7.9) is a fixed English placeholder
+(`"No plan for today or tomorrow yet."`)**, since the plan service (M5) doesn't exist yet and
+there is nothing real to report. `build_system_prompt`'s signature does not thread plan data
+through in anticipation of M5 — that would be speculative plumbing for a shape M5 hasn't
+determined yet (violates `CLAUDE.md`'s "don't design for hypothetical future requirements").
+M5 will need to pass `today`/`tomorrow` `StoredPlan` summaries into this function; that's a
+signature change to make then, not now.
+
+**Orchestrator loop and `CoreApp` live in `app.rs`, not a separate `orchestrator.rs`.** §2's
+repository layout table lists `orchestrator.rs` as its own file, but `lib.rs`'s own M1-era doc
+comment (written before M3, describing the intended M3 shape) already grouped the orchestrator
+into `app.rs` alongside `CoreApp`/`CoreAppBuilder`, and `send_message` — the orchestrator loop
+itself — is explicitly part of `CoreApp`'s public surface per §7.1's code block. Splitting it
+into a second file would just move private helper functions (`to_llm_messages`,
+`serialize_tool_calls`) across a file boundary for no encapsulation benefit, since they only
+serve `send_message`. Kept as one file; if `app.rs` grows unwieldy once M5 adds plan methods,
+splitting becomes a mechanical refactor, not a design decision.
+
+**`chat_model_override`/`--mock` builds a synthetic single-provider `ModelsConfig`** (one
+`ProviderConfig { id: "mock", ... }` bound to all three roles) rather than requiring
+`settings.models()` to already hold a config naming that provider. This keeps the override a
+pure bypass of real provider construction, matching its doc comment ("bypasses real provider
+construction entirely") and §7.1's own description ("tests & CLI `--mock`") — a test or
+`--mock` run shouldn't need onboarding to have run first.
+
+Verification: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D
+warnings`, and `cargo test --workspace` all pass — 117 unit tests in `lifeagent-core` (up from
+the M2 baseline; includes the new `plugin`/`tools`/`core_tools`/`context`/`app`/`usage` suites)
+plus 3 orchestrator integration tests in `crates/core/tests/orchestrator.rs` against a tiny
+test plugin (tool call → reply; invalid args → model retries; iteration cap at 6), satisfying
+§14 M3's "done when." `lifeagent-llm`'s 46 tests are unchanged from M2.

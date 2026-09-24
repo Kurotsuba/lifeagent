@@ -5,9 +5,11 @@
 //! credential store in production, and in memory in tests.
 
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use keyring::Entry;
+use lifeagent_llm::error::LlmError;
+use lifeagent_llm::router::KeyProvider;
 
 use crate::error::CoreError;
 
@@ -92,6 +94,19 @@ impl SecretStore for MemorySecretStore {
     }
 }
 
+/// Adapts any [`SecretStore`] to the LLM layer's `KeyProvider` trait (§6.3), so
+/// `lifeagent-llm` stays decoupled from how keys are stored (`CoreApp::build`, M3).
+pub struct SecretKeyProvider(pub Arc<dyn SecretStore>);
+
+impl KeyProvider for SecretKeyProvider {
+    fn get_key(&self, provider_id: &str) -> Result<String, LlmError> {
+        self.0
+            .get(provider_id)
+            .map_err(|e| LlmError::Config(e.to_string()))?
+            .ok_or_else(|| LlmError::Config(format!("no API key set for provider {provider_id:?}")))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -141,5 +156,23 @@ mod tests {
         store.set("anthropic", "b").unwrap();
         assert_eq!(store.get("openai").unwrap(), Some("a".to_string()));
         assert_eq!(store.get("anthropic").unwrap(), Some("b".to_string()));
+    }
+
+    #[test]
+    fn key_provider_returns_the_stored_key() {
+        let store: Arc<dyn SecretStore> = Arc::new(MemorySecretStore::new());
+        store.set("openai", "sk-test").unwrap();
+        let provider = SecretKeyProvider(store);
+        assert_eq!(provider.get_key("openai").unwrap(), "sk-test");
+    }
+
+    #[test]
+    fn key_provider_errors_when_no_key_is_set() {
+        let store: Arc<dyn SecretStore> = Arc::new(MemorySecretStore::new());
+        let provider = SecretKeyProvider(store);
+        assert!(matches!(
+            provider.get_key("openai"),
+            Err(LlmError::Config(_))
+        ));
     }
 }

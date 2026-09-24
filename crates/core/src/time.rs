@@ -4,7 +4,9 @@
 //! boundary (default 04:00) so a late-night snack still counts toward the day the user is
 //! living, not the next one.
 
-use chrono::{DateTime, Datelike, Local, NaiveDate, NaiveDateTime, NaiveTime, Timelike, Utc};
+use chrono::{
+    DateTime, Datelike, Local, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Timelike, Utc,
+};
 
 use crate::error::CoreError;
 
@@ -34,6 +36,24 @@ pub fn parse_hhmm(s: &str) -> Result<NaiveTime, CoreError> {
 /// Formats a time as the `"HH:MM"` setting value.
 pub fn format_hhmm(t: NaiveTime) -> String {
     t.format("%H:%M").to_string()
+}
+
+/// Parses a local ISO datetime (`"YYYY-MM-DDTHH:MM"` or `"YYYY-MM-DDTHH:MM:SS"`), as used by
+/// tool arguments like `core_log_weight`'s `measured_at` (§7.8), into the UTC instant it
+/// denotes in the process's local timezone.
+pub fn parse_local_datetime(s: &str) -> Result<DateTime<Utc>, CoreError> {
+    let naive = NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S")
+        .or_else(|_| NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M"))
+        .map_err(|e| CoreError::Validation(format!("invalid local datetime {s:?}: {e}")))?;
+    match Local.from_local_datetime(&naive) {
+        chrono::LocalResult::Single(dt) => Ok(dt.with_timezone(&Utc)),
+        // A repeated wall-clock hour (DST fall-back): pick either offset rather than reject a
+        // value the user could plausibly have meant.
+        chrono::LocalResult::Ambiguous(dt, _) => Ok(dt.with_timezone(&Utc)),
+        chrono::LocalResult::None => Err(CoreError::Validation(format!(
+            "local datetime {s:?} does not exist (falls in a DST gap)"
+        ))),
+    }
 }
 
 /// Age in whole years at `today`, for profile validation (§7.4).
@@ -127,6 +147,40 @@ mod tests {
         let t = NaiveTime::from_hms_opt(21, 5, 0).unwrap();
         assert_eq!(format_hhmm(t), "21:05");
         assert_eq!(parse_hhmm(&format_hhmm(t)).unwrap(), t);
+    }
+
+    #[test]
+    fn parse_local_datetime_round_trips_through_local_timezone() {
+        let naive = NaiveDate::from_ymd_opt(2026, 9, 23)
+            .unwrap()
+            .and_hms_opt(8, 30, 0)
+            .unwrap();
+        let expected = Local
+            .from_local_datetime(&naive)
+            .unwrap()
+            .with_timezone(&Utc);
+        assert_eq!(
+            parse_local_datetime("2026-09-23T08:30:00").unwrap(),
+            expected
+        );
+    }
+
+    #[test]
+    fn parse_local_datetime_accepts_hh_mm_without_seconds() {
+        let naive = NaiveDate::from_ymd_opt(2026, 9, 23)
+            .unwrap()
+            .and_hms_opt(8, 30, 0)
+            .unwrap();
+        let expected = Local
+            .from_local_datetime(&naive)
+            .unwrap()
+            .with_timezone(&Utc);
+        assert_eq!(parse_local_datetime("2026-09-23T08:30").unwrap(), expected);
+    }
+
+    #[test]
+    fn parse_local_datetime_rejects_garbage() {
+        assert!(parse_local_datetime("not-a-datetime").is_err());
     }
 
     #[test]
