@@ -2647,9 +2647,11 @@ dependencies = [
  "lifeagent-llm",
  "serde",
  "serde_json",
- "thiserror 2.0.20",
+ "sqlx",
+ "tempfile",
  "tokio",
  "tracing",
+ "uuid",
 ]
 
 [[package]]

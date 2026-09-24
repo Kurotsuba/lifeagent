@@ -1,5 +1,6 @@
-//! Shared test scaffolding for constructing a [`PluginContext`] without duplicating setup in
-//! every module's test suite. Test-only (`#[cfg(test)]`): never compiled into a real build.
+//! Shared test scaffolding for building a [`PluginContext`] without repeating the setup in
+//! every test suite. Compiled only for this crate's tests or with the `test-support` feature
+//! (which `lifeagent-plugin-diet` enables for its dev-dependency), never in a real build.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -13,22 +14,28 @@ use crate::clock::{Clock, FixedClock};
 use crate::events::EventStore;
 use crate::goals::GoalsService;
 use crate::memory::MemoryService;
+use crate::plan::PlanStore;
 use crate::plugin::PluginContext;
 use crate::profile::ProfileService;
 use crate::settings::Settings;
 use crate::usage::DbUsageSink;
 
-/// A [`PluginContext`] wired to an isolated temp-dir database and a [`FixedClock`], plus the
-/// [`MockChatModel`] handle behind `ctx.llm` for tests that do script LLM calls. Keep the
-/// returned [`tempfile::TempDir`] alive for as long as the context is used.
-pub(crate) async fn context() -> (PluginContext, Arc<MockChatModel>, tempfile::TempDir) {
+/// A [`PluginContext`] on an isolated temp-dir database, with every LLM role bound to `mock`
+/// and "now" controlled by `clock`. Keep the value alive while the context is in use: dropping
+/// `dir` deletes the database.
+pub struct TestEnv {
+    pub ctx: PluginContext,
+    pub mock: Arc<MockChatModel>,
+    pub clock: Arc<FixedClock>,
+    pub dir: tempfile::TempDir,
+}
+
+pub async fn env() -> TestEnv {
     let (db, dir) = crate::db::test_pool().await;
-    let clock: Arc<dyn Clock> = Arc::new(FixedClock::new(Utc::now()));
+    let clock = Arc::new(FixedClock::new(Utc::now()));
+    let dyn_clock: Arc<dyn Clock> = clock.clone();
     let settings = Settings::new(db.clone());
-    let events = EventStore::new(db.clone(), clock.clone(), settings.clone());
-    let profile = ProfileService::new(db.clone(), clock.clone());
-    let goals = GoalsService::new(db.clone(), clock.clone());
-    let memory = MemoryService::new(db.clone(), clock.clone());
+    let events = EventStore::new(db.clone(), dyn_clock.clone(), settings.clone());
 
     let mock = Arc::new(MockChatModel::new());
     let binding = RoleBinding {
@@ -52,18 +59,30 @@ pub(crate) async fn context() -> (PluginContext, Arc<MockChatModel>, tempfile::T
     let router = Arc::new(LlmRouter::with_providers(
         config,
         providers,
-        Arc::new(DbUsageSink::new(db.clone(), clock.clone())),
+        Arc::new(DbUsageSink::new(db.clone(), dyn_clock.clone())),
     ));
 
     let ctx = PluginContext {
-        db,
+        db: db.clone(),
         events,
         llm: router,
-        clock,
+        clock: dyn_clock.clone(),
         settings,
-        profile,
-        goals,
-        memory,
+        profile: ProfileService::new(db.clone(), dyn_clock.clone()),
+        goals: GoalsService::new(db.clone(), dyn_clock.clone()),
+        memory: MemoryService::new(db.clone(), dyn_clock.clone()),
+        plans: PlanStore::new(db, dyn_clock),
     };
-    (ctx, mock, dir)
+    TestEnv {
+        ctx,
+        mock,
+        clock,
+        dir,
+    }
+}
+
+/// Shorthand for tests that don't need to move the clock.
+pub async fn context() -> (PluginContext, Arc<MockChatModel>, tempfile::TempDir) {
+    let env = env().await;
+    (env.ctx, env.mock, env.dir)
 }

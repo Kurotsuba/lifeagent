@@ -30,4 +30,8 @@ pub enum CoreError {
 
     #[error("LLM error: {0}")]
     Llm(#[from] lifeagent_llm::error::LlmError),
+
+    /// A plugin hook called by core (context snippet, today card, ...) failed.
+    #[error("plugin error: {0}")]
+    Plugin(String),
 }

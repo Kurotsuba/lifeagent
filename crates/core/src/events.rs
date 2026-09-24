@@ -1,8 +1,8 @@
 //! `Event`, `EventStore` and the `AppEvent` bus, per `docs/PHASE1_SPEC.md` §7.5.
 //!
-//! Delivering each appended event to every plugin's `on_event` is the dispatcher's job
-//! (added once the `Plugin` trait exists, M3); `EventStore` itself is only responsible for
-//! persisting events and broadcasting `AppEvent::DataChanged` to shells.
+//! `EventStore` persists events and publishes each committed change on an internal
+//! `EventChange` channel. The dispatcher `CoreApp::build` starts delivers appended events to
+//! every plugin's `on_event`, then emits `AppEvent::DataChanged` to shells.
 
 use std::sync::Arc;
 
@@ -75,6 +75,22 @@ pub enum AppEvent {
     },
 }
 
+/// A committed change to the event store, published on the internal channel the dispatcher
+/// reads. Deletions are kept distinct because `Event` itself carries no "deleted" marker.
+#[derive(Debug, Clone, PartialEq)]
+pub enum EventChange {
+    Appended(Event),
+    Deleted(Event),
+}
+
+impl EventChange {
+    pub fn event(&self) -> &Event {
+        match self {
+            EventChange::Appended(e) | EventChange::Deleted(e) => e,
+        }
+    }
+}
+
 /// Channel capacity for the `AppEvent` bus: generous enough that a burst of appends between
 /// a shell's poll cycles never drops an event; a lagging receiver just misses the oldest.
 const BUS_CAPACITY: usize = 256;
@@ -85,21 +101,35 @@ pub struct EventStore {
     clock: Arc<dyn Clock>,
     settings: Settings,
     bus: broadcast::Sender<AppEvent>,
+    changes: broadcast::Sender<EventChange>,
 }
 
 impl EventStore {
     pub fn new(db: SqlitePool, clock: Arc<dyn Clock>, settings: Settings) -> Self {
         let (bus, _) = broadcast::channel(BUS_CAPACITY);
+        let (changes, _) = broadcast::channel(BUS_CAPACITY);
         Self {
             db,
             clock,
             settings,
             bus,
+            changes,
         }
     }
 
+    /// Shell-facing `AppEvent`s.
     pub fn subscribe(&self) -> broadcast::Receiver<AppEvent> {
         self.bus.subscribe()
+    }
+
+    /// Committed appends and deletes, for the dispatcher.
+    pub fn subscribe_changes(&self) -> broadcast::Receiver<EventChange> {
+        self.changes.subscribe()
+    }
+
+    /// Emits an `AppEvent` to shells. Having no subscriber is not an error.
+    pub fn publish(&self, event: AppEvent) {
+        let _ = self.bus.send(event);
     }
 
     pub async fn append(
@@ -131,21 +161,17 @@ impl EventStore {
         .execute(&self.db)
         .await?;
 
-        // A lagging or absent receiver is not an error: nothing is listening yet at M1, and
-        // shells are free to subscribe or not.
-        let _ = self.bus.send(AppEvent::DataChanged {
-            event_type: event_type.to_string(),
-            logical_date: logical,
-        });
-
-        Ok(Event {
+        let event = Event {
             id,
             event_type: event_type.to_string(),
             occurred_at,
             logical_date: logical,
             payload,
             source,
-        })
+        };
+        // No dispatcher running (e.g. a store used standalone in tests) is not an error.
+        let _ = self.changes.send(EventChange::Appended(event.clone()));
+        Ok(event)
     }
 
     pub async fn list(
@@ -205,11 +231,7 @@ impl EventStore {
             .execute(&self.db)
             .await?;
 
-        let _ = self.bus.send(AppEvent::DataChanged {
-            event_type: event.event_type.clone(),
-            logical_date: event.logical_date,
-        });
-
+        let _ = self.changes.send(EventChange::Deleted(event.clone()));
         Ok(event)
     }
 
@@ -424,12 +446,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn append_broadcasts_data_changed_to_subscribers() {
+    async fn append_and_soft_delete_publish_changes() {
         let (store, _dir) = store().await;
-        let mut rx = store.subscribe();
+        let mut rx = store.subscribe_changes();
         let occurred_at = Utc.with_ymd_and_hms(2026, 9, 23, 12, 0, 0).unwrap();
 
-        store
+        let appended = store
             .append(
                 "diet.meal_logged",
                 occurred_at,
@@ -438,9 +460,27 @@ mod tests {
             )
             .await
             .unwrap();
+        store.soft_delete(&appended.id).await.unwrap();
 
-        let event = rx.try_recv().expect("expected a broadcast AppEvent");
-        match event {
+        assert_eq!(
+            rx.try_recv().unwrap(),
+            EventChange::Appended(appended.clone())
+        );
+        assert_eq!(rx.try_recv().unwrap(), EventChange::Deleted(appended));
+    }
+
+    #[tokio::test]
+    async fn publish_reaches_app_event_subscribers() {
+        let (store, _dir) = store().await;
+        let mut rx = store.subscribe();
+        let date = NaiveDate::from_ymd_opt(2026, 9, 23).unwrap();
+
+        store.publish(AppEvent::DataChanged {
+            event_type: "diet.meal_logged".into(),
+            logical_date: date,
+        });
+
+        match rx.try_recv().unwrap() {
             AppEvent::DataChanged { event_type, .. } => assert_eq!(event_type, "diet.meal_logged"),
             other => panic!("unexpected AppEvent: {other:?}"),
         }

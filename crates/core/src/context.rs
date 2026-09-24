@@ -84,7 +84,7 @@ pub async fn build_system_prompt(
         if let Some(snippet) = plugin
             .context_snippet(ctx, today)
             .await
-            .map_err(|e| CoreError::Validation(e.to_string()))?
+            .map_err(|e| CoreError::Plugin(format!("{}: {e}", manifest.id)))?
         {
             snippets.push(format!("### {}\n{}", manifest.name, snippet));
         }

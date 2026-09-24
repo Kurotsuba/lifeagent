@@ -32,7 +32,7 @@ pub async fn open(data_dir: &Path) -> Result<SqlitePool, CoreError> {
 /// backed by a temp directory that lives as long as the returned guard. Keep the
 /// [`tempfile::TempDir`] alive for as long as the pool is in use — dropping it deletes the
 /// database file.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub(crate) async fn test_pool() -> (SqlitePool, tempfile::TempDir) {
     let dir = tempfile::tempdir().expect("create temp dir");
     let pool = open(dir.path()).await.expect("open test db");

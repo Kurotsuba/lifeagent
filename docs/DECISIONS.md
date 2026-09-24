@@ -407,3 +407,80 @@ A review pass over the B1–B3 resolutions found issues. The user decided on eac
   the tool description stating the convention.
 - **B3: no change.** The two implementation notes from the review stay unrecorded for now at
   the user's request.
+
+## 2026-09-24 — M4: closed. Diet plugin logging
+
+§14 M4: food table, resolver, sanity check, parser, tools, intake, targets engine, context
+snippet, today card, plan-vs-actual. Done when diet unit tests pass and an integration test
+logs a meal via the orchestrator and `today_view` shows correct totals
+(`crates/plugin-diet/tests/logging.rs`). Before starting, a check against the spec found
+several places where M4 depended on things from M5 or left them undefined. The user approved
+these resolutions:
+
+**Core pieces pulled into M4:**
+
+- **Plan types and `PlanStore` (read + insert).** Plan-vs-actual (§8.11), the context snippet's
+  "今日计划中尚未吃的餐" line (§8.7) and `TodayView`'s plan fields (§7.14) all read plans, which
+  §14 otherwise leaves to M5. `plan.rs` now has `PlanContent`, `StoredPlan`, `PlanStatus`,
+  `PlanTrigger` and `PlanStore { current(date), insert(...) }` (version = max + 1, status
+  proposed). Generation, revision and accept stay M5 and build on `insert`. Before M5 writes
+  any plans, those M4 features read an empty table: no adherence, no snippet line, `None` plans.
+  Two additions beyond §7.12/§7.6: `StoredPlan.instruction` (the table already stores it, and
+  M5's revision test needs to read it back) and `PluginContext.plans` (the diet plugin needs
+  plan access).
+- **`WeightPoint`** (named in §7.14, never defined) is `{ kg, logical_date, occurred_at }`,
+  from the latest `body.weight_logged` event.
+- **`today_view` works before models are configured.** This reverses the M3 simplification
+  noted above. When no model is configured, `CoreApp` now holds a placeholder `LlmRouter` with no
+  providers (every call fails with `LlmError::Config`), plus a `models_configured` flag. So
+  building a `PluginContext` can't fail anymore, and `send_message` checks the flag first
+  (now before storing the user message). **Open for M7:** the router is built once, in
+  `CoreAppBuilder::build`, so models saved during onboarding in a running desktop app won't
+  take effect until something rebuilds it. The `save_models` command will need a reload path.
+- **The event dispatcher (§7.5)**, planned for M3 but missed. `EventStore` now publishes each
+  committed change as an `EventChange` (`Appended`/`Deleted`) on an internal channel instead of
+  emitting `DataChanged` itself. A task started by `CoreAppBuilder::build` delivers appended
+  events to every plugin's `on_event` (errors logged) and *then* emits `DataChanged`, matching
+  §7.5's order. **Deviation:** deletes are not passed to `on_event`, only turned into
+  `DataChanged`. `Event` has no marker, so a plugin would see a deletion as a new event. A
+  plugin that needs deletes later should get a separate hook. Side effect: an `EventStore`
+  used without a `CoreApp` (in tests) no longer emits `DataChanged`.
+- `CoreError::Plugin(String)` for plugin hook failures surfaced by core (`today_card`,
+  `context_snippet`). The M3 context builder was misusing `Validation` for this.
+- A `test-support` cargo feature exposes `lifeagent_core::test_support` (a `PluginContext` on
+  a temp DB, with a `MockChatModel` and a settable `FixedClock`) to `lifeagent-plugin-diet`'s
+  tests through its dev-dependency. It's never enabled in a real build.
+
+**Diet plugin decisions:**
+
+- `normalize` (§8.2) strips trailing ASCII and CJK sentence punctuation but **not closing
+  brackets**, because the spec's own example names like "牛肉(熟)" end in one.
+- Targets (§8.6): no active goal counts as Maintain on current weight. When the
+  macro-feasibility floor raises kcal, carbs are recomputed from the rounded-up kcal
+  (≥ 100 g, up to ~2 g more) rather than fixed at 100. That keeps protein + fat + carbs equal
+  to kcal exactly. Outputs are rounded: kcal-type fields to 1, grams to 0.1.
+- Resolver: a name repeated within one meal is estimated once. A newly estimated food counts
+  as used. Inserts never overwrite an existing food, so user-corrected values always win
+  (§16). §8.3's `PluginError::Other("无法估算该食物营养")` reaches the model as `"internal
+  error"`, because §7.11 only passes `InvalidArgs`/`NotFound` messages through. That follows the
+  spec as written. Worth revisiting if users see unhelpful replies when an estimate fails.
+- Parser: KNOWN_FOODS is rendered as a JSON array. `meal_type` accepts both JSON `null` and the
+  string `"null"` (the prompt's own notation). Validation failures (no items, over 20, grams
+  outside 1–2000) are `InvalidArgs`, so the conversation model can relay them to the user.
+- `diet_update_food` checks user values against the hard §8.3 rules (rejecting impossible
+  ones) but doesn't apply the kcal correction, since user values win. A missing `fiber_g`
+  keeps the food's current fiber.
+- The context snippet shows **full** entry ids. §8.7's example abbreviates them, but the model
+  needs the full id to call `core_delete_entry`. Each meal is described by its item names
+  joined with "、".
+- Snack's zh-CN label is "加餐".
+- Still not implemented: B1's default target weight at goal save (§7.4). It belongs in
+  `CoreApp`'s save-goal path, which comes with M6/M7.
+
+Verification: fmt, clippy (`-D warnings`, all targets) and all 232 workspace tests pass. That's
+core 125 unit + 3 orchestrator integration, llm 46, and diet 56 unit + 2 logging integration.
+The diet unit tests cover every §13 item for M4: targets (hand-computed example, the B1
+heavy-weight case asserting carbs > 0, the macro-feasibility floor, rate cap, 1200 floor,
+goal reached → maintain), the sanity check (including wheat bran and fiber > carbs), the
+resolver (name hit, alias hit, miss → estimate → cached with no second LLM call), and parser
+validation and default meal type by time.

@@ -18,6 +18,7 @@ use crate::error::CoreError;
 use crate::events::{Event, EventStore};
 use crate::goals::GoalsService;
 use crate::memory::MemoryService;
+use crate::plan::PlanStore;
 use crate::profile::ProfileService;
 use crate::settings::Settings;
 
@@ -54,6 +55,9 @@ pub struct PluginContext {
     pub profile: ProfileService,
     pub goals: GoalsService,
     pub memory: MemoryService,
+    /// Read access to stored plans (plan-vs-actual, context snippets). Not in §7.6's field
+    /// list; see M4 in `docs/DECISIONS.md`.
+    pub plans: PlanStore,
 }
 
 /// What a tool call returns: JSON handed back to the LLM as the tool result, plus a short

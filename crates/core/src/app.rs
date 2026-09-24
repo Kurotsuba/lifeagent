@@ -1,14 +1,14 @@
-//! `CoreAppBuilder` / `CoreApp`: composition root and orchestrator loop, per
-//! `docs/PHASE1_SPEC.md` §7.1/§7.11.
+//! `CoreAppBuilder` / `CoreApp`: composition root, orchestrator loop, event dispatcher and
+//! today view, per `docs/PHASE1_SPEC.md` §7.1/§7.5/§7.11/§7.14.
 //!
-//! Only the builder and `send_message` land in M3, per the milestone note in §14 — the rest
-//! of `CoreApp`'s eventual surface (plan methods, `today_view`, `start_scheduler`, ...) is
-//! M4/M5 work and is added incrementally rather than stubbed out here.
+//! The rest of `CoreApp`'s eventual surface (plan methods, `start_scheduler`, ...) is M5 work
+//! and is added incrementally rather than stubbed out here.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use chrono::{DateTime, NaiveDate, Utc};
 use lifeagent_llm::router::{
     LlmRouter, ModelsConfig, ProviderConfig, ProviderKind, RoleBinding, RoleRequest,
 };
@@ -16,6 +16,7 @@ use lifeagent_llm::types::{ChatModel, Message, ResponseFormat, Role, ToolCall};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::SqlitePool;
+use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::{broadcast, Mutex};
 
 use crate::clock::{Clock, SystemClock};
@@ -23,13 +24,15 @@ use crate::context;
 use crate::conversation::{ConversationStore, MessageRole, NewMessage, StoredMessage};
 use crate::db;
 use crate::error::CoreError;
-use crate::events::{AppEvent, EventStore};
+use crate::events::{AppEvent, EventChange, EventStore};
 use crate::goals::GoalsService;
 use crate::memory::MemoryService;
+use crate::plan::{PlanStore, StoredPlan};
 use crate::plugin::{Plugin, PluginContext, PluginError};
 use crate::profile::ProfileService;
 use crate::secrets::{KeyringSecretStore, SecretKeyProvider, SecretStore};
 use crate::settings::Settings;
+use crate::time::logical_date;
 use crate::tools::ToolRegistry;
 use crate::usage::DbUsageSink;
 
@@ -45,6 +48,26 @@ const TOO_MANY_STEPS_REPLY: &str = "（处理步骤过多，已停止。请换�
 pub struct ChatTurn {
     pub reply: String,
     pub activities: Vec<String>,
+}
+
+/// A logged weight, from the latest `body.weight_logged` event. §7.14 names this type but
+/// never defines it; see M4 in `docs/DECISIONS.md`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct WeightPoint {
+    pub kg: f64,
+    pub logical_date: NaiveDate,
+    pub occurred_at: DateTime<Utc>,
+}
+
+/// Everything the Today page shows (§7.14).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct TodayView {
+    pub logical_date: NaiveDate,
+    /// Plugin id -> that plugin's `today_card`.
+    pub cards: BTreeMap<String, Value>,
+    pub today_plan: Option<StoredPlan>,
+    pub tomorrow_plan: Option<StoredPlan>,
+    pub latest_weight: Option<WeightPoint>,
 }
 
 pub struct CoreAppBuilder {
@@ -89,8 +112,8 @@ impl CoreAppBuilder {
         self
     }
 
-    /// Opens the database, runs core and plugin migrations, and builds the tool registry and
-    /// (if configured) the LLM router.
+    /// Opens the database, runs core and plugin migrations, builds the tool registry and the
+    /// LLM router, and starts the event dispatcher. Must be called inside a tokio runtime.
     pub async fn build(self) -> Result<CoreApp, CoreError> {
         let db = db::open(&self.data_dir).await?;
         let settings = Settings::new(db.clone());
@@ -99,38 +122,46 @@ impl CoreAppBuilder {
         let goals = GoalsService::new(db.clone(), self.clock.clone());
         let memory = MemoryService::new(db.clone(), self.clock.clone());
         let conversation = ConversationStore::new(db.clone(), self.clock.clone());
+        let plans = PlanStore::new(db.clone(), self.clock.clone());
 
         for plugin in &self.plugins {
             crate::plugin::apply_migrations(&db, self.clock.as_ref(), &plugin.manifest()).await?;
         }
 
         let registry = ToolRegistry::build(&self.plugins)?;
-        let router = self.build_router(&db, &settings).await?;
+        let (router, models_configured) = self.build_router(&db, &settings).await?;
 
-        Ok(CoreApp(Arc::new(CoreAppInner {
+        let app = CoreApp(Arc::new(CoreAppInner {
             db,
             clock: self.clock,
             settings,
             secrets: self.secrets,
             router,
+            models_configured,
             events,
             profile,
             goals,
             memory,
             conversation,
+            plans,
             plugins: self.plugins,
             registry,
             send_lock: Mutex::new(()),
-        })))
+        }));
+        app.spawn_dispatcher();
+        Ok(app)
     }
 
     /// A mock override always wins (tests, `--mock`); otherwise builds real providers from
-    /// `settings.models()`, or `None` if onboarding hasn't configured any yet.
+    /// `settings.models()`. With neither, returns a placeholder router whose every call fails
+    /// with `LlmError::Config`, so a `PluginContext` can still be built for read-only paths
+    /// like `today_view` before onboarding configures a model. The `bool` says whether models
+    /// are really configured.
     async fn build_router(
         &self,
         db: &SqlitePool,
         settings: &Settings,
-    ) -> Result<Option<Arc<LlmRouter>>, CoreError> {
+    ) -> Result<(Arc<LlmRouter>, bool), CoreError> {
         let usage_sink = Arc::new(DbUsageSink::new(db.clone(), self.clock.clone()));
 
         if let Some(model) = &self.chat_model_override {
@@ -152,20 +183,37 @@ impl CoreAppBuilder {
             };
             let mut providers: HashMap<String, Arc<dyn ChatModel>> = HashMap::new();
             providers.insert("mock".into(), model.clone());
-            return Ok(Some(Arc::new(LlmRouter::with_providers(
-                config, providers, usage_sink,
-            ))));
+            let router = LlmRouter::with_providers(config, providers, usage_sink);
+            return Ok((Arc::new(router), true));
         }
 
         match settings.models().await? {
             Some(config) => {
                 let key_provider = SecretKeyProvider(self.secrets.clone());
                 let router = LlmRouter::new(config, &key_provider, usage_sink)?;
-                Ok(Some(Arc::new(router)))
+                Ok((Arc::new(router), true))
             }
-            None => Ok(None),
+            None => Ok((Arc::new(unconfigured_router(usage_sink)), false)),
         }
     }
+}
+
+/// A router with no providers: every call fails with `LlmError::Config` naming the
+/// "models-not-configured" provider id.
+fn unconfigured_router(usage_sink: Arc<DbUsageSink>) -> LlmRouter {
+    let binding = RoleBinding {
+        provider_id: "models-not-configured".into(),
+        model: String::new(),
+        temperature: None,
+        effort: None,
+    };
+    let config = ModelsConfig {
+        providers: Vec::new(),
+        parser: binding.clone(),
+        planner: binding.clone(),
+        conversation: binding,
+    };
+    LlmRouter::with_providers(config, HashMap::new(), usage_sink)
 }
 
 struct CoreAppInner {
@@ -173,12 +221,14 @@ struct CoreAppInner {
     clock: Arc<dyn Clock>,
     settings: Settings,
     secrets: Arc<dyn SecretStore>,
-    router: Option<Arc<LlmRouter>>,
+    router: Arc<LlmRouter>,
+    models_configured: bool,
     events: EventStore,
     profile: ProfileService,
     goals: GoalsService,
     memory: MemoryService,
     conversation: ConversationStore,
+    plans: PlanStore,
     plugins: Vec<Arc<dyn Plugin>>,
     registry: ToolRegistry,
     /// Serializes `send_message` calls (§7.11: "one turn at a time").
@@ -221,26 +271,108 @@ impl CoreApp {
     pub fn conversation(&self) -> &ConversationStore {
         &self.0.conversation
     }
+    pub fn plans(&self) -> &PlanStore {
+        &self.0.plans
+    }
 
     pub fn subscribe(&self) -> broadcast::Receiver<AppEvent> {
         self.0.events.subscribe()
     }
 
-    fn plugin_context(&self) -> Result<PluginContext, CoreError> {
-        let llm = self
-            .0
-            .router
-            .clone()
-            .ok_or_else(|| CoreError::Validation("models are not configured yet".into()))?;
-        Ok(PluginContext {
+    fn plugin_context(&self) -> PluginContext {
+        PluginContext {
             db: self.0.db.clone(),
             events: self.0.events.clone(),
-            llm,
+            llm: self.0.router.clone(),
             clock: self.0.clock.clone(),
             settings: self.0.settings.clone(),
             profile: self.0.profile.clone(),
             goals: self.0.goals.clone(),
             memory: self.0.memory.clone(),
+            plans: self.0.plans.clone(),
+        }
+    }
+
+    /// The dispatcher (§7.5): delivers each appended event to every plugin's `on_event`
+    /// (errors are logged, not propagated), then emits `AppEvent::DataChanged` for appends and
+    /// deletes alike. Deletions are not passed to `on_event`, since `Event` carries no marker a
+    /// plugin could tell them apart by. Runs for the life of the runtime.
+    fn spawn_dispatcher(&self) {
+        let mut changes = self.0.events.subscribe_changes();
+        let ctx = self.plugin_context();
+        let plugins = self.0.plugins.clone();
+        tokio::spawn(async move {
+            loop {
+                let change = match changes.recv().await {
+                    Ok(change) => change,
+                    Err(RecvError::Lagged(skipped)) => {
+                        tracing::warn!(skipped, "event dispatcher lagged; some changes skipped");
+                        continue;
+                    }
+                    Err(RecvError::Closed) => break,
+                };
+                if let EventChange::Appended(event) = &change {
+                    for plugin in &plugins {
+                        if let Err(e) = plugin.on_event(&ctx, event).await {
+                            tracing::warn!(plugin = plugin.manifest().id, error = %e, "on_event failed");
+                        }
+                    }
+                }
+                let event = change.event();
+                ctx.events.publish(AppEvent::DataChanged {
+                    event_type: event.event_type.clone(),
+                    logical_date: event.logical_date,
+                });
+            }
+        });
+    }
+
+    /// The current logical date (§4), using the `day_boundary` setting.
+    pub async fn logical_today(&self) -> Result<NaiveDate, CoreError> {
+        let boundary = self.0.settings.day_boundary().await?;
+        Ok(logical_date(self.0.clock.now(), boundary))
+    }
+
+    /// Everything the Today page shows (§7.14). Works before models are configured.
+    pub async fn today_view(&self) -> Result<TodayView, CoreError> {
+        let today = self.logical_today().await?;
+        let ctx = self.plugin_context();
+
+        let mut cards = BTreeMap::new();
+        for plugin in &self.0.plugins {
+            let id = plugin.manifest().id;
+            let card = plugin
+                .today_card(&ctx, today)
+                .await
+                .map_err(|e| CoreError::Plugin(format!("{id}: {e}")))?;
+            if let Some(card) = card {
+                cards.insert(id.to_string(), card);
+            }
+        }
+
+        let latest_weight = self
+            .0
+            .events
+            .latest("body.weight_logged")
+            .await?
+            .and_then(|event| {
+                let kg = event.payload.get("kg").and_then(Value::as_f64)?;
+                Some(WeightPoint {
+                    kg,
+                    logical_date: event.logical_date,
+                    occurred_at: event.occurred_at,
+                })
+            });
+
+        Ok(TodayView {
+            logical_date: today,
+            cards,
+            today_plan: self.0.plans.current(today).await?,
+            tomorrow_plan: match today.succ_opt() {
+                Some(tomorrow) => self.0.plans.current(tomorrow).await?,
+                None => None,
+            },
+            latest_weight,
         })
     }
 
@@ -248,6 +380,11 @@ impl CoreApp {
     /// calls and tool dispatch — tool calls within a round run sequentially, in call order —
     /// until the model stops calling tools or the iteration cap is hit.
     pub async fn send_message(&self, text: &str) -> Result<ChatTurn, CoreError> {
+        if !self.0.models_configured {
+            return Err(CoreError::Validation(
+                "models are not configured yet".into(),
+            ));
+        }
         let _guard = self.0.send_lock.lock().await;
 
         self.0
@@ -259,7 +396,7 @@ impl CoreApp {
             })
             .await?;
 
-        let plugin_ctx = self.plugin_context()?;
+        let plugin_ctx = self.plugin_context();
         let router = plugin_ctx.llm.clone();
         let tool_specs = self.0.registry.specs();
         let mut activities = Vec::new();
@@ -417,6 +554,165 @@ mod tests {
             .clock(Arc::new(FixedClock::new(Utc::now())))
             .secrets(Arc::new(MemorySecretStore::new()));
         (builder, dir)
+    }
+
+    /// Records every event its `on_event` receives, and returns a fixed today card.
+    #[derive(Default)]
+    struct RecordingPlugin {
+        seen: std::sync::Mutex<Vec<String>>,
+    }
+
+    #[async_trait::async_trait]
+    impl Plugin for RecordingPlugin {
+        fn manifest(&self) -> crate::plugin::PluginManifest {
+            crate::plugin::PluginManifest {
+                id: "rec",
+                name: "Recording",
+                version: "0.1.0",
+                event_types: vec![],
+                migrations: vec![],
+            }
+        }
+        fn tools(&self) -> Vec<lifeagent_llm::types::ToolSpec> {
+            vec![]
+        }
+        async fn call_tool(
+            &self,
+            _ctx: &PluginContext,
+            _name: &str,
+            _args: Value,
+        ) -> Result<crate::plugin::ToolOutput, PluginError> {
+            unreachable!()
+        }
+        async fn on_event(
+            &self,
+            _ctx: &PluginContext,
+            e: &crate::events::Event,
+        ) -> Result<(), PluginError> {
+            self.seen.lock().unwrap().push(e.id.clone());
+            Ok(())
+        }
+        async fn today_card(
+            &self,
+            _ctx: &PluginContext,
+            date: NaiveDate,
+        ) -> Result<Option<Value>, PluginError> {
+            Ok(Some(serde_json::json!({ "date": date.to_string() })))
+        }
+    }
+
+    async fn next_data_changed(rx: &mut broadcast::Receiver<AppEvent>) -> String {
+        let event = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+            .await
+            .expect("timed out waiting for DataChanged")
+            .unwrap();
+        match event {
+            AppEvent::DataChanged { event_type, .. } => event_type,
+            other => panic!("unexpected AppEvent: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn dispatcher_delivers_appends_to_plugins_then_emits_data_changed() {
+        let (builder, _dir) = builder().await;
+        let plugin = Arc::new(RecordingPlugin::default());
+        let app = builder.plugin(plugin.clone()).build().await.unwrap();
+        let mut rx = app.subscribe();
+
+        let event = app
+            .events()
+            .append(
+                "test.thing",
+                Utc::now(),
+                serde_json::json!({}),
+                crate::events::EventSource::Chat,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(next_data_changed(&mut rx).await, "test.thing");
+        // DataChanged is only emitted after on_event ran.
+        assert_eq!(*plugin.seen.lock().unwrap(), vec![event.id]);
+    }
+
+    #[tokio::test]
+    async fn dispatcher_emits_data_changed_for_deletes_without_calling_on_event() {
+        let (builder, _dir) = builder().await;
+        let plugin = Arc::new(RecordingPlugin::default());
+        let app = builder.plugin(plugin.clone()).build().await.unwrap();
+        let mut rx = app.subscribe();
+
+        let event = app
+            .events()
+            .append(
+                "test.thing",
+                Utc::now(),
+                serde_json::json!({}),
+                crate::events::EventSource::Chat,
+            )
+            .await
+            .unwrap();
+        next_data_changed(&mut rx).await;
+        app.events().soft_delete(&event.id).await.unwrap();
+
+        assert_eq!(next_data_changed(&mut rx).await, "test.thing");
+        assert_eq!(plugin.seen.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn today_view_works_without_models_configured() {
+        let (builder, _dir) = builder().await;
+        let app = builder
+            .plugin(Arc::new(RecordingPlugin::default()))
+            .build()
+            .await
+            .unwrap();
+        let today = app.logical_today().await.unwrap();
+
+        let view = app.today_view().await.unwrap();
+
+        assert_eq!(view.logical_date, today);
+        assert_eq!(
+            view.cards.get("rec"),
+            Some(&serde_json::json!({ "date": today.to_string() }))
+        );
+        assert_eq!(view.today_plan, None);
+        assert_eq!(view.latest_weight, None);
+    }
+
+    #[tokio::test]
+    async fn today_view_includes_latest_weight_and_plans() {
+        use crate::plan::{PlanContent, PlanTrigger};
+
+        let (builder, _dir) = builder().await;
+        let app = builder.build().await.unwrap();
+        let today = app.logical_today().await.unwrap();
+        let tomorrow = today.succ_opt().unwrap();
+        app.events()
+            .append(
+                "body.weight_logged",
+                Utc::now(),
+                serde_json::json!({"kg": 61.2}),
+                crate::events::EventSource::Ui,
+            )
+            .await
+            .unwrap();
+        let content = PlanContent {
+            summary: "明天多吃蔬菜".into(),
+            sections: BTreeMap::new(),
+            disclaimer: None,
+        };
+        let plan = app
+            .plans()
+            .insert(tomorrow, PlanTrigger::Manual, None, &content, &[])
+            .await
+            .unwrap();
+
+        let view = app.today_view().await.unwrap();
+
+        assert_eq!(view.latest_weight.map(|w| w.kg), Some(61.2));
+        assert_eq!(view.today_plan, None);
+        assert_eq!(view.tomorrow_plan, Some(plan));
     }
 
     #[tokio::test]

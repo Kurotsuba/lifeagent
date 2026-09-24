@@ -17,6 +17,12 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 keyring = { workspace = true }
 directories = { workspace = true }
+tempfile = { workspace = true, optional = true }
+
+[features]
+# Exposes `test_support` to other crates' tests (enabled by lifeagent-plugin-diet's
+# dev-dependency). Never enabled in a real build.
+test-support = ["dep:tempfile"]
 
 [dev-dependencies]
 tempfile = { workspace = true }
