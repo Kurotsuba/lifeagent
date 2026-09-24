@@ -230,3 +230,180 @@ the M2 baseline; includes the new `plugin`/`tools`/`core_tools`/`context`/`app`/
 plus 3 orchestrator integration tests in `crates/core/tests/orchestrator.rs` against a tiny
 test plugin (tool call → reply; invalid args → model retries; iteration cap at 6), satisfying
 §14 M3's "done when." `lifeagent-llm`'s 46 tests are unchanged from M2.
+
+## 2026-09-24 — B1 resolved: goal-weight protein anchor, lower factors, macro-feasibility floor
+
+`docs/BLOCKERS.md`'s B1: the macro split could produce zero or negative `carbs_g`, because
+`protein_g = w × factor` (anchored to *current* body weight, uncapped) plus the `fat_g ≥ 0.6·w`
+floor could consume the entire kcal budget for a heavy user, and the spec's own `if carbs_g <
+100` repair branch was a no-op whenever the fat floor was already binding (it recomputes the
+same floor value). Full mechanism explained to the user before deciding; worked example: female,
+150 kg, 155 cm, 60 y, Lose → kcal floored to 2010; old formula gave protein 300 g (1200 kcal) +
+fat 90 g (810 kcal) = 2010 = the whole budget → carbs 0.
+
+Two decisions were needed (both marked **DECIDE** in `docs/BLOCKERS.md`); resolved by the user:
+
+1. **Protein anchor:** switched from `w × (2.0 Lose / 1.8 Gain / 1.6 Maintain)` to
+   `anchor_w × (1.8 Lose / 1.6 Gain / 1.2 Maintain)`, where `anchor_w =
+   target_weight_kg.unwrap_or(w)` — the user's explicit choice, combining the spec's option (b)
+   "goal-weight anchor" with lower per-kg factors than any of the three originally proposed
+   options. Rationale (user-stated intent, as understood from the choice): protein needs should
+   scale toward the body being built *toward*, not the one being left, and the lower factors
+   reduce how much headroom the fix needs from `fat_g`'s floor in the first place. A floor
+   `protein_g ≥ 1.2·w` (current weight) is layered on top so protein for the *actual* body eating
+   the diet never falls unreasonably low just because a much smaller goal weight was set — e.g.
+   a 150 kg user with a 65 kg target now gets `protein_g = max(65×1.8, 1.2×150) = max(117, 180) =
+   180`, so the current-weight floor is what actually binds in that case, not the far-off goal
+   weight.
+2. **Infeasible case:** if even after (1) the budget can't fit `protein_g` + the `0.6·w` fat
+   floor + a 100 g carb minimum, **raise `kcal`** to whatever those three require and set
+   `floor_applied = true`, rather than silently accepting protein below the safety floor. This
+   reuses the existing `floor_applied` boolean (previously only set by the absolute
+   `max(BMR, 1500/1200)` floor) rather than adding a second flag to `NutritionTargets` — the UI
+   only ever needs to show one "adjusted for safety" note, not attribute which floor fired.
+
+Also resolved without needing a decision (simplest compliant choice, not one of the two
+**DECIDE** items):
+
+- **`round_to_10` → `round_up_to_10`** everywhere it's used (both the original absolute floor
+  and the new macro-feasibility floor): rounding *down* to the nearest 10 could push `kcal`
+  below the very floor it was just clamped to (e.g. a floor of 2007.75 rounds down to 2000,
+  violating `kcal ≥ floor`); rounding up preserves the invariant exactly, at the cost of at most
+  9 kcal of overshoot, negligible against the ±8% tolerance used elsewhere in the plan validator
+  (§8.10).
+- `effective_direction` (the existing "goal already reached → treat as Maintain" conversion,
+  §8.6) now explicitly drives the macro split too, not just `delta` — the spec's original
+  pseudocode only named it in the `delta` computation, but the same conversion has to apply to
+  which protein factor and anchor logic is used, or a user who reached their goal would still
+  get Lose/Gain-level protein under a Maintain-level calorie budget.
+
+Amended `docs/PHASE1_SPEC.md` §8.6 (formula) and §13 (added a goal-weight-anchor case, the
+originally-broken heavy-weight case now asserting `carbs_g > 0`, and a case that exercises the
+new macro-feasibility `floor_applied` path to the required targets-engine tests).
+`docs/BLOCKERS.md`'s B1 entry is removed as resolved; B2, B3, B4 remain open. No code changes
+yet — `lifeagent-plugin-diet`'s `targets.rs` is still an M4 stub, so this is a spec-only
+resolution; M4's implementation will follow this corrected formula directly, tests included.
+
+## 2026-09-24 — B2 resolved: `carbs_g` is total carbohydrate, fiber included
+
+`docs/BLOCKERS.md`'s B2: the per-100g sanity check treated fiber as an addend separate from
+carbs (`protein + carbs + fat + fiber ≤ 100`) and double-charged it in the energy formula
+(`e = 4·protein + 4·carbs + 9·fat + 2·fiber`), while food composition tables report fiber
+*inside* total carbohydrate. Wheat bran (protein 15.5, carbs 64.5, fat 4.3, fiber 42.8) sums to
+127 under the old rule → hard rejection → `PluginError::Other("无法估算该食物营养")`, for a food
+whose numbers are simply correct under the standard convention. §9.2/§9.3's own prompts never
+told the model which convention to use either, so nothing was actually broken by a wrong model
+answer — the validator was rejecting a right one.
+
+`docs/BLOCKERS.md` flagged this as needing no real judgment call (unlike B1's two **DECIDE**
+items), so resolved directly with its recommended fix rather than asking:
+
+- **`carbs_g` = total carbohydrate, fiber included.** This is what food composition tables
+  report, so it's what an LLM asked for "nutrition values... consistent with standard food
+  composition tables" (§9.3's own prompt) will produce by default — the fix aligns the
+  validator with the model's natural output rather than the other way around.
+- Sum rule → `protein + carbs + fat ≤ 100` (fiber no longer a separate addend; it's already
+  inside `carbs`).
+- Energy rule → `e = 4·protein + 4·(carbs − fiber) + 9·fat + 2·fiber` (the non-fiber part of
+  carbs at 4 kcal/g, fiber itself at 2 kcal/g — so fiber contributes once, not twice).
+- Added validity rule `fiber ≤ carbs` (fiber can't exceed the total it's part of).
+- **Stated the convention explicitly in the §9.3 prompt** ("`carbs_g` is total carbohydrate,
+  fiber included... Do not subtract fiber from it") — per `BLOCKERS.md`'s own note, this half
+  matters more than the validator change: fixing only the validator while leaving the prompt
+  silent would leave the model's choice a coin flip again as soon as it happened to pick the
+  other convention.
+
+Checked, no change needed: §8.6's `fiber_g = 14·kcal/1000` plan target and §8.10's "fiber < 70%
+of target" warning both compare a fiber value against a separately-computed fiber value —
+neither depends on whether fiber is also counted inside `carbs`, so both already read correctly
+under the new convention.
+
+Amended `docs/PHASE1_SPEC.md` §8.3 (validator rules), §9.3 (prompt), and §13 (added the wheat
+bran pass case and a `fiber > carbs` rejection case to the required nutrition-sanity-check
+tests). `docs/BLOCKERS.md`'s B2 entry removed as resolved; B3, B4 remain open. No code changes
+yet — `lifeagent-plugin-diet`'s sanity-check function is still an M4 stub; M4's implementation
+follows this corrected rule directly, tests included.
+
+## 2026-09-24 — B3 resolved: catch-up anchors to the logical day, not "today's calendar date"
+
+`docs/BLOCKERS.md`'s B3: §7.13's "past `plan_time`" check compared against "today's calendar
+date at `plan_time`," evaluated as of the moment of the check — but between midnight and
+`day_boundary` the calendar date has already advanced while the logical day hasn't, so that
+phrase silently means "tomorrow's calendar date" during exactly that window. Worked case (also
+acceptance scenario §15.9): relaunch at 01:00 after the app was down through the previous
+evening's `plan_time` (21:00). `logical_today` = the previous calendar day (the 23rd, since
+01:00 < the 04:00 boundary); `tomorrow` = the 24th, with no plan yet. The old rule computed
+"today's calendar date" as the 24th (the actual calendar date *right now*, at relaunch) and
+checked `01:00 ≥ (24th, 21:00)` — false — so catch-up silently never fired, even though
+`plan_time` had already passed hours earlier on the 23rd. Explained in full to the user before
+deciding, since the fix's shape (anchor to `plan_time` *within* `logical_today`, giving `due_at`
+= `logical_today`'s own calendar date at `plan_time`) left two things genuinely undefined.
+
+Both marked **DECIDE** in `docs/BLOCKERS.md`; the user chose both recommended options:
+
+1. **`plan_time < day_boundary` is forbidden**, not supported. The clean anchoring rule (`due_at`'s
+   calendar date = `logical_today`) only holds when `plan_time ≥ day_boundary`; the opposite case
+   needs a second rule (`due_at`'s calendar date = `logical_today + 1`) for a `plan_time` value
+   (small hours of the morning, generating *tomorrow's* meal plan) that isn't meaningful UX
+   anyway. Added as a settings-validation rule (§7.2): `plan_time ≥ day_boundary`, rejected
+   otherwise — one anchoring rule, one branch to test, matching B1 and B2's own "simplest
+   compliant alternative" pattern rather than adding a second code path for an edge case with no
+   real use.
+2. **The "gap" case is left alone, not backfilled.** Catch-up only ever asks "does `tomorrow`
+   have a plan?" — it does not also ask "does `today`?" So after an outage long enough that even
+   `today` has no plan (not just one missed overnight cycle), nothing retroactively fills it in;
+   the user sees the Today page's existing `today_plan: None` empty state and clicks 立即生成
+   manually. This was already the design's implicit behavior ("catch-up only ever targets
+   tomorrow"), now made explicit and intentional rather than an unnoticed gap. Revisit only if
+   real usage shows multi-day outages are common enough that this friction matters.
+
+Amended `docs/PHASE1_SPEC.md` §7.13 (corrected anchoring rule, explicit statement of both
+decisions), §7.2 (added the `plan_time ≥ day_boundary` validation rule the scheduler now relies
+on), and §13 (added the 01:00-relaunch case, a validation-rejection test, and a test confirming
+today's own missing plan is *not* backfilled, to the required scheduler tests).
+`docs/BLOCKERS.md`'s B3 entry removed as resolved; only B4 remains open. No code changes yet —
+`scheduler.rs` is still an M5 stub; M5's implementation follows this corrected rule directly,
+tests included.
+
+## 2026-09-24 — B1/B2 follow-up after review
+
+A review pass over the B1–B3 resolutions found issues. The user decided on each:
+
+- **B1: protein safety floor lowered from `1.2·w` to `0.8·w` (RDA level).** The `1.2·w`
+  floor was not something the user asked for. It was added while interpreting the answer to the
+  infeasibility question, and in practice it cancelled the goal-weight anchor for the heavy
+  users it was meant to help: 150 kg with a 65 kg target gave `max(1.8×65, 1.2×150) = 180 g`.
+  With `0.8·w` the same case gives `max(117, 120) = 120 g`. The floor still binds here, but it
+  adds 3 g over the goal-weight value instead of 63 g. In general it only binds when the target
+  is far below current weight (for Lose, a target under ~44% of current weight; 65/150 is 43%).
+  §8.6 amended. The example in the B1 entry above is superseded by this one.
+- **B1: default target weight for Lose/Gain goals saved without one (§7.4).** The target stays
+  optional in the UI, but when it's left empty, saving the goal stores latest weight − 1 kg
+  (Lose) or + 1 kg (Gain), clamped to the 30–300 kg validation range, without asking the user.
+  It is **stored once at save time, not recomputed**: a 70 kg user saving "Lose" with no target
+  gets `target_weight_kg = 69`, and after reaching 69 kg the existing §8.6 "goal reached →
+  Maintain" rule applies and the deficit stops until they set a new goal. That's the user's
+  explicit choice over recomputing (target always trailing current weight by 1 kg, never
+  reached). If no weight has been logged at save time, the target stays unset and §8.6's
+  `unwrap_or(w)` fallback applies. Clamping keeps the stored value valid under §7.4's own
+  30–300 kg rule. For example, a 30 kg user saving Lose gets target 30, which is immediately
+  "reached" (Maintain). That's correct, since they can't go below the minimum anyway. Code:
+  `GoalsService` has no access to weight, so the default belongs wherever goal saving is
+  wired with the event store (`CoreApp`'s save-goal path, M6/M7). §7.4, §8.6 comment and §13
+  amended.
+- **B1: a Lose goal can still end up with a small surplus, accepted.** A 1 kg default barely
+  moves the protein anchor off current weight, so the macro-feasibility raise can still push a
+  Lose user's kcal slightly above TDEE when the fat floor, protein and carb minimum don't fit.
+  Example: female, 100 kg, 150 cm, 80 y, sedentary, Lose → kcal 1660 against TDEE ≈ 1652.
+  The user chose to accept this rather than cap kcal at TDEE for Lose: it's rare, the surplus is
+  tens of kcal, and `floor_applied` is set, so the UI still shows the safety note.
+- **B2: `diet_update_food` (§8.5) does not state the carbs convention. Deferred, known gap.**
+  §9.3's estimator prompt now says `carbs_g` includes fiber, but the `diet_update_food` tool
+  description (user-supplied per-100 g values, often read off a package label) does not.
+  Chinese labels (GB 28050) and the China Food Composition Table include fiber in 碳水化合物,
+  so zh-CN users are unaffected. EU-style labels exclude fiber, so a user copying one would
+  store carbs understated by the fiber amount. User-sourced values bypass the §8.3 sanity check
+  (`source='user'` always wins), so nothing catches this. Fix when it matters: add one line to
+  the tool description stating the convention.
+- **B3: no change.** The two implementation notes from the review stay unrecorded for now at
+  the user's request.

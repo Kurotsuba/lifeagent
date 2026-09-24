@@ -443,6 +443,10 @@ Key-value in `settings` table, typed accessors with defaults:
 | `autostart` | bool | false |
 | `onboarding_complete` | bool | false |
 
+Validation: `plan_time ≥ day_boundary`, rejected otherwise — the scheduler's catch-up logic
+(§7.13) relies on this to anchor `plan_time` to the correct calendar date (B3 in
+`docs/DECISIONS.md`).
+
 ### 7.3 Secrets
 
 `SecretStore` trait with `get(provider_id)`, `set(provider_id, key)`, `delete(provider_id)`.
@@ -475,6 +479,13 @@ pub struct WeightGoal {
 Weight is not in the profile: it is the latest `body.weight_logged` event
 (`{ "kg": f64 }`). Onboarding records the initial weight as an event.
 Validation: height 120–230 cm, weight 30–300 kg, age 16–100, rate 0–1.0 kg/week.
+
+Default target: when a Lose or Gain goal is saved without `target_weight_kg`, it is set without
+asking the user to the latest weight − 1 kg (Lose) or + 1 kg (Gain), clamped to 30–300 kg, and
+stored on the goal record. It is set once, at save time, and not recomputed. After the user
+loses or gains that 1 kg, §8.6's "goal reached → treat as Maintain" rule applies. If no weight
+has been logged when the goal is saved, the target stays unset and §8.6 falls back to current
+weight. See B1 in `docs/DECISIONS.md`.
 
 ### 7.5 Events and event bus
 
@@ -685,10 +696,22 @@ Only one generation runs at a time (mutex); a second request waits.
 
 A tokio task started by the shell:
 - Tick every 60 s and once immediately at start (catch-up).
-- Let `today` = logical date now, `tomorrow` = today + 1. If local time on the logical day is
-  past `plan_time` and no plan exists for `tomorrow`, generate one (trigger `schedule`).
-  "Past plan_time on the logical day" means: local now ≥ (today's calendar date at
-  plan_time) when plan_time ≥ day_boundary; compute carefully and unit test it.
+- Let `today` = logical date now, `tomorrow` = today + 1. If local time is past `plan_time` on
+  logical day `today` and no plan exists for `tomorrow`, generate one (trigger `schedule`).
+  "Past `plan_time` on logical day `today`" means: `local_now ≥ due_at`, where `due_at` is the
+  local datetime of `plan_time` **within logical day `today`** — its calendar date is `today`
+  itself, **not** the calendar date of `local_now` at the moment of the check. Those two dates
+  differ in the window between midnight and `day_boundary`, where the calendar date has already
+  advanced but the logical day hasn't — exactly the window a relaunch after downtime spanning
+  the previous evening's `plan_time` lands in (B3 in `docs/DECISIONS.md`; this is acceptance
+  scenario §15.9). This calendar-date mapping is only valid because `plan_time ≥ day_boundary`
+  is enforced by settings validation (§7.2) — a `plan_time` before the boundary would need a
+  second anchoring rule, so it's rejected instead. Compute carefully and unit test it across
+  several `plan_time`/`day_boundary` combinations, including a relaunch shortly after midnight
+  with `plan_time` already passed the previous evening.
+- Catch-up only ever targets `tomorrow`. If an outage is long enough that `today` itself also
+  has no plan, catch-up does not generate one for `today` retroactively — the Today page's
+  existing empty state (`today_plan: None`) and its 立即生成 button cover that case.
 - Failure: emit `PlanFailed`, retry after 15 min, at most 3 attempts per target date
   (attempt counter in memory is fine).
 - Skip entirely if onboarding is not complete or `models` is not configured.
@@ -750,9 +773,15 @@ Resolving a list of names runs misses concurrently (max 4 in flight) but inserts
 
 ### 8.3 Nutrition sanity check (per 100 g)
 
-- All values ≥ 0; `protein + carbs + fat + fiber ≤ 100`; `kcal ≤ 900`.
-- Computed energy `e = 4·protein + 4·carbs + 9·fat + 2·fiber`. If `|kcal − e| > max(20, 0.15·e)`,
-  replace `kcal` with `e` (trust the macros) and log at DEBUG.
+**Convention: `carbs_g` is total carbohydrate, fiber included** (matches standard food
+composition tables, so it matches what the parser/estimator prompts (§9.2/§9.3) produce by
+default) — every rule below follows from this; fiber is a subset of carbs, not counted
+separately (see B2 in `docs/DECISIONS.md`).
+
+- All values ≥ 0; `fiber ≤ carbs`; `protein + carbs + fat ≤ 100`; `kcal ≤ 900`.
+- Computed energy `e = 4·protein + 4·(carbs − fiber) + 9·fat + 2·fiber` (the non-fiber part of
+  carbs at 4 kcal/g, fiber itself at 2 kcal/g — not double-counted). If
+  `|kcal − e| > max(20, 0.15·e)`, replace `kcal` with `e` (trust the macros) and log at DEBUG.
 - Failure of the first two rules → one re-ask with the error; still invalid →
   `PluginError::Other("无法估算该食物营养")`.
 
@@ -796,23 +825,44 @@ BMR  = 10·w + 6.25·height_cm − 5·a − 161    (female)
 TDEE = BMR × factor   Sedentary 1.2, Light 1.375, Moderate 1.55, Active 1.725, VeryActive 1.9
 
 rate = min(goal.rate_kg_per_week, 0.01·w)                  (cap 1% body weight / week)
+effective_direction = goal.direction
+If Lose and target_weight_kg is set and w ≤ target: effective_direction = Maintain.
+If Gain and target_weight_kg is set and w ≥ target: effective_direction = Maintain.
+(effective_direction, not goal.direction, drives delta and the macro split below)
+
 Lose:     delta = −min(rate·7700/7, 0.25·TDEE)
 Gain:     delta = +min(rate·7700/7, 500)
 Maintain: delta = 0
-If Lose and target_weight_kg is set and w ≤ target: treat as Maintain.
-If Gain and target_weight_kg is set and w ≥ target: treat as Maintain.
 
 floor = max(BMR, 1500 if male else 1200)
-kcal  = round_to_10(max(TDEE + delta, floor))
+kcal  = round_up_to_10(max(TDEE + delta, floor))
+(round UP to the next multiple of 10, never down — rounding down could push kcal below floor)
 
-protein_g = w × (2.0 if Lose, 1.8 if Gain, 1.6 if Maintain)
+anchor_w  = target_weight_kg.unwrap_or(w)                  (goal weight when set, else current;
+ Lose/Gain goals normally always have one, since §7.4 stores a ∓1 kg default at save time)
+protein_g = max(anchor_w × (1.8 Lose, 1.6 Gain, 1.2 Maintain), 0.8·w)
+(the 0.8·w term is an RDA-level safety floor on the CURRENT body; it only binds when the goal
+ weight is far below current weight — see B1 in docs/DECISIONS.md for why protein is no longer
+ anchored to current weight alone)
 fat_g     = max(0.27·kcal/9, 0.6·w)
 carbs_g   = (kcal − 4·protein_g − 9·fat_g) / 4
+
 if carbs_g < 100: fat_g = max(0.6·w, (kcal − 4·protein_g − 400)/9); recompute carbs_g
+if carbs_g < 100:
+  (still infeasible: protein_g + the 0.6·w fat floor + a 100 g carb minimum exceed the kcal
+   computed above — raise kcal to fit all three rather than shrink any of them further)
+  kcal          = round_up_to_10(4·protein_g + 9·(0.6·w) + 400)
+  fat_g         = 0.6·w
+  carbs_g       = 100
+  floor_applied = true
+
 fiber_g   = 14·kcal/1000
 ```
 
 Output `NutritionTargets { kcal, protein_g, carbs_g, fat_g, fiber_g, bmr, tdee, delta, floor_applied: bool }`.
+`floor_applied` is `true` whenever `kcal` was raised above `round_up_to_10(TDEE + delta)` by
+either safety floor above — the absolute `max(BMR, 1500/1200)` floor, or the macro-feasibility
+floor — so the UI can show one "计划已按最低安全值调整" note regardless of which one fired.
 If the profile or weight is missing, tools still work but targets are `null` and the plan
 input returns `None` with a warning logged.
 
@@ -976,6 +1026,9 @@ Description: {description}
 Give typical nutrition values per 100 g of the edible portion of this food, as eaten
 (cooked if it is normally eaten cooked). Use values consistent with standard food
 composition tables.
+
+`carbs_g` is total carbohydrate, fiber included — the same convention standard food composition
+tables use. Do not subtract fiber from it.
 
 Return JSON: {"kcal": number, "protein_g": number, "carbs_g": number, "fat_g": number, "fiber_g": number}
 
@@ -1153,10 +1206,21 @@ temp directory DB).
 
 Required unit tests:
 - `logical_date` around the boundary, including DST-free and midnight cases.
-- Scheduler "is it time" logic for several plan_time / day_boundary combinations.
+- Scheduler "is it time" logic for several plan_time / day_boundary combinations, including a
+  relaunch shortly after midnight with plan_time already passed the previous evening (B3 in
+  `docs/DECISIONS.md`) — the case that broke under the old "today's calendar date" wording.
+- Settings validation rejects `plan_time < day_boundary`.
 - Targets engine: male/female, each goal direction, rate cap, floor application, carbs
-  minimum adjustment, goal reached → maintain. Include at least one hand-computed example.
-- Nutrition sanity check and kcal replacement.
+  minimum adjustment, goal reached → maintain, goal-weight anchor (target set vs. unset).
+  Include at least one hand-computed example, plus a heavy-body-weight case that would have
+  produced zero/negative carbs under the old current-weight-only protein anchor (B1 in
+  `docs/DECISIONS.md`), asserting `carbs_g > 0` and, separately, a case extreme enough to
+  trigger the macro-feasibility `floor_applied` path.
+- Goal save default target (§7.4): Lose/Gain without a target stores latest weight ∓ 1 kg;
+  clamped at 30/300 kg; an explicit target is kept as given; no logged weight → stays unset.
+- Nutrition sanity check and kcal replacement, including a high-fiber food (e.g. wheat bran:
+  protein 15.5, carbs 64.5, fat 4.3, fiber 42.8 — passes under the fiber-included-in-carbs
+  convention) and a `fiber > carbs` input that is rejected.
 - Food resolver: hit by name, hit by alias, miss → estimate → cached (second call makes no LLM
   request).
 - Meal parser validation and default meal type by time.
@@ -1177,7 +1241,10 @@ Required integration tests (in `core/tests` and `plugin-diet/tests`):
 - Plan generation: scripted planner output that violates kcal → retry with violation message
   (assert the second request contains it) → valid plan stored as version 1.
 - Plan revision creates version 2 with trigger `revision` and instruction stored.
-- Scheduler catch-up: FixedClock after plan_time with no plan → generation happens once.
+- Scheduler catch-up: FixedClock after plan_time with no plan → generation happens once,
+  including the 01:00-relaunch case from §7.13 (calendar date has advanced, logical day hasn't)
+  and a case confirming today's own missing plan is *not* backfilled (catch-up only targets
+  tomorrow).
 
 ## 14. Milestones
 
