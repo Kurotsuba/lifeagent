@@ -7,8 +7,9 @@
 //! `secrets`, `profile`, `goals`, `events`, `memory`, `conversation`) landed in M1; the
 //! plugin API, tool registry and orchestrator (`plugin`, `tools`, `core_tools`, `context`,
 //! `app`) landed in M3, along with `usage` (needed as soon as an `LlmRouter` can be built —
-//! see `usage.rs`'s doc comment). M4 added the plan types and `PlanStore` read/insert in
-//! `plan`, the event dispatcher and `today_view`; plan generation and `scheduler` are M5.
+//! see `usage.rs`'s doc comment). M4 added the plan types and `PlanStore`, the event
+//! dispatcher and `today_view`; M5 added plan generation (`plan::PlanService`), the
+//! `scheduler` with the daily backup, and `i18n`.
 
 pub mod app;
 pub mod clock;
@@ -19,6 +20,7 @@ pub mod db;
 pub mod error;
 pub mod events;
 pub mod goals;
+pub mod i18n;
 pub mod memory;
 pub mod plan;
 pub mod plugin;

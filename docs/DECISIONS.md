@@ -517,3 +517,82 @@ Amended `docs/PHASE1_SPEC.md` §12, §7.13 and §13 (backup tests: a row still i
 the backup, one backup per logical day, retention of 7, a leftover `.tmp` doesn't block).
 `docs/BLOCKERS.md` now has no open blockers. No code changes yet: the backup is part of the
 scheduler, which is M5.
+
+## 2026-09-24 — M5: closed. Planning, scheduler, backup
+
+§14 M5: plan service (generate, retry, store, revise, accept), diet plan input and
+finalize/validate, plan core tools, scheduler, daily DB backup. Done when planning and
+scheduler integration tests pass (`crates/plugin-diet/tests/planning.rs`).
+
+**Decided by the user before starting:**
+
+- **`{user_language}` (§9.4) is Simplified Chinese, with i18n kept open.** No language setting
+  exists, so `lifeagent_core::i18n::Language` has one variant, `ZhCn`, and the planner reads
+  `USER_LANGUAGE.prompt_name()`. A second language is a new variant plus a setting. §9.4 amended.
+- **`AppEvent::PlanReady` carries `trigger`**, so the desktop can notify only for scheduled
+  plans (§10.1) without a later breaking change. §7.5 amended.
+- **The `plan_time ≥ day_boundary` check (§7.2, from B3) is enforced in both setters.**
+  Changing `day_boundary` later can break it just as changing `plan_time` can. Neither setter
+  validated anything before.
+
+**Other decisions:**
+
+- **One `PlanService` per app.** `CoreApp`, the scheduler and the plan core tools (through
+  `ToolRegistry`, which now takes the service as a parameter) share one instance, so §7.12's
+  "one generation at a time" lock covers chat, the shell and the scheduler alike.
+- **Planner prompt.** Sent as one user message built from three constants: header,
+  per-section, revision (§9.4's loop and conditional). User-supplied text (profile, notes,
+  brief, instruction) is substituted last in each part, so braces in it aren't read as
+  placeholders. §9.4's "You create tomorrow's plan" is kept verbatim even for other dates; the
+  `Date:` line says which. The retry appends the model's output re-serialized from the parsed
+  JSON, since `complete_json` returns the parsed value, not the raw text.
+- **Violation and warning text is zh-CN.** Unmet violations end up in `warnings` shown to the
+  user (§7.12 step 6), so they're written for the user. The retry request around them stays
+  English like the rest of the prompts. A missing section reads "计划缺少“diet”部分".
+- **Revising needs an existing plan:** `CoreError::NotFound` otherwise, and an empty
+  instruction is a validation error.
+- **The context builder's "Plans" section (§7.9)** now shows today's and tomorrow's plans.
+  Core doesn't know section schemas, so it renders any section with a `meals` array shaped like
+  the diet section's (`meal_type`, `title`, `items[{name, grams}]`) and skips others.
+- **Plan core tools return that compact form, not the full plan JSON.** Tool results are cut
+  at 4,000 characters (§7.10), and a full plan can exceed that, which would hand the model
+  truncated JSON. `core_revise_plan` defaults its date like `core_get_plan` (tomorrow if it
+  has a plan, else today); §7.8 gave no default. `NothingToPlan` reaches the model as a
+  `NotFound` message ("complete the profile and log a weight first") instead of "internal
+  error".
+- **Scheduler.** It checks `CoreApp`'s `models_configured` flag rather than
+  `settings.models()`: with models saved after startup (the open M7 reload issue), the
+  setting would say yes while the router can't call anything, and every tick would fail
+  three times. Attempts are counted per target date, failures only, in memory (§7.13).
+  `PlanFailed` comes only from the scheduler; manual and chat generation return errors to
+  their caller.
+- **Backup** as resolved in B4 (`VACUUM INTO ?` with a bound path, dated files, keep 7,
+  `.tmp` then rename).
+- **Diet plan input (§8.9):** the meal rule in the brief ("exactly 3 main meals plus
+  0–(meals_per_day − 2) snacks") is derived from the validator's own limit (total ≤
+  meals_per_day + 1), so the planner is told what will be checked. Targets are passed as
+  the five macro values, without BMR/TDEE/delta.
+- **Diet finalize (§8.10):** planned items go through the same resolver as logged meals, so
+  they count toward `use_count`, and with it the KNOWN_FOODS ranking. That's accepted, since
+  planned foods are likely to be eaten. Allergy and dislike checks match against both the
+  planned and the canonical name. Matching "in both directions" (§8.10) can over-flag short
+  names ("油" against an allergy to "花生油"). For allergies, erring toward a false alarm is
+  the intended side.
+- Added `PluginContext::today()` (logical date), now used by core tools, the context builder
+  and the diet plugin.
+
+Verification: fmt, clippy (`-D warnings`, all targets) and all 276 workspace tests pass. That's
+core 149 unit + 3 orchestrator, llm 46, and diet 70 unit + 2 logging + 6 planning/scheduler
+integration. The planning tests cover the §13 required cases:
+- a kcal violation is retried, the second request names it, and the valid plan is stored
+  as version 1;
+- a revision creates version 2 with trigger `revision` and the instruction stored;
+- scheduler catch-up at 01:00 after plan_time generates exactly once, doesn't backfill
+  today, and takes the backup;
+- not due before plan_time;
+- skipped before onboarding;
+- `PlanFailed` plus a 15-minute retry, at most 3 attempts.
+
+Unit tests cover every §8.10 violation and warning rule, the "is it time" rule across
+plan_time/day_boundary combinations, the settings check, and the backup (a row still in the
+WAL, one per day, retention, leftover `.tmp`).

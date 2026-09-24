@@ -27,9 +27,10 @@ use crate::error::CoreError;
 use crate::events::{AppEvent, EventChange, EventStore};
 use crate::goals::GoalsService;
 use crate::memory::MemoryService;
-use crate::plan::{PlanStore, StoredPlan};
+use crate::plan::{PlanService, PlanStore, PlanTrigger, StoredPlan};
 use crate::plugin::{Plugin, PluginContext, PluginError};
 use crate::profile::ProfileService;
+use crate::scheduler::{Scheduler, TICK_INTERVAL};
 use crate::secrets::{KeyringSecretStore, SecretKeyProvider, SecretStore};
 use crate::settings::Settings;
 use crate::time::logical_date;
@@ -128,11 +129,13 @@ impl CoreAppBuilder {
             crate::plugin::apply_migrations(&db, self.clock.as_ref(), &plugin.manifest()).await?;
         }
 
-        let registry = ToolRegistry::build(&self.plugins)?;
+        let planner = Arc::new(PlanService::new(self.plugins.clone()));
+        let registry = ToolRegistry::build(&self.plugins, planner.clone())?;
         let (router, models_configured) = self.build_router(&db, &settings).await?;
 
         let app = CoreApp(Arc::new(CoreAppInner {
             db,
+            data_dir: self.data_dir,
             clock: self.clock,
             settings,
             secrets: self.secrets,
@@ -144,6 +147,7 @@ impl CoreAppBuilder {
             memory,
             conversation,
             plans,
+            planner,
             plugins: self.plugins,
             registry,
             send_lock: Mutex::new(()),
@@ -218,6 +222,7 @@ fn unconfigured_router(usage_sink: Arc<DbUsageSink>) -> LlmRouter {
 
 struct CoreAppInner {
     db: SqlitePool,
+    data_dir: PathBuf,
     clock: Arc<dyn Clock>,
     settings: Settings,
     secrets: Arc<dyn SecretStore>,
@@ -229,6 +234,9 @@ struct CoreAppInner {
     memory: MemoryService,
     conversation: ConversationStore,
     plans: PlanStore,
+    /// Shared with the tool registry, so chat, the scheduler and the shell all go through
+    /// one generation lock.
+    planner: Arc<PlanService>,
     plugins: Vec<Arc<dyn Plugin>>,
     registry: ToolRegistry,
     /// Serializes `send_message` calls (§7.11: "one turn at a time").
@@ -273,6 +281,77 @@ impl CoreApp {
     }
     pub fn plans(&self) -> &PlanStore {
         &self.0.plans
+    }
+
+    pub(crate) fn db(&self) -> &SqlitePool {
+        &self.0.db
+    }
+    pub(crate) fn data_dir(&self) -> &std::path::Path {
+        &self.0.data_dir
+    }
+    pub(crate) fn clock(&self) -> &Arc<dyn Clock> {
+        &self.0.clock
+    }
+    pub(crate) fn models_configured(&self) -> bool {
+        self.0.models_configured
+    }
+
+    fn require_models(&self) -> Result<(), CoreError> {
+        if self.0.models_configured {
+            Ok(())
+        } else {
+            Err(CoreError::Validation(
+                "models are not configured yet".into(),
+            ))
+        }
+    }
+
+    /// The current version of the plan for `date`, if any.
+    pub async fn get_plan(&self, date: NaiveDate) -> Result<Option<StoredPlan>, CoreError> {
+        self.0.plans.current(date).await
+    }
+
+    /// Generates a new plan version for `date` (§7.12).
+    pub async fn generate_plan(
+        &self,
+        date: NaiveDate,
+        trigger: PlanTrigger,
+    ) -> Result<StoredPlan, CoreError> {
+        self.require_models()?;
+        self.0
+            .planner
+            .generate(&self.plugin_context(), date, trigger)
+            .await
+    }
+
+    /// Revises the current plan for `date` following the user's `instruction`.
+    pub async fn revise_plan(
+        &self,
+        date: NaiveDate,
+        instruction: &str,
+    ) -> Result<StoredPlan, CoreError> {
+        self.require_models()?;
+        self.0
+            .planner
+            .revise(&self.plugin_context(), date, instruction)
+            .await
+    }
+
+    /// Marks the current plan for `date` accepted.
+    pub async fn accept_plan(&self, date: NaiveDate) -> Result<(), CoreError> {
+        self.0.plans.accept(date).await
+    }
+
+    /// Starts the scheduler (§7.13): one tick immediately, then every 60 s, for the life of
+    /// the runtime. Shells call this once.
+    pub fn start_scheduler(&self) -> tokio::task::JoinHandle<()> {
+        let mut scheduler = Scheduler::new(self.clone());
+        tokio::spawn(async move {
+            loop {
+                scheduler.tick().await;
+                tokio::time::sleep(TICK_INTERVAL).await;
+            }
+        })
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<AppEvent> {
@@ -380,11 +459,7 @@ impl CoreApp {
     /// calls and tool dispatch — tool calls within a round run sequentially, in call order —
     /// until the model stops calling tools or the iteration cap is hit.
     pub async fn send_message(&self, text: &str) -> Result<ChatTurn, CoreError> {
-        if !self.0.models_configured {
-            return Err(CoreError::Validation(
-                "models are not configured yet".into(),
-            ));
-        }
+        self.require_models()?;
         let _guard = self.0.send_lock.lock().await;
 
         self.0

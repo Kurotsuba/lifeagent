@@ -15,6 +15,7 @@ use uuid::Uuid;
 
 use crate::clock::Clock;
 use crate::error::CoreError;
+use crate::plan::PlanTrigger;
 use crate::settings::Settings;
 use crate::time::logical_date;
 
@@ -68,6 +69,8 @@ pub enum AppEvent {
     PlanReady {
         date: NaiveDate,
         version: u32,
+        /// Lets shells notify only for scheduled plans (§10.1).
+        trigger: PlanTrigger,
     },
     PlanFailed {
         date: NaiveDate,

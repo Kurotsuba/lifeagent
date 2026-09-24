@@ -1,14 +1,12 @@
 //! Core tool specs and handlers, per `docs/PHASE1_SPEC.md` §7.8.
-//!
-//! The plan tools (`core_get_plan`, `core_generate_plan`, `core_revise_plan`) are stubbed per
-//! the M3 milestone note in `docs/PHASE1_SPEC.md` §14 ("core tools (except plan tools,
-//! stubbed)") — they are not registered at all until the plan service lands in M5, since
-//! there is nothing meaningful for them to do without it (see `docs/DECISIONS.md`).
 
+use chrono::NaiveDate;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
+use crate::context::render_plan_compact;
 use crate::events::EventSource;
+use crate::plan::{PlanService, PlanTrigger, StoredPlan};
 use crate::plugin::{PluginContext, PluginError, ToolOutput};
 use crate::time::parse_local_datetime;
 
@@ -55,6 +53,43 @@ pub fn specs() -> Vec<lifeagent_llm::types::ToolSpec> {
             }),
         },
         ToolSpec {
+            name: "core_get_plan".into(),
+            description: "Get the current plan for a day. `date` is YYYY-MM-DD; by default, \
+                tomorrow if it has a plan, else today. Use when the user asks about a plan \
+                that isn't already shown in your context."
+                .into(),
+            parameters: json!({
+                "type": "object",
+                "properties": { "date": {"type": "string"} }
+            }),
+        },
+        ToolSpec {
+            name: "core_generate_plan".into(),
+            description: "Generate a new plan for a day (`date` YYYY-MM-DD, default \
+                tomorrow). Only when the user asks for a plan; it takes a while. To change \
+                an existing plan, use core_revise_plan instead."
+                .into(),
+            parameters: json!({
+                "type": "object",
+                "properties": { "date": {"type": "string"} }
+            }),
+        },
+        ToolSpec {
+            name: "core_revise_plan".into(),
+            description: "Change an existing plan following the user's request (e.g. \
+                'tomorrow's lunch is a company dinner'). Pass the user's request as \
+                `instruction`. `date` defaults to tomorrow if it has a plan, else today."
+                .into(),
+            parameters: json!({
+                "type": "object",
+                "required": ["instruction"],
+                "properties": {
+                    "instruction": {"type": "string"},
+                    "date": {"type": "string"}
+                }
+            }),
+        },
+        ToolSpec {
             name: "core_delete_entry".into(),
             description: "Soft-delete a previously logged entry (meal, weight, ...) by its \
                 id. Use this when the user corrects or retracts something they reported, \
@@ -69,16 +104,123 @@ pub fn specs() -> Vec<lifeagent_llm::types::ToolSpec> {
     ]
 }
 
-pub async fn call(ctx: &PluginContext, name: &str, args: Value) -> Result<ToolOutput, PluginError> {
+pub async fn call(
+    ctx: &PluginContext,
+    planner: &PlanService,
+    name: &str,
+    args: Value,
+) -> Result<ToolOutput, PluginError> {
     match name {
         "core_log_weight" => log_weight(ctx, args).await,
         "core_remember" => remember(ctx, args).await,
         "core_forget" => forget(ctx, args).await,
+        "core_get_plan" => get_plan(ctx, args).await,
+        "core_generate_plan" => generate_plan(ctx, planner, args).await,
+        "core_revise_plan" => revise_plan(ctx, planner, args).await,
         "core_delete_entry" => delete_entry(ctx, args).await,
         other => Err(PluginError::NotFound(format!(
             "unknown core tool {other:?}"
         ))),
     }
+}
+
+fn parse_date(s: &str) -> Result<NaiveDate, PluginError> {
+    NaiveDate::parse_from_str(s.trim(), "%Y-%m-%d")
+        .map_err(|e| PluginError::InvalidArgs(format!("invalid date {s:?}: {e}")))
+}
+
+/// The explicit date, else tomorrow if it has a plan, else today (§7.8).
+async fn plan_date_or_default(
+    ctx: &PluginContext,
+    date: Option<&str>,
+) -> Result<NaiveDate, PluginError> {
+    if let Some(s) = date {
+        return parse_date(s);
+    }
+    let today = ctx.today().await?;
+    let tomorrow = today
+        .succ_opt()
+        .ok_or_else(|| PluginError::Other("date out of range".into()))?;
+    Ok(if ctx.plans.current(tomorrow).await?.is_some() {
+        tomorrow
+    } else {
+        today
+    })
+}
+
+/// Plans go back to the model in the same compact form the system prompt uses, which stays
+/// well under the 4,000-char tool-result limit (§7.10) where the full JSON might not.
+fn plan_json(plan: &StoredPlan) -> Value {
+    json!({
+        "date": plan.plan_date.to_string(),
+        "version": plan.version,
+        "status": plan.status,
+        "plan": render_plan_compact("Plan", plan),
+        "warnings": plan.warnings,
+        "disclaimer": plan.content.disclaimer,
+    })
+}
+
+#[derive(Deserialize)]
+struct DateArgs {
+    date: Option<String>,
+}
+
+async fn get_plan(ctx: &PluginContext, args: Value) -> Result<ToolOutput, PluginError> {
+    let args: DateArgs =
+        serde_json::from_value(args).map_err(|e| PluginError::InvalidArgs(e.to_string()))?;
+    let date = plan_date_or_default(ctx, args.date.as_deref()).await?;
+    let plan = ctx.plans.current(date).await?;
+    Ok(ToolOutput {
+        content: match &plan {
+            Some(plan) => plan_json(plan),
+            None => json!({ "date": date.to_string(), "plan": null }),
+        },
+        summary: format!("查看了 {date} 的计划"),
+    })
+}
+
+async fn generate_plan(
+    ctx: &PluginContext,
+    planner: &PlanService,
+    args: Value,
+) -> Result<ToolOutput, PluginError> {
+    let args: DateArgs =
+        serde_json::from_value(args).map_err(|e| PluginError::InvalidArgs(e.to_string()))?;
+    let date = match args.date.as_deref() {
+        Some(s) => parse_date(s)?,
+        None => ctx
+            .today()
+            .await?
+            .succ_opt()
+            .ok_or_else(|| PluginError::Other("date out of range".into()))?,
+    };
+    let plan = planner.generate(ctx, date, PlanTrigger::Manual).await?;
+    Ok(ToolOutput {
+        content: plan_json(&plan),
+        summary: format!("已生成 {date} 的计划（第 {} 版）", plan.version),
+    })
+}
+
+#[derive(Deserialize)]
+struct ReviseArgs {
+    instruction: String,
+    date: Option<String>,
+}
+
+async fn revise_plan(
+    ctx: &PluginContext,
+    planner: &PlanService,
+    args: Value,
+) -> Result<ToolOutput, PluginError> {
+    let args: ReviseArgs =
+        serde_json::from_value(args).map_err(|e| PluginError::InvalidArgs(e.to_string()))?;
+    let date = plan_date_or_default(ctx, args.date.as_deref()).await?;
+    let plan = planner.revise(ctx, date, &args.instruction).await?;
+    Ok(ToolOutput {
+        content: plan_json(&plan),
+        summary: format!("已调整 {date} 的计划（第 {} 版）", plan.version),
+    })
 }
 
 #[derive(Deserialize)]
@@ -167,6 +309,70 @@ async fn delete_entry(ctx: &PluginContext, args: Value) -> Result<ToolOutput, Pl
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::plan::PlanContent;
+
+    /// Most tests here don't touch plan generation, so an empty planner is enough. Shadows
+    /// the glob-imported `call`.
+    async fn call(ctx: &PluginContext, name: &str, args: Value) -> Result<ToolOutput, PluginError> {
+        super::call(ctx, &PlanService::new(vec![]), name, args).await
+    }
+
+    async fn insert_plan(ctx: &PluginContext, date: NaiveDate) {
+        let content = PlanContent {
+            summary: "测试".into(),
+            sections: Default::default(),
+            disclaimer: None,
+        };
+        ctx.plans
+            .insert(date, PlanTrigger::Manual, None, &content, &[])
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn get_plan_defaults_to_tomorrow_when_it_has_a_plan_else_today() {
+        let (ctx, _mock, _dir) = crate::test_support::context().await;
+        let today = ctx.today().await.unwrap();
+        let tomorrow = today.succ_opt().unwrap();
+
+        let out = call(&ctx, "core_get_plan", json!({})).await.unwrap();
+        assert_eq!(
+            out.content,
+            json!({"date": today.to_string(), "plan": null})
+        );
+
+        insert_plan(&ctx, tomorrow).await;
+        let out = call(&ctx, "core_get_plan", json!({})).await.unwrap();
+        assert_eq!(out.content["date"], tomorrow.to_string());
+        assert_eq!(out.content["version"], 1);
+    }
+
+    #[tokio::test]
+    async fn generate_plan_with_nothing_to_plan_reaches_the_model_as_not_found() {
+        let (ctx, _mock, _dir) = crate::test_support::context().await;
+        assert!(matches!(
+            call(&ctx, "core_generate_plan", json!({})).await,
+            Err(PluginError::NotFound(m)) if m.contains("nothing to plan")
+        ));
+    }
+
+    #[tokio::test]
+    async fn revise_plan_without_a_plan_is_not_found() {
+        let (ctx, _mock, _dir) = crate::test_support::context().await;
+        assert!(matches!(
+            call(&ctx, "core_revise_plan", json!({"instruction": "少吃点"})).await,
+            Err(PluginError::NotFound(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn plan_tools_reject_malformed_dates() {
+        let (ctx, _mock, _dir) = crate::test_support::context().await;
+        assert!(matches!(
+            call(&ctx, "core_get_plan", json!({"date": "明天"})).await,
+            Err(PluginError::InvalidArgs(_))
+        ));
+    }
 
     #[tokio::test]
     async fn log_weight_appends_a_weight_event_defaulting_to_now() {

@@ -3,7 +3,7 @@
 //! Depends on `lifeagent-core` and `lifeagent-llm`; implements the `Plugin` trait from
 //! `lifeagent-core`. Registered by the composition root (`cli`, `desktop`) — `core` never
 //! depends on this crate. Logging (`model`, `foods`, `resolver`, `parser`, `targets`,
-//! `intake`, `tools`) landed in M4; the plan section (`plan`, `validate`) is M5, per
+//! `intake`, `tools`) landed in M4 and the plan section (`plan`, `validate`) in M5, per
 //! `docs/PHASE1_SPEC.md` §8.
 
 pub mod foods;
@@ -20,7 +20,8 @@ pub mod validate;
 use async_trait::async_trait;
 use chrono::NaiveDate;
 use lifeagent_core::plugin::{
-    Plugin, PluginContext, PluginError, PluginManifest, PluginMigration, ToolOutput,
+    PlanInput, PlanSection, Plugin, PluginContext, PluginError, PluginManifest, PluginMigration,
+    ToolOutput,
 };
 use lifeagent_llm::types::ToolSpec;
 use serde_json::Value;
@@ -69,6 +70,23 @@ impl Plugin for DietPlugin {
         date: NaiveDate,
     ) -> Result<Option<Value>, PluginError> {
         Ok(Some(intake::today_card(ctx, date).await?))
+    }
+
+    async fn plan_input(
+        &self,
+        ctx: &PluginContext,
+        date: NaiveDate,
+    ) -> Result<Option<PlanInput>, PluginError> {
+        plan::plan_input(ctx, date).await
+    }
+
+    async fn finalize_plan_section(
+        &self,
+        ctx: &PluginContext,
+        date: NaiveDate,
+        raw: Value,
+    ) -> Result<PlanSection, PluginError> {
+        validate::finalize(ctx, date, raw).await
     }
 }
 

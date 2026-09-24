@@ -85,7 +85,10 @@ impl Settings {
         }
     }
 
+    /// Rejects a `plan_time` earlier than `day_boundary` (§7.2): the scheduler's catch-up rule
+    /// relies on `plan_time ≥ day_boundary` (§7.13).
     pub async fn set_plan_time(&self, t: NaiveTime, now: DateTime<Utc>) -> Result<(), CoreError> {
+        check_plan_time(t, self.day_boundary().await?)?;
         self.set_json("plan_time", &format_hhmm(t), now).await
     }
 
@@ -96,11 +99,13 @@ impl Settings {
         }
     }
 
+    /// Rejects a boundary later than the current `plan_time`; see [`Settings::set_plan_time`].
     pub async fn set_day_boundary(
         &self,
         t: NaiveTime,
         now: DateTime<Utc>,
     ) -> Result<(), CoreError> {
+        check_plan_time(self.plan_time().await?, t)?;
         self.set_json("day_boundary", &format_hhmm(t), now).await
     }
 
@@ -156,10 +161,61 @@ impl Settings {
     }
 }
 
+fn check_plan_time(plan_time: NaiveTime, day_boundary: NaiveTime) -> Result<(), CoreError> {
+    if plan_time < day_boundary {
+        return Err(CoreError::Validation(format!(
+            "plan_time {} must not be earlier than day_boundary {}",
+            format_hhmm(plan_time),
+            format_hhmm(day_boundary)
+        )));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use chrono::TimeZone;
+
+    #[tokio::test]
+    async fn plan_time_earlier_than_day_boundary_is_rejected_from_either_setter() {
+        let (pool, _dir) = crate::db::test_pool().await;
+        let settings = Settings::new(pool);
+
+        // Defaults are 21:00 / 04:00; 03:00 is before the boundary.
+        assert!(settings
+            .set_plan_time(parse_hhmm("03:00").unwrap(), now())
+            .await
+            .is_err());
+        // A boundary after the 21:00 plan_time.
+        assert!(settings
+            .set_day_boundary(parse_hhmm("22:00").unwrap(), now())
+            .await
+            .is_err());
+        // Nothing was stored by either rejected call.
+        assert_eq!(
+            settings.plan_time().await.unwrap(),
+            parse_hhmm("21:00").unwrap()
+        );
+        assert_eq!(
+            settings.day_boundary().await.unwrap(),
+            parse_hhmm("04:00").unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn plan_time_equal_to_day_boundary_is_allowed() {
+        let (pool, _dir) = crate::db::test_pool().await;
+        let settings = Settings::new(pool);
+        settings
+            .set_plan_time(parse_hhmm("04:00").unwrap(), now())
+            .await
+            .unwrap();
+        assert_eq!(
+            settings.plan_time().await.unwrap(),
+            parse_hhmm("04:00").unwrap()
+        );
+    }
 
     fn now() -> DateTime<Utc> {
         Utc.with_ymd_and_hms(2026, 9, 23, 12, 0, 0).unwrap()

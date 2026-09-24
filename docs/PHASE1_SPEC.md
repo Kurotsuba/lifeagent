@@ -513,7 +513,7 @@ and emits `AppEvent::DataChanged { event_type, logical_date }` to shells.
 ```rust
 pub enum AppEvent {
     DataChanged { event_type: String, logical_date: NaiveDate },
-    PlanReady { date: NaiveDate, version: u32 },
+    PlanReady { date: NaiveDate, version: u32, trigger: PlanTrigger }, // trigger: see §10.1
     PlanFailed { date: NaiveDate, error: String },
 }
 ```
@@ -1037,6 +1037,10 @@ Food: {name}
 ```
 
 ### 9.4 Planner (core, role Planner, JSON)
+
+`{user_language}` is `"Simplified Chinese"` in Phase 1, from `lifeagent_core::i18n::Language`
+(zh-CN is the only variant). i18n stays open: a second language is a new variant plus a
+setting, not a prompt change.
 
 ```
 You create tomorrow's plan for the user. The plan has one section per domain below. Each

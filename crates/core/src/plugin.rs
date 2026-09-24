@@ -60,6 +60,14 @@ pub struct PluginContext {
     pub plans: PlanStore,
 }
 
+impl PluginContext {
+    /// The current logical date (§4), using the `day_boundary` setting.
+    pub async fn today(&self) -> Result<NaiveDate, CoreError> {
+        let boundary = self.settings.day_boundary().await?;
+        Ok(crate::time::logical_date(self.clock.now(), boundary))
+    }
+}
+
 /// What a tool call returns: JSON handed back to the LLM as the tool result, plus a short
 /// human-readable line for UI activity chips.
 pub struct ToolOutput {
@@ -104,6 +112,8 @@ impl From<CoreError> for PluginError {
         match e {
             CoreError::NotFound(m) => PluginError::NotFound(m),
             CoreError::Validation(m) => PluginError::InvalidArgs(m),
+            // Passed through (as NotFound) so the model can tell the user what's missing.
+            e @ CoreError::NothingToPlan => PluginError::NotFound(e.to_string()),
             other => PluginError::Other(other.to_string()),
         }
     }

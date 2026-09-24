@@ -5,7 +5,7 @@ use std::collections::HashSet;
 
 use chrono::{DateTime, Local, NaiveDate, Utc};
 use lifeagent_core::plugin::{PluginContext, PluginError};
-use lifeagent_core::time::{age_years, logical_date};
+use lifeagent_core::time::age_years;
 use serde::Serialize;
 use serde_json::{json, Value};
 
@@ -46,8 +46,7 @@ pub struct Adherence {
 }
 
 pub async fn today(ctx: &PluginContext) -> Result<NaiveDate, PluginError> {
-    let boundary = ctx.settings.day_boundary().await?;
-    Ok(logical_date(ctx.clock.now(), boundary))
+    Ok(ctx.today().await?)
 }
 
 pub async fn meals_on(

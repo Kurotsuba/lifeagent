@@ -9,6 +9,7 @@ use serde_json::Value;
 
 use crate::core_tools;
 use crate::error::CoreError;
+use crate::plan::PlanService;
 use crate::plugin::{Plugin, PluginContext, PluginError, ToolOutput};
 
 enum ToolOwner {
@@ -21,13 +22,19 @@ enum ToolOwner {
 pub struct ToolRegistry {
     specs: Vec<ToolSpec>,
     owners: HashMap<String, ToolOwner>,
+    /// The app's one plan service, for the plan core tools.
+    planner: Arc<PlanService>,
 }
 
 impl ToolRegistry {
-    pub fn build(plugins: &[Arc<dyn Plugin>]) -> Result<Self, CoreError> {
+    pub fn build(
+        plugins: &[Arc<dyn Plugin>],
+        planner: Arc<PlanService>,
+    ) -> Result<Self, CoreError> {
         let mut registry = ToolRegistry {
             specs: Vec::new(),
             owners: HashMap::new(),
+            planner,
         };
 
         for spec in core_tools::specs() {
@@ -93,7 +100,7 @@ impl ToolRegistry {
         validate_args(&spec.parameters, &args).map_err(PluginError::InvalidArgs)?;
 
         match owner {
-            ToolOwner::Core => core_tools::call(ctx, name, args).await,
+            ToolOwner::Core => core_tools::call(ctx, &self.planner, name, args).await,
             ToolOwner::Plugin(plugin) => plugin.call_tool(ctx, name, args).await,
         }
     }
@@ -185,6 +192,10 @@ mod tests {
     use super::*;
     use async_trait::async_trait;
     use serde_json::json;
+
+    fn planner() -> Arc<PlanService> {
+        Arc::new(PlanService::new(vec![]))
+    }
 
     struct GoodPlugin;
 
@@ -295,7 +306,7 @@ mod tests {
     #[test]
     fn build_registers_core_tools_and_plugin_tools() {
         let plugins: Vec<Arc<dyn Plugin>> = vec![Arc::new(GoodPlugin)];
-        let registry = ToolRegistry::build(&plugins).unwrap();
+        let registry = ToolRegistry::build(&plugins, planner()).unwrap();
         let specs = registry.specs();
         let names: Vec<&str> = specs.iter().map(|s| s.name.as_str()).collect();
         assert!(names.contains(&"core_remember"));
@@ -306,7 +317,7 @@ mod tests {
     fn build_rejects_a_tool_not_matching_the_plugin_prefix() {
         let plugins: Vec<Arc<dyn Plugin>> = vec![Arc::new(BadPrefixPlugin)];
         assert!(matches!(
-            ToolRegistry::build(&plugins),
+            ToolRegistry::build(&plugins, planner()),
             Err(CoreError::Validation(_))
         ));
     }
@@ -315,7 +326,7 @@ mod tests {
     fn build_rejects_duplicate_tool_names_within_a_plugin() {
         let plugins: Vec<Arc<dyn Plugin>> = vec![Arc::new(DuplicatePlugin)];
         assert!(matches!(
-            ToolRegistry::build(&plugins),
+            ToolRegistry::build(&plugins, planner()),
             Err(CoreError::Validation(_))
         ));
     }
@@ -353,7 +364,7 @@ mod tests {
 
         let plugins: Vec<Arc<dyn Plugin>> = vec![Arc::new(CollidingPlugin)];
         assert!(matches!(
-            ToolRegistry::build(&plugins),
+            ToolRegistry::build(&plugins, planner()),
             Err(CoreError::Validation(_))
         ));
     }
@@ -361,7 +372,7 @@ mod tests {
     #[tokio::test]
     async fn call_routes_to_the_owning_plugin() {
         let plugins: Vec<Arc<dyn Plugin>> = vec![Arc::new(GoodPlugin)];
-        let registry = ToolRegistry::build(&plugins).unwrap();
+        let registry = ToolRegistry::build(&plugins, planner()).unwrap();
         let (ctx, _mock, _dir) = crate::test_support::context().await;
 
         let out = registry
@@ -373,7 +384,7 @@ mod tests {
 
     #[tokio::test]
     async fn call_routes_core_tools_to_core() {
-        let registry = ToolRegistry::build(&[]).unwrap();
+        let registry = ToolRegistry::build(&[], planner()).unwrap();
         let (ctx, _mock, _dir) = crate::test_support::context().await;
 
         let out = registry
@@ -385,7 +396,7 @@ mod tests {
 
     #[tokio::test]
     async fn call_of_unknown_tool_is_not_found() {
-        let registry = ToolRegistry::build(&[]).unwrap();
+        let registry = ToolRegistry::build(&[], planner()).unwrap();
         let (ctx, _mock, _dir) = crate::test_support::context().await;
 
         assert!(matches!(
@@ -396,7 +407,7 @@ mod tests {
 
     #[tokio::test]
     async fn call_rejects_args_missing_a_required_field() {
-        let registry = ToolRegistry::build(&[]).unwrap();
+        let registry = ToolRegistry::build(&[], planner()).unwrap();
         let (ctx, _mock, _dir) = crate::test_support::context().await;
 
         // core_remember requires "note".

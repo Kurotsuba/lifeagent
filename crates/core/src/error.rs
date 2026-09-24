@@ -34,4 +34,9 @@ pub enum CoreError {
     /// A plugin hook called by core (context snippet, today card, ...) failed.
     #[error("plugin error: {0}")]
     Plugin(String),
+
+    /// No plugin produced a plan input for the date (§7.12 step 1), e.g. because the profile
+    /// or a weight is missing.
+    #[error("nothing to plan: complete the profile and log a weight first")]
+    NothingToPlan,
 }

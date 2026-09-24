@@ -1,7 +1,4 @@
 //! Conversation system-prompt builder, per `docs/PHASE1_SPEC.md` §7.9/§9.1.
-//!
-//! The "Plans" section is a fixed placeholder until the plan service lands in M5 — there is
-//! nothing to report yet (see `docs/DECISIONS.md`).
 
 use std::sync::Arc;
 
@@ -12,9 +9,10 @@ use crate::error::CoreError;
 use crate::events::Event;
 use crate::goals::{GoalDirection, WeightGoal};
 use crate::memory::MemoryNote;
+use crate::plan::StoredPlan;
 use crate::plugin::{Plugin, PluginContext};
 use crate::profile::Profile;
-use crate::time::{age_years, logical_date};
+use crate::time::age_years;
 
 const SYSTEM_PROMPT_TEMPLATE: &str = "\
 You are LifeAgent, a personal assistant running on the user's computer. You help the user
@@ -54,8 +52,7 @@ Current time: {now_local} ({weekday}). Logical date: {logical_date}.
 /// Target size for the built prompt (§7.9); memory notes are truncated first if exceeded.
 const TARGET_TOKENS: usize = 2500;
 
-/// Plan service lands in M5; until then there is nothing to report here.
-const PLANS_PLACEHOLDER: &str = "No plan for today or tomorrow yet.";
+const NO_PLANS: &str = "No plan for today or tomorrow yet.";
 
 /// Rough token estimate for CJK-heavy text (§7.9): chars / 3.
 fn estimate_tokens(text: &str) -> usize {
@@ -66,10 +63,8 @@ pub async fn build_system_prompt(
     ctx: &PluginContext,
     plugins: &[Arc<dyn Plugin>],
 ) -> Result<String, CoreError> {
-    let now = ctx.clock.now();
-    let now_local = now.with_timezone(&Local);
-    let boundary = ctx.settings.day_boundary().await?;
-    let today = logical_date(now, boundary);
+    let now_local = ctx.clock.now().with_timezone(&Local);
+    let today = ctx.today().await?;
 
     let profile = ctx.profile.get().await?;
     let latest_weight = ctx.events.latest("body.weight_logged").await?;
@@ -95,6 +90,21 @@ pub async fn build_system_prompt(
         snippets.join("\n\n")
     };
 
+    let mut plans = Vec::new();
+    if let Some(plan) = ctx.plans.current(today).await? {
+        plans.push(render_plan_compact("Today", &plan));
+    }
+    if let Some(tomorrow) = today.succ_opt() {
+        if let Some(plan) = ctx.plans.current(tomorrow).await? {
+            plans.push(render_plan_compact("Tomorrow", &plan));
+        }
+    }
+    let plans_text = if plans.is_empty() {
+        NO_PLANS.to_string()
+    } else {
+        plans.join("\n\n")
+    };
+
     let mut notes = ctx.memory.list(50).await?;
     let render = |notes: &[MemoryNote]| -> String {
         render_template(
@@ -103,6 +113,7 @@ pub async fn build_system_prompt(
             &profile_summary,
             &goals_text,
             &plugin_snippets,
+            &plans_text,
             notes,
         )
     };
@@ -123,6 +134,7 @@ fn render_template(
     profile_summary: &str,
     goals_text: &str,
     plugin_snippets: &str,
+    plans: &str,
     notes: &[MemoryNote],
 ) -> String {
     let memory_notes = if notes.is_empty() {
@@ -145,11 +157,50 @@ fn render_template(
         .replace("{profile_summary}", profile_summary)
         .replace("{goals}", goals_text)
         .replace("{plugin_snippets}", plugin_snippets)
-        .replace("{plans}", PLANS_PLACEHOLDER)
+        .replace("{plans}", plans)
         .replace("{memory_notes}", &memory_notes)
 }
 
-fn render_profile_summary(
+/// A plan in compact form (§7.9): summary, then each meal's title and items. Core doesn't
+/// know section schemas; it renders any section that has a `meals` array shaped like the diet
+/// section's (`meal_type`, `title`, `items[{name, grams}]`) and skips the rest.
+pub(crate) fn render_plan_compact(label: &str, plan: &StoredPlan) -> String {
+    let status = format!("{:?}", plan.status).to_lowercase();
+    let mut lines = vec![format!(
+        "{label} ({}, version {}, {status}): {}",
+        plan.plan_date, plan.version, plan.content.summary
+    )];
+    for section in plan.content.sections.values() {
+        let Some(meals) = section.get("meals").and_then(Value::as_array) else {
+            continue;
+        };
+        for meal in meals {
+            let meal_type = meal
+                .get("meal_type")
+                .and_then(Value::as_str)
+                .unwrap_or("meal");
+            let title = meal.get("title").and_then(Value::as_str).unwrap_or("");
+            let items: Vec<String> = meal
+                .get("items")
+                .and_then(Value::as_array)
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(|i| {
+                            let name = i.get("name")?.as_str()?;
+                            let grams = i.get("grams")?.as_f64()?;
+                            Some(format!("{name} {grams}g"))
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            lines.push(format!("- {meal_type} {title}: {}", items.join(", ")));
+        }
+    }
+    lines.join("\n")
+}
+
+pub(crate) fn render_profile_summary(
     profile: Option<&Profile>,
     latest_weight: Option<&Event>,
     today: NaiveDate,
@@ -294,7 +345,7 @@ mod tests {
         assert!(prompt.contains("Profile not set yet."));
         assert!(prompt.contains("No active goals."));
         assert!(prompt.contains("(no data yet)"));
-        assert!(prompt.contains(PLANS_PLACEHOLDER));
+        assert!(prompt.contains(NO_PLANS));
         assert!(prompt.contains("(none)"));
     }
 
@@ -337,6 +388,39 @@ mod tests {
 
         assert!(prompt.contains("### Snippet Plugin"));
         assert!(prompt.contains("today's snippet text"));
+    }
+
+    #[tokio::test]
+    async fn includes_tomorrows_plan_in_compact_form() {
+        use crate::plan::{PlanContent, PlanTrigger};
+        use std::collections::BTreeMap;
+
+        let (ctx, _mock, _dir) = crate::test_support::context().await;
+        let tomorrow = ctx.today().await.unwrap().succ_opt().unwrap();
+        let content = PlanContent {
+            summary: "明天多吃蛋白质".into(),
+            sections: BTreeMap::from([(
+                "diet".to_string(),
+                json!({"meals": [{
+                    "meal_type": "breakfast",
+                    "title": "燕麦牛奶",
+                    "items": [{"name": "燕麦", "grams": 50}, {"name": "牛奶", "grams": 250}]
+                }]}),
+            )]),
+            disclaimer: None,
+        };
+        ctx.plans
+            .insert(tomorrow, PlanTrigger::Manual, None, &content, &[])
+            .await
+            .unwrap();
+
+        let prompt = build_system_prompt(&ctx, &[]).await.unwrap();
+
+        assert!(prompt.contains(&format!(
+            "Tomorrow ({tomorrow}, version 1, proposed): 明天多吃蛋白质"
+        )));
+        assert!(prompt.contains("- breakfast 燕麦牛奶: 燕麦 50g, 牛奶 250g"));
+        assert!(!prompt.contains(NO_PLANS));
     }
 
     #[tokio::test]
