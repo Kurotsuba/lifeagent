@@ -7,6 +7,7 @@
 //! when that type exists.
 
 use chrono::{DateTime, Utc};
+use lifeagent_llm::router::ModelsConfig;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::Value;
@@ -140,6 +141,19 @@ impl Settings {
     ) -> Result<(), CoreError> {
         self.set_json("onboarding_complete", &on, now).await
     }
+
+    /// `None` until onboarding configures a provider (§7.2: "none (onboarding required)").
+    pub async fn models(&self) -> Result<Option<ModelsConfig>, CoreError> {
+        self.get_json("models").await
+    }
+
+    pub async fn set_models(
+        &self,
+        config: &ModelsConfig,
+        now: DateTime<Utc>,
+    ) -> Result<(), CoreError> {
+        self.set_json("models", config, now).await
+    }
 }
 
 #[cfg(test)]
@@ -167,6 +181,7 @@ mod tests {
         assert!(settings.notifications_enabled().await.unwrap());
         assert!(!settings.autostart().await.unwrap());
         assert!(!settings.onboarding_complete().await.unwrap());
+        assert_eq!(settings.models().await.unwrap(), None);
     }
 
     #[tokio::test]
@@ -201,6 +216,34 @@ mod tests {
 
         settings.set_onboarding_complete(true, t).await.unwrap();
         assert!(settings.onboarding_complete().await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn models_round_trips_through_set_and_get() {
+        use lifeagent_llm::router::{ProviderConfig, ProviderKind, RoleBinding};
+
+        let (pool, _dir) = crate::db::test_pool().await;
+        let settings = Settings::new(pool);
+
+        let binding = RoleBinding {
+            provider_id: "openai".into(),
+            model: "gpt-test".into(),
+            temperature: None,
+            effort: None,
+        };
+        let config = ModelsConfig {
+            providers: vec![ProviderConfig {
+                id: "openai".into(),
+                kind: ProviderKind::OpenAiCompatible,
+                base_url: "https://api.openai.com/v1".into(),
+            }],
+            parser: binding.clone(),
+            planner: binding.clone(),
+            conversation: binding,
+        };
+
+        settings.set_models(&config, now()).await.unwrap();
+        assert_eq!(settings.models().await.unwrap(), Some(config));
     }
 
     #[tokio::test]

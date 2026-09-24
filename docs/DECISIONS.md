@@ -92,3 +92,57 @@ column; under a `FixedClock` (and in principle under real time, for two events l
 the same second) two rows can share that timestamp, making "newest/oldest first" order
 unspecified. Added `rowid` as a secondary sort key (SQLite's implicit, strictly-increasing
 insertion-order column) everywhere this could bite.
+
+## 2026-09-24 — M2: closed. LLM layer built; `effort` added to `ChatRequest`
+
+`docs/PHASE1_SPEC.md` §6 gives `ChatRequest` six fields (`model`, `messages`, `tools`,
+`temperature`, `max_tokens`, `response_format`) and separately gives `RoleBinding` an
+`effort: Option<Effort>` used "Anthropic only" (§6.3's table: parser=low, planner=high,
+conversation=medium, mirroring `temperature`'s per-role defaults for the OpenAI-compatible
+kind). But `ChatModel::complete` takes only `ChatRequest`, and the router dispatches to
+whichever provider by calling that one method — so there is no path left for a resolved
+`effort` value to reach the Anthropic provider once `RoleRequest` (built by the caller) is
+merged with the binding. This is the same class of defect as `docs/BLOCKERS.md`'s B1–B4
+(expression-level gap, not a design problem), just not filed there since it blocks M2 itself
+rather than M4/M5.
+
+Resolved by adding `pub effort: Option<Effort>` to `ChatRequest` (`crates/llm/src/types.rs`),
+symmetric with `temperature`: each provider reads the field it needs and ignores the other,
+exactly as §6.2.2 already says of `temperature` ("ignored for `ProviderKind::Anthropic`").
+`RoleRequest` (§6.3: "`ChatRequest` without `model`/`temperature`") is defined to also exclude
+`effort`, for the same reason it excludes `temperature`: both are router-resolved from the
+binding, not caller-supplied. The router computes `(temperature, effort)` once per call from
+`ProviderKind` and either the binding's explicit value or the per-role default table.
+
+Also: `Effort` itself is defined in `types.rs` rather than `router.rs` (where §6.3's code block
+places it), purely because `ChatRequest` needed it and `types.rs` (§6.1) is a lower module than
+`router.rs` (§6.3); `router.rs` uses `crate::types::Effort`. No shape change, just which file
+owns the `enum`.
+
+Two smaller gaps, resolved without a decision needed (simplest compliant choice per
+`CLAUDE.md`):
+
+- `LlmError::InvalidResponse` and `LlmError::Config` carry a `String` (spec names only the
+  variants, not their fields, for these two — `Status`'s and `RateLimited`'s shapes were
+  already spelled out).
+- `KeyProvider::get_key` and `UsageSink::record`/`UsageEvent` aren't given field-level shapes
+  in §6.3 beyond "a `KeyProvider`" / "a `UsageSink` trait ... writes `llm_usage`". `UsageEvent`
+  mirrors the `llm_usage` table columns (§5) minus `id`/`created_at`, which the sink
+  implementation (in `lifeagent-core`, M3/M5 per `usage.rs`'s existing stub) assigns.
+
+Provider mapping (`build_request_body`/`parse_response_body` in both `provider/*.rs`) is kept
+as pure functions separate from the HTTP-calling `ChatModel::complete`, so the "provider
+mapping test suites... with fixtures" `§14` done-when criterion is testable without a live or
+mocked HTTP server. Retry/backoff policy (timeout, retryable-status classification, `Retry-After`
+parsing, body-excerpt truncation) is similarly split into pure functions in `provider/mod.rs`
+and tested directly; the HTTP-calling glue around them is exercised only by real network use
+(out of scope for offline tests, per `CLAUDE.md`).
+
+Verification: `cargo build`, `cargo test`, `cargo clippy --all-targets -- -D warnings` and
+`cargo fmt --all -- --check` all pass for `lifeagent-llm`, `lifeagent-core`,
+`lifeagent-plugin-diet` and `lifeagent-cli` (122 tests total, including the new provider
+mapping fixture tests, router role-resolution tests, and `complete_json` repair-loop tests).
+`lifeagent-desktop` was not rebuilt in this session: the sandbox's apt mirror returned 404 for
+the WebKit/GTK dev packages M0's `DECISIONS.md` entry lists (mirror snapshot mismatch, not a
+code issue); M2 doesn't touch `apps/desktop` or `lifeagent-core`'s M3+ modules, so this doesn't
+gate M2's own done-when criteria.
