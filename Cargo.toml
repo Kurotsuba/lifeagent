@@ -28,6 +28,10 @@ keyring = "4"
 directories = "6"
 clap = { version = "4", features = ["derive"] }
 tempfile = "3"
+# Hides terminal input for `lifeagent-cli models set-key` (§11, §12: keys never touch the
+# screen or shell history). Small, focused, cross-platform (incl. Windows) — no reason to
+# hand-roll termios/console handling for one prompt.
+rpassword = "7"
 
 lifeagent-llm = { path = "crates/llm" }
 lifeagent-core = { path = "crates/core" }

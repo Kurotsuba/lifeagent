@@ -358,7 +358,11 @@ impl CoreApp {
         self.0.events.subscribe()
     }
 
-    fn plugin_context(&self) -> PluginContext {
+    /// Assembles a fresh [`PluginContext`]. Exposed (M6) so a composition root can reach
+    /// plugin-specific reads `CoreApp` itself has no business knowing about (e.g. the diet
+    /// plugin's own food table) without `core` depending on that plugin — see the dependency
+    /// rule in `CLAUDE.md`.
+    pub fn plugin_context(&self) -> PluginContext {
         PluginContext {
             db: self.0.db.clone(),
             events: self.0.events.clone(),

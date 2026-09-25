@@ -596,3 +596,86 @@ integration. The planning tests cover the §13 required cases:
 Unit tests cover every §8.10 violation and warning rule, the "is it time" rule across
 plan_time/day_boundary combinations, the settings check, and the backup (a row still in the
 WAL, one per day, retention, leftover `.tmp`).
+
+## 2026-09-25 — M6: closed. CLI wired to `CoreApp`
+
+§14 M6: all §11 subcommands wired to `CoreApp`; `lifeagent-cli` registers the diet plugin as
+its composition root. Done when, with a real API key, `say` logs a meal and `plan generate`
+produces a valid plan (manual check, noted here).
+
+**Bug found and fixed before it shipped: `models set-key` couldn't run in the order §11 lists
+it.** `CoreAppBuilder::build` builds a real `LlmRouter` as soon as `settings.models()` has a
+provider, which fetches that provider's key from the secret store immediately and fails if it
+isn't there yet — precisely the gap `set-key` exists to close. Since the CLI built one
+`CoreApp` up front for every subcommand, running `models set-json` (which stores the provider)
+and then `models set-key` for it (§11's own listed order) made `set-key` itself fail before it
+ever ran, while trying to build the app. Fixed by special-casing `Command::Models{action:
+SetKey}` in `main` to run before `CoreApp` is built at all, going straight to
+`KeyringSecretStore` — it needs no data dir, DB or router, only the OS credential store. This
+also makes `set-key` order-independent with `set-json`, not just fixed for the listed order.
+
+**Other decisions:**
+
+- **Data dir default**, per §3: `directories::ProjectDirs::from("", "", "LifeAgent").data_dir()`,
+  overridable with `--data-dir`. No default existed anywhere yet; `crates/cli/src/paths.rs`.
+- **`--mock`'s "`MockChatModel` that echoes"** (§11) is the real `lifeagent_llm::mock::
+  MockChatModel`, not a hand-rolled stand-in: one echo closure is queued right before each
+  `chat`/`say` turn, since the model always answers without tool calls, so
+  `CoreApp::send_message`'s loop makes exactly one call per turn. `--mock` is not wired into
+  plan generation — the planner role expects structured JSON an echo could never satisfy, and
+  §11 scopes `--mock` to smoke-testing plumbing, not the planner.
+- **Output format: pretty JSON for every subcommand except `chat`/`say`.** §11 only names JSON
+  explicitly for `today`; JSON everywhere else keeps the developer harness uniform and
+  scriptable, and doesn't contradict anything the spec says about the other subcommands.
+  `chat`/`say` print the reply text plus one bullet per activity, matching §11's own wording
+  ("prints reply and activities").
+- **`plan generate`/`show`/`revise` all default `--date` to tomorrow** (today's logical date +
+  1) when omitted. §11 doesn't specify a default; tomorrow is what a user actually wants from
+  each of these day to day, and matches the core tools' own default in the no-existing-plan
+  case (§7.8).
+- **`CoreApp::plugin_context` made `pub`** (was private, M3). `foods list` and `targets` need
+  a `PluginContext` to call into the diet plugin's own `FoodTable` and `intake::targets_for` —
+  `core` still never depends on `lifeagent-plugin-diet` (the type is core's own); this just
+  lets a composition root reach plugin-specific reads it has no other way to build, since
+  `PluginContext`'s other fields (`db`, `clock`, `llm`) aren't otherwise exposed off `CoreApp`.
+- **`foods list`** needed a way to list full food rows, not just names; `known_names` (§8.4,
+  for the parser prompt) only returns names. Added `FoodTable::list` alongside it, same
+  ordering (most used first).
+- **`Food` now derives `Serialize`** (plugin-diet), so `foods list` can print it directly;
+  `Macros` and `NutritionSource` already did.
+- **`targets`** builds a `NutritionTargets` the same way the diet plugin's own `today_card`
+  does (`intake::targets_for`, profile + latest weight + active goal, defaulting to Maintain
+  with no goal), erroring with a clear message if the profile or a weight is missing yet,
+  rather than printing a bare `null`.
+- **`models set-json`/`profile set-json` call `Utc::now()` directly**, not through a `Clock`.
+  `CoreApp` exposes no clock accessor (deliberately — `CLAUDE.md`'s "always get now from the
+  injected `Clock`" is about testable core/plugin logic); the CLI is a leaf composition root
+  with no time-dependent tests of its own, and the two throwaway example harnesses this
+  milestone replaces did the same.
+- **Added `rpassword`** (workspace dependency) for `models set-key`'s hidden prompt — §11 says
+  the key is "read from stdin, hidden"; hand-rolling terminal echo suppression across Windows
+  and Unix for one prompt isn't worth it. It requires a real controlling terminal (like `ssh`,
+  `git credential` prompts, etc.); it cannot be driven by piped stdin, so it wasn't exercised
+  by the automated verification below.
+- **Deleted the two throwaway example harnesses** (`crates/core/examples/chat.rs`,
+  `crates/plugin-diet/examples/try.rs`, both added just before this milestone): their own doc
+  comments said they were superseded by the M6 CLI, and everything they covered (chat, diet
+  logging, planning, the profile/goal seed) is now reachable through real subcommands.
+
+Verification: fmt, clippy (`-D warnings`, all targets) and all 277 workspace tests pass (one
+more than M5: `FoodTable::list`'s new unit test). Every subcommand was smoke-tested by hand
+against a scratch `--data-dir` with `--mock`: `say`/`chat` echo and print activities; `today`
+renders a `TodayView` with a null diet target before a profile exists; `profile set-json` then
+`show` round-trips; `plan generate`/`revise` surface `CoreError::NothingToPlan`/`NotFound` as
+clean errors before a profile+weight or an existing plan exist; `plan show` prints `null`
+without one; `foods list` prints `[]` empty; `targets` errors with a clear message before a
+profile+weight exist; `models set-json` then `set-key` (§11's listed order) both succeed, the
+latter without needing `CoreApp` to build first (see the bug above).
+
+**Not verified here, left for the user:** the §14 M6 "done when" manual check itself — a real
+provider key and a live model call — since this sandbox has neither an API key nor a working
+OS credential store (Linux keyring backend needs a D-Bus Secret Service, which isn't running
+here; same class of environment gap as M0's missing system packages). Whoever runs this next
+with a real key should confirm `say "早餐吃了两个鸡蛋和一杯牛奶"` logs a meal via
+`core_log_weight`/the diet tools and `plan generate` produces a plan within targets, then
+update this entry with the result.

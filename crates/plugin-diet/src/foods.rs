@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use lifeagent_core::clock::Clock;
 use lifeagent_core::plugin::{PluginContext, PluginError};
+use serde::Serialize;
 use sqlx::SqlitePool;
 use uuid::Uuid;
 
@@ -27,7 +28,7 @@ pub const MIGRATION_1: &str = "CREATE TABLE diet_foods (
   updated_at    TEXT NOT NULL
 )";
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Food {
     pub id: String,
     /// Canonical display name, in the user's language.
@@ -273,6 +274,19 @@ impl FoodTable {
                 .await?;
         Ok(names.into_iter().map(|(n,)| n).collect())
     }
+
+    /// Full food rows, most used first — the CLI's `foods list` inspection command (M6).
+    pub async fn list(&self, limit: u32) -> Result<Vec<Food>, PluginError> {
+        let rows: Vec<FoodRow> = sqlx::query_as(
+            "SELECT id, name, name_key, aliases_json, kcal, protein_g, carbs_g, fat_g, fiber_g,
+                    source, use_count
+             FROM diet_foods ORDER BY use_count DESC, name ASC LIMIT ?",
+        )
+        .bind(limit)
+        .fetch_all(&self.db)
+        .await?;
+        rows.into_iter().map(row_to_food).collect()
+    }
 }
 
 fn row_to_food(row: FoodRow) -> Result<Food, PluginError> {
@@ -482,5 +496,25 @@ mod tests {
 
         assert_eq!(table.known_names(150).await.unwrap(), vec!["a", "b"]);
         assert_eq!(table.known_names(1).await.unwrap(), vec!["a"]);
+    }
+
+    #[tokio::test]
+    async fn list_returns_full_rows_most_used_first_and_respects_limit() {
+        let (table, _env) = table().await;
+        let a = table
+            .insert("a", rice(), NutritionSource::LlmEstimate)
+            .await
+            .unwrap();
+        table
+            .insert("b", rice(), NutritionSource::LlmEstimate)
+            .await
+            .unwrap();
+        table.record_use(&a.id).await.unwrap();
+        // Re-fetch: `a`'s in-memory `use_count` is stale after `record_use`.
+        let a = table.find("a").await.unwrap().unwrap();
+        let b = table.find("b").await.unwrap().unwrap();
+
+        assert_eq!(table.list(150).await.unwrap(), vec![a.clone(), b]);
+        assert_eq!(table.list(1).await.unwrap(), vec![a]);
     }
 }
