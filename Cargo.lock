@@ -2612,6 +2612,7 @@ name = "lifeagent-desktop"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "directories",
  "lifeagent-core",
  "lifeagent-llm",
@@ -2623,6 +2624,7 @@ dependencies = [
  "tauri-plugin-autostart",
  "tauri-plugin-notification",
  "tauri-plugin-single-instance",
+ "tempfile",
  "tokio",
  "tracing",
  "tracing-appender",

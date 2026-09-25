@@ -27,3 +27,11 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 tracing-appender = { workspace = true }
 directories = { workspace = true }
+chrono = { workspace = true }
+
+[dev-dependencies]
+# Adds tauri's `test` feature (mock runtime, real IPC round-trips) on top of the main
+# dependency's `tray-icon` for test builds only — Cargo unions features across dependency
+# declarations of the same crate, so a release build never pulls this in.
+tauri = { version = "2", features = ["test"] }
+tempfile = { workspace = true }

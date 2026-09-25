@@ -6,9 +6,9 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
-use chrono::{DateTime, NaiveDate, Utc};
+use chrono::{DateTime, Datelike, NaiveDate, Utc};
 use lifeagent_llm::router::{
     LlmRouter, ModelsConfig, ProviderConfig, ProviderKind, RoleBinding, RoleRequest,
 };
@@ -45,10 +45,20 @@ const EMPTY_REPLY: &str = "（模型没有返回内容，请再试一次。）";
 const TOO_MANY_STEPS_REPLY: &str = "（处理步骤过多，已停止。请换个说法再试一次。）";
 
 /// The result of one `send_message` turn.
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize)]
 pub struct ChatTurn {
     pub reply: String,
     pub activities: Vec<String>,
+}
+
+/// One message in `get_history`'s result (§10.2): user/assistant only, tool call plumbing
+/// hidden. Past turns' `activities` aren't reconstructed here — see `docs/DECISIONS.md`'s
+/// M7.1-step-1 entry; only a *live* `send_message` response carries them (on `ChatTurn`).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct HistoryMessage {
+    pub role: MessageRole,
+    pub content: Option<String>,
+    pub created_at: DateTime<Utc>,
 }
 
 /// A logged weight, from the latest `body.weight_logged` event. §7.14 names this type but
@@ -139,8 +149,10 @@ impl CoreAppBuilder {
             clock: self.clock,
             settings,
             secrets: self.secrets,
-            router,
-            models_configured,
+            router_state: RwLock::new(Arc::new(RouterState {
+                router,
+                models_configured,
+            })),
             events,
             profile,
             goals,
@@ -191,14 +203,38 @@ impl CoreAppBuilder {
             return Ok((Arc::new(router), true));
         }
 
-        match settings.models().await? {
-            Some(config) => {
-                let key_provider = SecretKeyProvider(self.secrets.clone());
-                let router = LlmRouter::new(config, &key_provider, usage_sink)?;
-                Ok((Arc::new(router), true))
+        build_router_state(settings, &self.secrets, usage_sink).await
+    }
+}
+
+/// The non-override half of [`CoreAppBuilder::build_router`], factored out so
+/// [`CoreApp::reload_models`] can rebuild the router from the same logic after
+/// `save_models`/`set_api_key` change what's stored, without needing a `CoreAppBuilder` (which
+/// only ever exists at startup) or its test/CLI-only `chat_model_override`.
+async fn build_router_state(
+    settings: &Settings,
+    secrets: &Arc<dyn SecretStore>,
+    usage_sink: Arc<DbUsageSink>,
+) -> Result<(Arc<LlmRouter>, bool), CoreError> {
+    match settings.models().await? {
+        Some(config) => {
+            let key_provider = SecretKeyProvider(secrets.clone());
+            match LlmRouter::new(config, &key_provider, usage_sink.clone()) {
+                Ok(router) => Ok((Arc::new(router), true)),
+                // A stored config that can't build (e.g. the key isn't in the secret store
+                // right now) must not fail the caller outright — a shell needs a working
+                // `CoreApp` to reach Settings and fix it. Falls back to the same no-providers
+                // placeholder as "never configured."
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        "stored models config could not be used; treating as not configured"
+                    );
+                    Ok((Arc::new(unconfigured_router(usage_sink)), false))
+                }
             }
-            None => Ok((Arc::new(unconfigured_router(usage_sink)), false)),
         }
+        None => Ok((Arc::new(unconfigured_router(usage_sink)), false)),
     }
 }
 
@@ -220,14 +256,22 @@ fn unconfigured_router(usage_sink: Arc<DbUsageSink>) -> LlmRouter {
     LlmRouter::with_providers(config, HashMap::new(), usage_sink)
 }
 
+/// The router and whether it's backed by a real, working config — swapped as one unit by
+/// [`CoreApp::reload_models`] so a reader never sees a router paired with the wrong flag.
+struct RouterState {
+    router: Arc<LlmRouter>,
+    models_configured: bool,
+}
+
 struct CoreAppInner {
     db: SqlitePool,
     data_dir: PathBuf,
     clock: Arc<dyn Clock>,
     settings: Settings,
     secrets: Arc<dyn SecretStore>,
-    router: Arc<LlmRouter>,
-    models_configured: bool,
+    /// `std::sync::RwLock`, not `tokio`'s: every hold is a plain `Arc` clone with no `.await`
+    /// inside it, so a blocking lock is simpler and correct — see `router_state()`.
+    router_state: RwLock<Arc<RouterState>>,
     events: EventStore,
     profile: ProfileService,
     goals: GoalsService,
@@ -292,18 +336,49 @@ impl CoreApp {
     pub(crate) fn clock(&self) -> &Arc<dyn Clock> {
         &self.0.clock
     }
-    pub(crate) fn models_configured(&self) -> bool {
-        self.0.models_configured
+    /// The current `RouterState`. A plain `Arc` clone under a brief, non-`.await`-holding lock
+    /// — see the field's own doc comment.
+    fn router_state(&self) -> Arc<RouterState> {
+        self.0
+            .router_state
+            .read()
+            .expect("router_state lock poisoned")
+            .clone()
+    }
+
+    /// Whether the LLM router is backed by a real, working config right now. Exposed (M7) for
+    /// `get_app_state`; `scheduler.rs` also reads this internally to skip plan generation.
+    pub fn models_configured(&self) -> bool {
+        self.router_state().models_configured
     }
 
     fn require_models(&self) -> Result<(), CoreError> {
-        if self.0.models_configured {
+        if self.models_configured() {
             Ok(())
         } else {
-            Err(CoreError::Validation(
-                "models are not configured yet".into(),
-            ))
+            Err(CoreError::NotConfigured)
         }
+    }
+
+    /// Rebuilds the LLM router from whatever `settings.models()` holds right now and swaps it
+    /// in, so a `save_models`/`set_api_key` command takes effect for this already-running
+    /// `CoreApp` immediately — previously an open item (see `docs/DECISIONS.md`: M4's
+    /// "today_view works before models are configured" entry flagged this as "Open for M7").
+    /// Falls back to "not configured" exactly like `build()` does, rather than erroring, for the
+    /// same reason: a shell needs `CoreApp` to keep working so the user can fix Settings.
+    pub async fn reload_models(&self) -> Result<(), CoreError> {
+        let usage_sink = Arc::new(DbUsageSink::new(self.0.db.clone(), self.0.clock.clone()));
+        let (router, models_configured) =
+            build_router_state(&self.0.settings, &self.0.secrets, usage_sink).await?;
+        *self
+            .0
+            .router_state
+            .write()
+            .expect("router_state lock poisoned") = Arc::new(RouterState {
+            router,
+            models_configured,
+        });
+        Ok(())
     }
 
     /// The current version of the plan for `date`, if any.
@@ -342,6 +417,48 @@ impl CoreApp {
         self.0.plans.accept(date).await
     }
 
+    /// The most recent `limit` user/assistant messages, oldest first, for the Chat page's
+    /// history (§10.2's `get_history`).
+    pub async fn get_history(&self, limit: u32) -> Result<Vec<HistoryMessage>, CoreError> {
+        let messages = self.0.conversation.recent_visible(limit).await?;
+        Ok(messages
+            .into_iter()
+            .map(|m| HistoryMessage {
+                role: m.role,
+                content: m.content,
+                created_at: m.created_at,
+            })
+            .collect())
+    }
+
+    /// Soft-deletes a logged entry (§10.2's `delete_entry`) — any event, not just diet ones,
+    /// since the command is generic over event id.
+    pub async fn delete_entry(&self, id: &str) -> Result<(), CoreError> {
+        self.0.events.soft_delete(id).await?;
+        Ok(())
+    }
+
+    /// Records a body weight reading from the UI (§10.2's `log_weight`), same validation as the
+    /// `core_log_weight` chat tool (§7.8), always at "now" (the UI has no equivalent of that
+    /// tool's optional `measured_at`).
+    pub async fn log_weight(&self, kg: f64) -> Result<(), CoreError> {
+        if !(30.0..=300.0).contains(&kg) {
+            return Err(CoreError::Validation(format!(
+                "kg must be within 30..=300, got {kg}"
+            )));
+        }
+        self.0
+            .events
+            .append(
+                "body.weight_logged",
+                self.0.clock.now(),
+                serde_json::json!({ "kg": kg }),
+                crate::events::EventSource::Ui,
+            )
+            .await?;
+        Ok(())
+    }
+
     /// Starts the scheduler (§7.13): one tick immediately, then every 60 s, for the life of
     /// the runtime. Shells call this once.
     pub fn start_scheduler(&self) -> tokio::task::JoinHandle<()> {
@@ -366,7 +483,7 @@ impl CoreApp {
         PluginContext {
             db: self.0.db.clone(),
             events: self.0.events.clone(),
-            llm: self.0.router.clone(),
+            llm: self.router_state().router.clone(),
             clock: self.0.clock.clone(),
             settings: self.0.settings.clone(),
             profile: self.0.profile.clone(),
@@ -414,6 +531,21 @@ impl CoreApp {
     pub async fn logical_today(&self) -> Result<NaiveDate, CoreError> {
         let boundary = self.0.settings.day_boundary().await?;
         Ok(logical_date(self.0.clock.now(), boundary))
+    }
+
+    /// Token usage per LLM role for the current calendar month (§10.3's Settings usage
+    /// display). "Current month" is the UTC calendar month of `Clock::now()`, same as every
+    /// `created_at` timestamp it's computed from — a simplification worth revisiting only if a
+    /// non-UTC user actually notices the boundary landing a few hours off from their own
+    /// midnight.
+    pub async fn usage_summary(&self) -> Result<Vec<crate::usage::RoleUsage>, CoreError> {
+        let now = self.0.clock.now();
+        let month_start = NaiveDate::from_ymd_opt(now.year(), now.month(), 1)
+            .expect("the first of the month is always a valid date")
+            .and_hms_opt(0, 0, 0)
+            .expect("midnight is always a valid time")
+            .and_utc();
+        crate::usage::summary(&self.0.db, month_start).await
     }
 
     /// Everything the Today page shows (§7.14). Works before models are configured.
@@ -801,8 +933,99 @@ mod tests {
 
         assert!(matches!(
             app.send_message("你好").await,
-            Err(CoreError::Validation(_))
+            Err(CoreError::NotConfigured)
         ));
+    }
+
+    /// An `anthropic` `ModelsConfig` binding every role to the same model — enough to exercise
+    /// real router construction (provider lookup, key fetch) without a live network call.
+    fn anthropic_config() -> ModelsConfig {
+        let binding = RoleBinding {
+            provider_id: "anthropic".into(),
+            model: "claude-sonnet-5".into(),
+            temperature: None,
+            effort: None,
+        };
+        ModelsConfig {
+            providers: vec![ProviderConfig {
+                id: "anthropic".into(),
+                kind: ProviderKind::Anthropic,
+                base_url: "https://api.anthropic.com".into(),
+            }],
+            parser: binding.clone(),
+            planner: binding.clone(),
+            conversation: binding,
+        }
+    }
+
+    /// A composition root (M7's desktop shell, in particular) must be able to start even when a
+    /// previously-saved `models` config can't build right now — e.g. the OS keyring is
+    /// unreachable at this exact moment, though the key was set successfully before. `build()`
+    /// itself must still succeed; `models_configured` just reports `false`, same as "never
+    /// configured," so the shell can route to Settings instead of failing to launch at all.
+    #[tokio::test]
+    async fn stored_models_config_with_an_unreachable_key_falls_back_to_unconfigured() {
+        let dir = tempfile::tempdir().unwrap();
+        let clock = Arc::new(FixedClock::new(Utc::now()));
+        let secrets = Arc::new(MemorySecretStore::new());
+
+        let app = CoreAppBuilder::new(dir.path().to_path_buf())
+            .clock(clock.clone())
+            .secrets(secrets.clone())
+            .build()
+            .await
+            .unwrap();
+        assert!(!app.models_configured());
+
+        app.settings()
+            .set_models(&anthropic_config(), Utc::now())
+            .await
+            .unwrap();
+        // Deliberately no `secrets.set("anthropic", ...)`: the key is missing, as it would be
+        // if the OS keyring were unreachable at startup despite a config already on disk.
+
+        let app2 = CoreAppBuilder::new(dir.path().to_path_buf())
+            .clock(clock)
+            .secrets(secrets)
+            .build()
+            .await
+            .unwrap();
+        assert!(!app2.models_configured());
+    }
+
+    /// The M7.1 fix for the M4 entry's "Open for M7" note: `save_models`/`set_api_key` must take
+    /// effect on the already-running `CoreApp`, not just on the next app restart.
+    #[tokio::test]
+    async fn reload_models_picks_up_a_newly_saved_config_without_rebuilding_the_app() {
+        let (builder, _dir) = builder().await;
+        let app = builder.build().await.unwrap();
+        assert!(!app.models_configured());
+
+        app.settings()
+            .set_models(&anthropic_config(), Utc::now())
+            .await
+            .unwrap();
+        app.secrets().set("anthropic", "sk-test-key").unwrap();
+
+        app.reload_models().await.unwrap();
+
+        assert!(app.models_configured());
+    }
+
+    #[tokio::test]
+    async fn reload_models_falls_back_to_unconfigured_when_the_new_config_cannot_build() {
+        let (builder, _dir) = builder().await;
+        let app = builder.build().await.unwrap();
+
+        app.settings()
+            .set_models(&anthropic_config(), Utc::now())
+            .await
+            .unwrap();
+        // No `secrets.set("anthropic", ...)`: the key is missing.
+
+        app.reload_models().await.unwrap();
+
+        assert!(!app.models_configured());
     }
 
     #[tokio::test]

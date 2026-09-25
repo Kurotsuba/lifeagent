@@ -39,4 +39,10 @@ pub enum CoreError {
     /// or a weight is missing.
     #[error("nothing to plan: complete the profile and log a weight first")]
     NothingToPlan,
+
+    /// No LLM provider is configured yet (§7.2: "none (onboarding required)"). Distinct from
+    /// `Validation` so a shell (M7's `CommandError`) can map it to its own `not_configured`
+    /// code without matching on message text.
+    #[error("models are not configured yet")]
+    NotConfigured,
 }

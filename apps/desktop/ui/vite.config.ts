@@ -15,7 +15,14 @@ export default defineConfig({
   },
   envPrefix: ["VITE_", "TAURI_ENV_*"],
   build: {
-    target: ["es2021", "chrome100", "safari13"],
+    // `safari13` (the M0 scaffold's original, generic-Tauri-template value, alongside
+    // `chrome100` for Windows WebView2/Linux WebKitGTK) is dropped: CLAUDE.md scopes this
+    // project to Windows only, and keeping it hits a real bug in this toolchain's minifier —
+    // `vite build`'s esbuild pass fails on ordinary array destructuring (e.g. `const [a, b] =
+    // useState(...)`, introduced by M7.2's onboarding UI) with "Transforming destructuring to
+    // the configured target environment... is not supported yet" specifically when `safari13`
+    // is in the target list. Confirmed by reproducing with `minify: false`, which built fine.
+    target: ["es2021", "chrome100"],
     minify: !process.env.TAURI_ENV_DEBUG ? "esbuild" : false,
     sourcemap: !!process.env.TAURI_ENV_DEBUG,
   },

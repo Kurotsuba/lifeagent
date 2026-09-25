@@ -6,6 +6,31 @@
   "permissions": [
     "core:default",
     "notification:default",
-    "autostart:default"
+    "autostart:default",
+    "allow-get-app-state",
+    "allow-complete-onboarding",
+    "allow-send-message",
+    "allow-get-history",
+    "allow-get-today",
+    "allow-get-plan",
+    "allow-generate-plan",
+    "allow-accept-plan",
+    "allow-delete-entry",
+    "allow-get-profile",
+    "allow-save-profile",
+    "allow-get-weight-goal",
+    "allow-save-weight-goal",
+    "allow-log-weight",
+    "allow-preview-targets",
+    "allow-get-settings",
+    "allow-save-settings",
+    "allow-get-models",
+    "allow-save-models",
+    "allow-set-api-key",
+    "allow-has-api-key",
+    "allow-test-model",
+    "allow-get-memory",
+    "allow-delete-memory",
+    "allow-get-usage-summary"
   ]
 }

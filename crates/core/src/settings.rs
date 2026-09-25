@@ -109,6 +109,25 @@ impl Settings {
         self.set_json("day_boundary", &format_hhmm(t), now).await
     }
 
+    /// Validates and stores `plan_time` and `day_boundary` together, against each other rather
+    /// than against whatever was stored before. A caller changing both at once (§10.2's
+    /// `save_settings`) can't use `set_plan_time` then `set_day_boundary` safely: each checks
+    /// only the *other's currently-stored* value, so e.g. moving both several hours earlier can
+    /// be rejected by whichever setter runs first even though the final pair is valid. This
+    /// checks the new pair directly, so there's no such order dependency.
+    pub async fn set_plan_time_and_day_boundary(
+        &self,
+        plan_time: NaiveTime,
+        day_boundary: NaiveTime,
+        now: DateTime<Utc>,
+    ) -> Result<(), CoreError> {
+        check_plan_time(plan_time, day_boundary)?;
+        self.set_json("plan_time", &format_hhmm(plan_time), now)
+            .await?;
+        self.set_json("day_boundary", &format_hhmm(day_boundary), now)
+            .await
+    }
+
     pub async fn notifications_enabled(&self) -> Result<bool, CoreError> {
         Ok(self
             .get_json::<bool>("notifications_enabled")
@@ -214,6 +233,63 @@ mod tests {
         assert_eq!(
             settings.plan_time().await.unwrap(),
             parse_hhmm("04:00").unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn set_plan_time_and_day_boundary_together_rejects_an_invalid_new_pair() {
+        let (pool, _dir) = crate::db::test_pool().await;
+        let settings = Settings::new(pool);
+
+        assert!(settings
+            .set_plan_time_and_day_boundary(
+                parse_hhmm("03:00").unwrap(),
+                parse_hhmm("04:00").unwrap(),
+                now()
+            )
+            .await
+            .is_err());
+        // Neither value was written.
+        assert_eq!(
+            settings.plan_time().await.unwrap(),
+            parse_hhmm("21:00").unwrap()
+        );
+        assert_eq!(
+            settings.day_boundary().await.unwrap(),
+            parse_hhmm("04:00").unwrap()
+        );
+    }
+
+    /// The order-dependency hazard `set_plan_time_and_day_boundary` exists to avoid: starting at
+    /// the defaults (21:00 / 04:00), moving both several hours earlier to 03:00 / 02:00 is a
+    /// valid final pair, but calling `set_plan_time` then `set_day_boundary` separately would
+    /// reject at the first step (03:00 is earlier than the *old*, still-04:00, day_boundary).
+    #[tokio::test]
+    async fn set_plan_time_and_day_boundary_together_avoids_the_single_setter_order_hazard() {
+        let (pool, _dir) = crate::db::test_pool().await;
+        let settings = Settings::new(pool);
+
+        assert!(settings
+            .set_plan_time(parse_hhmm("03:00").unwrap(), now())
+            .await
+            .is_err());
+
+        settings
+            .set_plan_time_and_day_boundary(
+                parse_hhmm("03:00").unwrap(),
+                parse_hhmm("02:00").unwrap(),
+                now(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            settings.plan_time().await.unwrap(),
+            parse_hhmm("03:00").unwrap()
+        );
+        assert_eq!(
+            settings.day_boundary().await.unwrap(),
+            parse_hhmm("02:00").unwrap()
         );
     }
 

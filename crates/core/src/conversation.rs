@@ -150,6 +150,24 @@ impl ConversationStore {
         rows.into_iter().map(Self::row_to_message).collect()
     }
 
+    /// The most recent `limit` non-tool messages (user/assistant only), oldest first — for the
+    /// Chat page's history (§10.2's `get_history`), which never shows tool call/result
+    /// plumbing. Filtering at the SQL level, not after `recent`, so `limit` counts visible
+    /// messages rather than being reduced by however many tool rows happened to be interleaved.
+    pub async fn recent_visible(&self, limit: u32) -> Result<Vec<StoredMessage>, CoreError> {
+        let rows: Vec<MessageRow> = sqlx::query_as(
+                "SELECT id, role, content, tool_calls_json, tool_call_id, tool_name, created_at FROM (
+                     SELECT rowid, id, role, content, tool_calls_json, tool_call_id, tool_name, created_at
+                     FROM messages WHERE role != 'tool' ORDER BY rowid DESC LIMIT ?
+                 ) ORDER BY rowid ASC",
+            )
+            .bind(limit)
+            .fetch_all(&self.db)
+            .await?;
+
+        rows.into_iter().map(Self::row_to_message).collect()
+    }
+
     /// The history window sent to the conversation model (§7.10): the last 30 stored
     /// messages, trimmed so the window starts at a `user` message — never with an orphan
     /// `tool` message at the front.
@@ -305,5 +323,30 @@ mod tests {
         // The oldest 5 of the 35 fell outside the window.
         assert_eq!(window[0].content.as_deref(), Some("第 5 条"));
         assert_eq!(window[29].content.as_deref(), Some("第 34 条"));
+    }
+
+    #[tokio::test]
+    async fn recent_visible_hides_tool_messages_without_reducing_the_visible_count() {
+        let (store, _dir) = store().await;
+        let first = store.append(user("第一条")).await.unwrap();
+        store.append(tool("工具结果", "call_1")).await.unwrap();
+        let second = store.append(assistant("第二条回复")).await.unwrap();
+
+        let visible = store.recent_visible(2).await.unwrap();
+
+        assert_eq!(visible, vec![first, second]);
+    }
+
+    #[tokio::test]
+    async fn recent_visible_returns_oldest_first_within_the_limit() {
+        let (store, _dir) = store().await;
+        store.append(user("一")).await.unwrap();
+        store.append(tool("工具结果", "call_1")).await.unwrap();
+        let third = store.append(assistant("二")).await.unwrap();
+        let fourth = store.append(user("三")).await.unwrap();
+
+        let visible = store.recent_visible(2).await.unwrap();
+
+        assert_eq!(visible, vec![third, fourth]);
     }
 }

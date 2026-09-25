@@ -19,6 +19,13 @@ pub trait SecretStore: Send + Sync {
     fn get(&self, provider_id: &str) -> Result<Option<String>, CoreError>;
     fn set(&self, provider_id: &str, key: &str) -> Result<(), CoreError>;
     fn delete(&self, provider_id: &str) -> Result<(), CoreError>;
+
+    /// Whether a key is set, without handing the key value itself back to the caller (§10.2's
+    /// `has_api_key`: Settings shows presence, never the key). Default-implemented in terms of
+    /// `get` so neither impl below needs to change.
+    fn has(&self, provider_id: &str) -> Result<bool, CoreError> {
+        Ok(self.get(provider_id)?.is_some())
+    }
 }
 
 /// Stores API keys in the OS credential store (Windows Credential Manager, macOS Keychain,
@@ -147,6 +154,14 @@ mod tests {
     fn memory_store_delete_of_missing_key_is_not_an_error() {
         let store = MemorySecretStore::new();
         assert!(store.delete("never-set").is_ok());
+    }
+
+    #[test]
+    fn has_reports_presence_without_the_default_impl_leaking_the_key() {
+        let store = MemorySecretStore::new();
+        assert!(!store.has("openai").unwrap());
+        store.set("openai", "sk-test").unwrap();
+        assert!(store.has("openai").unwrap());
     }
 
     #[test]

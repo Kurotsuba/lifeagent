@@ -715,3 +715,347 @@ org.freedesktop.Secret.Service.SetAlias "default" "objectpath
 survive the daemon exiting, so this needs redoing per shell session — fine for one-off
 verification, not something the app or `lifeagent-cli` needs to know or do anything about,
 since the real target platform (Windows Credential Manager) has none of these issues.
+
+## 2026-09-25 — M7.1 step 1: `CommandError` mapping + `CoreError::NotConfigured`
+
+`docs/PHASE1_SPEC.md` §10.2 gives `CommandError { code, message }` with codes `not_configured`,
+`auth`, `llm`, `invalid_input`, `not_found`, `internal`, and says `message` is "already in
+zh-CN." Two things needed resolving before `apps/desktop/src-tauri/src/error.rs` could implement
+`From<CoreError> for CommandError`.
+
+**"Models not configured" needed its own `CoreError` variant.** `CoreApp::require_models`
+(M3/M4) returned `CoreError::Validation("models are not configured yet")` — the only way to
+recognize this specific case at the command boundary would have been matching on that message
+string, which breaks silently if the text ever changes. Added `CoreError::NotConfigured` (no
+payload) instead; `require_models` returns it directly, and it maps to `CommandError`'s
+`not_configured` code with no string matching. The one existing test asserting
+`Err(CoreError::Validation(_))` (`app.rs`) now asserts `Err(CoreError::NotConfigured)`.
+`PluginError::from(CoreError)` (§7.7, M3) already has a catch-all arm, so the new variant falls
+through to `PluginError::Other` there unchanged — a tool call can't run without models anyway.
+
+**`invalid_input` gets a generic zh-CN message, not each `CoreError::Validation`'s own text.**
+`CoreError::Validation` carries free-form English detail from a dozen call sites across
+`profile.rs`, `goals.rs`, `memory.rs`, `settings.rs`, `plan.rs`, etc. (e.g. "height_cm must be
+within 120..=230, got 119.9"). Translating each one properly needs either a structured
+sub-code per validation rule or a message-keyed lookup table — real work, and exactly what §14
+M8 already lists as its own milestone item ("Error messages in zh-CN for every `CommandError`").
+For M7.1, every `CoreError::Validation` maps to one static zh-CN message
+("输入内容有误，请检查后重试。"); the original English detail is kept at `tracing::debug!`, not
+dropped, so it's still available for development. Revisit in M8 with per-rule messages once the
+UI forms exist to make that detail actionable to a user (which field, which bound).
+
+Also mapped: `LlmError::Auth` → `auth` (the variant already exists, so no HTTP-status sniffing
+was needed); `LlmError::Config` and `CoreError::NotConfigured` both → `not_configured` (a router
+built with no provider, and a provider missing its key, are both "finish configuring this"
+states from the user's point of view); every other `CoreError`/`LlmError` variant → `internal`/
+`llm` respectively, logged at `error!` (no personal data in any of them) since their detail
+can't reach the user through a single generic message anyway.
+
+Verification: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D
+warnings`, `cargo test --workspace` all pass (287 tests: +9 for `error.rs`'s new mapping tests,
++0 net elsewhere since the one changed assertion is a rename, not an addition). `CommandError`
+itself is `#[allow(dead_code)]` for now — nothing constructs it yet outside its own tests, since
+`commands.rs` (the rest of M7.1) is what will actually call `.into()` on a `CoreError`. Remove
+the allow once that lands.
+
+## 2026-09-25 — M7 cross-cutting infra step 2: composition root; two real bugs found by smoke-testing it
+
+`docs/PHASE1_SPEC.md` §10.1: build `CoreApp` (with `SystemClock`, `KeyringSecretStore`, the diet
+plugin) in `setup()`, manage it as Tauri state, start the scheduler. Added
+`apps/desktop/src-tauri/src/paths.rs` (mirrors `lifeagent-cli`'s `default_data_dir`) and wired
+`lib.rs`'s `run()` accordingly. Smoke-tested against this machine's real data dir (from M6's own
+manual verification — a real, working `models` config, saved before this session) rather than a
+throwaway one, specifically to exercise a first launch under real conditions. That surfaced two
+bugs, both fixed here rather than filed, since neither needed a judgment call:
+
+**Bug 1: a stored `models` config that can't build failed `CoreAppBuilder::build()` outright.**
+This machine's keyring session had already expired (see the M6 entry's WSL keyring workaround —
+it doesn't survive a shell restart), so `LlmRouter::new` failed with `no API key set for
+provider "anthropic"` even though a valid config was on disk. `build_router` (M3) only had two
+cases, "config present, build it" and "no config, use the placeholder" — a config present but
+unusable propagated its `LlmError` straight out of `build()`, which would crash the whole
+desktop app before it could even reach a window, let alone Settings, to fix it. Added a third
+outcome: a build failure on a *stored* config logs a warning and falls back to the same
+no-providers placeholder as "never configured," so `models_configured` is `false` and the app
+still starts. This is the direct, code-level counterpart to the M4 entry's "**Open for M7**"
+note about `models_configured` existing so read paths don't have to assume a working router.
+
+**Bug 2: `start_scheduler()` panicked when called after `tauri::async_runtime::block_on`
+returned.** `CoreApp::start_scheduler` (M5) calls `tokio::spawn` directly, which needs an active
+Tokio runtime context (a `Handle`) to find its reactor. Building `CoreApp` inside
+`tauri::async_runtime::block_on(...)` provides that context for the duration of the `block_on`
+call itself, but `setup()`'s own thread has none once `block_on` returns — calling
+`start_scheduler()` there panicked with "there is no reactor running, must be called from the
+context of a Tokio 1.x runtime." Fixed by moving the `start_scheduler()` call inside the same
+`block_on` future as `CoreAppBuilder::build()`, so both `tokio::spawn` call sites (the event
+dispatcher `build()` starts internally, and the scheduler loop) run while that context is live.
+
+Verification: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D
+warnings`, `cargo test --workspace` all pass (288 tests: +1 in `lifeagent-core` for Bug 1's
+fallback case). Manually ran the real `lifeagent-desktop` binary (`GDK_BACKEND=x11`, no `--mock`,
+this machine's actual data dir, `RUST_LOG=info`) for 8 seconds: no panic, the fallback warning
+logged as expected, process still running when the timeout signaled it — confirms `setup()`
+completes and the scheduler's loop is alive under real conditions, not just against a fresh
+temp dir. No change to the user's stored `models` config or keyring state was made or needed.
+
+## 2026-09-25 — M7 cross-cutting infra step 3: `AppEvent` → webview forwarding
+
+`docs/PHASE1_SPEC.md` §10.1: forward `AppEvent`s as Tauri events `data-changed`, `plan-ready`,
+`plan-failed`. The spec names the three event channels but not their JSON payload shape, so one
+was picked directly from each `AppEvent` variant's own fields (`apps/desktop/src-tauri/src/
+events.rs`):
+
+- `data-changed`: `{ event_type, logical_date }`
+- `plan-ready`: `{ date, version, trigger }`
+- `plan-failed`: `{ date, error }`
+
+`tauri::async_runtime::spawn(...)` is used for the forwarding task itself, not raw
+`tokio::spawn` — unlike `tokio::spawn` (Bug 2 in the step-2 entry above), Tauri's own wrapper
+spawns onto its globally-held runtime handle rather than reading a thread-local "current"
+context, so it works correctly when called from `setup()`'s plain thread *after*
+`tauri::async_runtime::block_on` has already returned (confirmed by the same manual 8-second run
+as step 2: no panic, forwarder task alive).
+
+**The event → payload mapping is a separate pure function (`payload_for`), not inlined in the
+spawned loop.** The loop itself (subscribe, match, call Tauri's `emit`) needs a live `AppHandle`
+and isn't practically unit-testable without Tauri's `test` feature and its `MockRuntime` — a real
+webview is also not available in this Linux/WSL2 sandbox to verify against (see the M7_SCOPE.md
+environment caveat). Pulling the actual mapping logic out into `payload_for(&AppEvent) ->
+(&'static str, Value)` means the only real "logic" here — which channel name and which JSON keys
+each variant produces — has direct unit test coverage (3 new tests in
+`lifeagent-desktop`) instead of relying on "it compiles" for a change that's otherwise opaque to
+automated verification.
+
+Verification: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D
+warnings`, `cargo test --workspace` all pass (291 tests: +3 for `payload_for`). Manually ran the
+real binary again (same conditions as step 2): no panic, forwarder task starts cleanly. Full
+end-to-end confirmation that an emitted event actually reaches a webview is deferred to M7.6
+(needs a real window and at least one M7.1 command to trigger a state change from), same as the
+tray/notification/autostart pieces already flagged as Windows-only manual verification.
+
+## 2026-09-25 — M7 cross-cutting infra step 4: plan notifications; click-to-focus deferred
+
+`docs/PHASE1_SPEC.md` §10.1: on `PlanReady` (trigger `schedule`) and `PlanFailed`, show a
+Windows notification if `notifications_enabled`, titled "明日计划已生成"/"明日计划生成失败",
+body = first sentence of the summary / a short error; clicking focuses the main window on
+Today. Implemented in `apps/desktop/src-tauri/src/notify.rs` as its own subscriber task
+(`core_app.subscribe()` again — a second, independent receiver on the same broadcast channel
+events.rs already reads from), gated on `settings.notifications_enabled()`.
+
+**Clicking to focus the window is not implemented.** `tauri-plugin-notification` 2.4's desktop
+backend (`src/desktop.rs`) wraps `notify_rust`, whose builder exposes only
+title/body/icon/sound — no activation/click callback. Reaching real click-through on Windows
+needs the platform's own toast API (`winrt` `ToastNotificationManager`, handling
+`ToastActivated` outside this plugin entirely), which is out of scope for this cross-cutting
+step and, being Windows-only, isn't something this Linux/WSL2 sandbox could verify even if
+implemented. Left as a known gap; revisit when M7.5's window-focus plumbing (tray's 打开, single
+instance) exists to hang it off of, or in M8.
+
+**`PlanFailed`'s notification body is a fixed zh-CN string, not `AppEvent::PlanFailed.error`
+itself.** That field is `CoreError::to_string()` from the scheduler (`scheduler.rs`), i.e.
+English, developer-facing text ("LLM error: authentication failed", etc.) — not something to
+put in a user's toast. Same call as `error.rs`'s `CommandError` mapping (M7.1 step 1): a
+generic zh-CN message now, the underlying detail already reaches a developer via the
+scheduler's own `tracing::warn!`, and per-cause zh-CN text is M8 work.
+
+**`PlanReady` only notifies for `trigger: Schedule`.** A manual or revision generation is
+something the user just did themselves in the UI (§10.3's 立即生成/重新生成 buttons) and already
+sees the result on screen; a toast for that would be redundant. This matches the cross-cutting
+plan already written down before starting M7 (`docs/M7_SCOPE.md`).
+
+The event→title/date mapping (`notification_target`) and the summary-truncation helper
+(`first_sentence`) are pure functions with their own unit tests, for the same reason as step 3's
+`payload_for`: the surrounding task needs a live `AppHandle` and a real OS notification backend
+neither exist in this sandbox to verify against.
+
+Verification: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D
+warnings`, `cargo test --workspace` all pass (298 tests: +7 in `lifeagent-desktop`). Manually ran
+the real binary again (same conditions as steps 2–3): no panic, all three background tasks
+(scheduler, event forwarder, notification listener) start cleanly. Actually seeing a toast fire
+needs a real `PlanReady`/`PlanFailed` event, which needs at least one M7.1 command (or a real
+plan generation) to trigger — deferred to M7.6 like the rest of this sandbox's Windows-only
+manual-verification items.
+
+## 2026-09-25 — M7.1: `commands.rs` — all §10.2 commands, router reload, and a real ACL bug found
+
+`docs/PHASE1_SPEC.md` §10.2: every command in its table, each a thin wrapper around an existing
+or small new `CoreApp` method. Several things had to be resolved or built beyond "wire it up"
+before the table's commands could actually work.
+
+**Router reload — closing M4's "Open for M7" item.** `CoreApp` built its `LlmRouter` once, in
+`CoreAppBuilder::build`, and had no way to rebuild it afterward. That made `save_models`/
+`set_api_key` pointless on an already-running app: onboarding's step 3 saves a config and a key,
+then immediately calls `test_model` — which would still hit the stale (usually unconfigured)
+router built at startup, exactly the gap M4's entry flagged. Fixed in `crates/core/src/app.rs`:
+- `CoreAppInner`'s `router: Arc<LlmRouter>` + `models_configured: bool` fields became one
+  `router_state: std::sync::RwLock<Arc<RouterState>>` (a small struct pairing the two, swapped as
+  one unit so a reader never sees a router paired with the wrong flag).
+- `std::sync::RwLock`, not `tokio::sync::RwLock`: every hold is just an `Arc` clone with no
+  `.await` inside it, so a blocking lock is simpler and correct — no need to make
+  `plugin_context()`/`models_configured()`/`require_models()` async, which would have rippled
+  into every call site (`scheduler.rs`, `lifeagent-cli`, the orchestrator loop).
+- The non-override half of `CoreAppBuilder::build_router` (settings lookup → build → fallback to
+  unconfigured on failure, from the step-2 entry above) was factored into a free function,
+  `build_router_state`, so the new `pub async fn CoreApp::reload_models(&self)` can reuse it
+  without needing a `CoreAppBuilder` (which only ever exists at startup) or its test/CLI-only
+  `chat_model_override`.
+- `models_configured()` changed from `pub(crate)` to `pub` (needed by `get_app_state`).
+- `save_models` and `set_api_key` both call `reload_models()` after writing, unconditionally —
+  it's a harmless no-op rebuild if nothing's actually changed for the router, and there's no
+  reason to make the caller reason about which of the two onboarding might call first.
+
+**A real Tauri ACL bug, found by testing commands through actual IPC rather than as plain Rust
+calls.** Every other test in this workspace calls service methods directly; that proves
+`CoreApp`'s logic is correct but not that a `#[tauri::command]` is reachable from a real webview
+at all. Added `apps/desktop/src-tauri/tests/commands.rs`, using `tauri::test`'s mock runtime
+(`tauri = { features = ["test"] }` as a **dev**-dependency, unioned with the main dependency's
+`tray-icon` feature for test builds only) to send real `InvokeRequest`s through the real
+`invoke_handler` and get real JSON back. Every single command it tried came back
+`"<command> not allowed. Plugin not found"` — Tauri 2's permission system denies every app-level
+command by default, and `capabilities/default.json` (from M0's scaffold) only granted
+`core:default`/`notification:default`/`autostart:default`, never anything for the app's own
+commands. **This means the real production app was equally broken**: the frontend could not
+have called a single command in `commands.rs`, onboarding included, until this was fixed — not a
+test-only artifact.
+
+Fixed with the mechanism `tauri-build` provides for exactly this (`tauri_build::AppManifest::
+commands(&[...])`, which autogenerates an `allow-<command>`/`deny-<command>` permission pair per
+name, in kebab-case, e.g. `allow-get-app-state` for `get_app_state`):
+- `build.rs` now lists every command name in a `COMMANDS` const and passes it through
+  `Attributes::new().app_manifest(AppManifest::new().commands(COMMANDS))`. A doc comment on the
+  const says to keep it in sync with `commands.rs` — there's no way to derive one from the other
+  automatically, and a command left out here is silently unreachable (denied), not a compile
+  error.
+- `capabilities/default.json` grants each generated `allow-<command>` permission.
+- The test itself needed `tauri::generate_context!()` (the project's real `tauri.conf.json` +
+  `capabilities/`), not `tauri::test::mock_context`'s bare-bones one — permission enforcement is
+  identical regardless of runtime, so a mock context with no capabilities proves nothing (every
+  command would fail the same "Plugin not found" way for a different, uninteresting reason: no
+  ACL manifest registered *at all*, vs. one that's registered but doesn't grant the command).
+- The request's `url` must be `"tauri://localhost"`, not `"http://tauri.localhost"` (the doc
+  example's "alternatively" option) — the latter resolves to `Origin::Remote`, which
+  `capabilities/default.json`'s default `ExecutionContext::Local` doesn't match, so every command
+  was still denied even after the permissions existed, just with a different, more specific
+  error naming the capability that almost-but-didn't match.
+
+**`get_history`'s `limit` needed a new store method, not a post-filter.** Filtering
+`ConversationStore::recent(limit)`'s result down to non-tool messages *after* the query would
+make `limit` mean "however many visible messages happen to survive whatever the raw row count
+was," shrinking unpredictably whenever tool messages were interleaved. Added
+`ConversationStore::recent_visible(limit)`, filtering `role != 'tool'` inside the same
+ROWID-windowed subquery `recent` already uses, so `limit` means what the command's caller expects
+it to mean.
+
+**`save_settings` needed one atomic setter, not two.** `Settings::set_plan_time` and
+`set_day_boundary` (§7.2, B3) each validate against the *other's currently-stored* value — fine
+for changing one at a time, but a caller changing both together (exactly what a Settings form
+does) hits an order dependency: moving both several hours earlier (e.g. 21:00/04:00 →
+03:00/02:00) is a valid final pair, but calling `set_plan_time` first is rejected against the
+still-04:00 stored boundary. Added `Settings::set_plan_time_and_day_boundary(plan_time,
+day_boundary, now)`, validating the new pair directly against each other, with no dependency on
+whatever was stored before. `save_settings` uses this instead of the two single-field setters.
+
+**`SecretStore` gained a default-implemented `has()`.** `has_api_key` needs presence, not the key
+itself — `has(&self) -> Result<bool, CoreError> { Ok(self.get(id)?.is_some()) }` as a trait
+default means neither `KeyringSecretStore` nor `MemorySecretStore` needed changing, and the key
+value never has to flow through a caller that only wanted a yes/no.
+
+**`preview_targets`'s and settings' JSON boundaries.** `ChatTurn` and `MemoryNote` gained
+`Serialize` (needed to cross the command boundary; neither had it before since `send_message`'s
+and `memory().list()`'s only prior callers were Rust code). `RoleUsage` (new, in `usage.rs`
+alongside a new `summary(db, since)` query function) mirrors `llm_usage`'s role/token columns;
+`CoreApp::usage_summary()` computes "current calendar month" from `Clock::now()`'s UTC month —
+a simplification worth revisiting only if a non-UTC user actually notices the boundary landing a
+few hours off their own midnight. `SettingsDto`/`AppState`/`TestModelResult` are desktop-local
+DTOs (not added to `core`'s public surface), since they're UI-shaped groupings with no other
+caller, unlike `Profile`/`WeightGoal`/`StoredPlan`/etc., which are reused directly.
+
+**`test_model` bypasses the orchestrator entirely** — one `RoleRequest` with a fixed "Reply with
+OK." message, no history, no tools, nothing persisted — since it's a connectivity check, not a
+conversation turn. Its `error` field reuses `CommandError`'s own `LlmError` mapping (step 1) for
+the message text, rather than duplicating that logic.
+
+**`autostart`'s OS-level registration is explicitly out of scope here.** `save_settings` persists
+the `autostart` boolean; actually calling `tauri_plugin_autostart`'s enable/disable needs an
+`AppHandle`-level autostart manager, which belongs with M7.5's tray work (per `docs/M7_SCOPE.md`),
+not this step.
+
+Verification: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D
+warnings`, `cargo test --workspace` all pass — 312 tests total (up from 297 before this step):
++10 in `crates/core` (`reload_models` ×2, `usage::summary` ×3, `recent_visible` ×2,
+`set_plan_time_and_day_boundary` ×2, `has` ×1), +5 real-IPC tests in
+`apps/desktop/src-tauri/tests/commands.rs`. Manually ran the real `lifeagent-desktop` binary
+again against this machine's actual data dir: no panic, ran the full timeout window.
+
+## 2026-09-25 — M7.2: Onboarding UI; a real minifier bug found and fixed
+
+`docs/PHASE1_SPEC.md` §10.3: three-step blocking onboarding (基本信息 / 目标 / 模型), gated on
+`get_app_state().onboarding_complete`. Built the whole frontend layer for it — `App.tsx` routing,
+`api/types.ts` + `api/commands.ts` (typed `invoke()` wrappers), `onboarding/` (wizard container
++ three step components), and the zh-CN strings it needs, per CLAUDE.md's thin-view-layer rule
+(no business logic beyond what the components need to hold as they collect input).
+
+**A real production bug, again found by actually building rather than trusting `tsc`.**
+`npm run build` (used by `beforeBuildCommand`, i.e. every real release build) failed with
+esbuild's minifier erroring "Transforming destructuring to the configured target environment...
+is not supported yet" on ordinary code like `const [preview, setPreview] = useState(null)` — the
+first real destructuring this project's frontend has ever had, since the M0 placeholder page used
+none. Bisected by toggling `minify: false` (what `TAURI_ENV_DEBUG` selects): the build succeeded
+without minification, isolating the bug to Vite 8's default bundler (`rolldown`, evidenced by the
+stack trace) combined with the `safari13` target the M0 scaffold's `vite.config.ts` carried over
+from Tauri's generic project template. Fixed by dropping `safari13` from the build target — this
+project targets Windows only (CLAUDE.md's own first line), so macOS/Safari compatibility was
+never actually a requirement here, unlike a template meant to cover every Tauri platform.
+Verified: `npm run build` (real, minified) now produces a working bundle, `600KB → 240KB`
+minified confirming minification is actually running, not just not-crashing.
+
+**Layout bug caught by screenshotting the running app, not just reading the code.** The
+onboarding container centered its content vertically (`justify-center`) inside the fixed
+1100×720 window. Step 1's form is taller than that, so with no scroll, the step indicator and the
+下一步/上一步 buttons were pushed off-screen entirely — the user would have had no way to
+proceed past onboarding at all. Fixed by restructuring to a flex column: a scrollable content
+area above a fixed footer holding the navigation buttons, so the buttons stay reachable
+regardless of how tall a given step's form is.
+
+**Verification without a way to click the real window.** This sandbox has no `xdotool`/
+`ydotool`/equivalent installed, and installing one needs a password this session doesn't have —
+so the golden path (fill in three steps, finish) could not be driven through the actual UI.
+Compensated with: (1) screenshotting the running app at each step by temporarily forcing the
+wizard's initial `step` state and `sameModelForAll` default, confirming all three steps and both
+the shared-model and per-role-model layouts render correctly with the right zh-CN labels, then
+reverting those temporary edits exactly; (2) extending `tests/commands.rs` with real-IPC tests
+for every onboarding command that didn't already have one (`save_weight_goal`/`get_weight_goal`
+round-trip, `complete_onboarding` flipping `get_app_state`, `preview_targets` against a valid
+profile, and `test_model` resolving `{ ok: false, error: Some(...) }` rather than rejecting when
+nothing is configured — the case onboarding's own connection test hits before anything is saved).
+`test_model` is deliberately not exercised against a real provider in any automated test
+(CLAUDE.md: never call a real LLM in tests); that stays a manual, real-network check, same as
+M6's own real-API-key verification.
+
+**`test_model` is called for all three roles on every 测试连接 click, not deduped by
+provider+model.** When `sameModelForAll` is on (the default), the three calls are identical
+requests; the redundancy costs one connectivity check's worth of extra latency in exchange for
+not having to reason about which (role, model) pairs are actually distinct. §10.3's own
+suggested role defaults (opus/sonnet/haiku for planner/conversation/parser) mean a user who
+unchecks "same model for all" is exactly the case where testing all three actually matters.
+
+**`ModelsConfig`'s `ProviderKind::OpenAiCompatible` serializes as `"open_ai_compatible"`, not
+`"openai_compatible"`.** Verified directly (a throwaway `serde_json::to_string` check), not
+guessed from the natural English spelling — serde's snake_case rename splits at every capital,
+so "OpenAiCompatible" splits into "Open"/"Ai"/"Compatible". Documented inline in `api/types.ts`
+so nobody re-guesses it wrong later.
+
+**Everything is persisted only at the very end (完成), except the model config being tested,
+which is saved as part of 测试连接 itself.** `save_profile`/`log_weight`/`save_weight_goal`/
+`complete_onboarding` all fire from `handleFinish`, since none of the earlier steps need their
+data durable yet — `preview_targets` and `test_model` both work against in-memory draft state or
+a just-saved candidate config, not anything persisted early. A "tested successfully" flag is
+invalidated (`modelSignature`, a JSON snapshot of every model-related field) whenever the model
+step's fields change after a successful test, so editing a model name after testing correctly
+re-disables 完成 until 测试连接 is run again against the new values.
+
+Verification: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D
+warnings`, `cargo test --workspace` all pass — 316 tests (+4 real-IPC tests). `npm run build`
+(`tsc -b && vite build`) passes clean, strict mode, no unused locals/params. Screenshotted all
+three onboarding steps (both model-step layouts) against the running app via `npm run tauri dev`;
+confirmed the layout fix by comparing before/after screenshots.

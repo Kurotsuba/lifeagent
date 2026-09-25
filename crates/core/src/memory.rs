@@ -5,6 +5,7 @@
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
+use serde::Serialize;
 use uuid::Uuid;
 
 use crate::clock::Clock;
@@ -13,7 +14,7 @@ use crate::error::CoreError;
 /// Matches the `core_remember` tool's stated limit (§7.8).
 pub const MAX_NOTE_LEN: usize = 300;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct MemoryNote {
     pub id: String,
     pub note: String,
