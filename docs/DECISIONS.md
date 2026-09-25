@@ -672,10 +672,46 @@ without one; `foods list` prints `[]` empty; `targets` errors with a clear messa
 profile+weight exist; `models set-json` then `set-key` (§11's listed order) both succeed, the
 latter without needing `CoreApp` to build first (see the bug above).
 
-**Not verified here, left for the user:** the §14 M6 "done when" manual check itself — a real
-provider key and a live model call — since this sandbox has neither an API key nor a working
-OS credential store (Linux keyring backend needs a D-Bus Secret Service, which isn't running
-here; same class of environment gap as M0's missing system packages). Whoever runs this next
-with a real key should confirm `say "早餐吃了两个鸡蛋和一杯牛奶"` logs a meal via
-`core_log_weight`/the diet tools and `plan generate` produces a plan within targets, then
-update this entry with the result.
+**Verified by the user with a real API key, `chat` mode, 2026-09-25.** This sandbox had no
+API key and no working OS credential store to do it here (see the WSL keyring workaround
+below); the user ran it themselves against a live Anthropic model. In one turn, "我今天
+80.2kg，我的目标体重是75kg。我今天摄入了200g鸡小胸，半个番茄罐头，150g西蓝花，100g干意大利
+面,半个洋葱" produced three tool calls in a single round — `core_log_weight` (80.2 kg),
+`core_remember` (the stated goal, as a note — see the observation below), and the diet
+plugin's meal-logging tool (611 kcal, items resolved and totaled) — confirming the
+orchestrator's multi-tool-call loop and the diet plugin's parser/resolver/validator work
+end to end against a real model, not just mocks. "生成今天的计划" (the user asked for
+*today's* plan, not the usual tomorrow default) correctly resolved to today's date and
+returned a full plan — breakfast/lunch/dinner/snack, each with named dishes and gram-level
+items — per its activity line: "已生成 2026-09-25 的计划（第 1 版）". §14 M6's "done when" is
+satisfied: a real key logs a meal via chat and `plan generate` returns a valid plan.
+
+**Observation from this check, not a blocker for M6:** there is no core or diet tool for
+setting a `WeightGoal` from chat. Asked to record a goal weight, the model fell back to
+`core_remember`, and its reply ("目标体重 75kg 已保存") reads as if a structured goal was
+saved, when only a free-text memory note was. `GoalsService::get_active_weight_goal` — what
+the deterministic targets engine (`targets::compute`, §8.6) actually reads — was untouched,
+so the kcal/macro targets shown right after reflect Maintain at the logged weight, not a
+trajectory toward the stated 75 kg goal. This matches §7.8 and §11 as written: Phase 1 gives
+goal-setting no chat tool and the CLI no command for it, by design — the spec's own onboarding
+flow (§15) sets the goal through a structured form, not chat. Left as-is here; worth a look if
+a later milestone wants chat to be able to set or change the goal too, since right now it
+*appears* to work from the reply text alone.
+
+**Setting up a working OS keyring in WSL for this check**, since the default Linux
+`keyring` backend needs a D-Bus Secret Service that WSL doesn't start on its own (`sudo apt
+install gnome-keyring dbus-x11`, then `export $(dbus-launch)` and
+`eval "$(printf '' | gnome-keyring-daemon --unlock --components=secrets)"` per shell). Even
+then, `models set-key` failed with `secret store error: Couldn't access platform storage: SS
+error: result not returned from SS API` — WSL's `gnome-keyring-daemon` creates only a
+transient `session` collection with no `default` alias, and the `keyring` crate's Linux
+backend (`zbus-secret-service-keyring-store`) specifically requires one; this is a documented
+upstream limitation (github.com/open-source-cooperative/keyring-rs/issues/133), not a
+lifeagent bug. Worked around, for manual testing only, by aliasing `default` to the existing
+`session` collection over D-Bus directly:
+`gdbus call --session -d org.freedesktop.secrets -o /org/freedesktop/secrets -m
+org.freedesktop.Secret.Service.SetAlias "default" "objectpath
+'/org/freedesktop/secrets/collection/session'"`. That collection is in-memory and doesn't
+survive the daemon exiting, so this needs redoing per shell session — fine for one-off
+verification, not something the app or `lifeagent-cli` needs to know or do anything about,
+since the real target platform (Windows Credential Manager) has none of these issues.
