@@ -1534,3 +1534,13 @@ actually hit. Cross-checked every command and file path it names against the cur
 `ModelsConfig` section number) rather than copying from the spec's prose. §14 M8 is now
 complete: fmt/clippy/`cargo test --workspace` clean (verified again after this step), README
 written.
+
+## 2026-09-26 — M7.5/M7.6: autostart toggle confirmed on Windows
+
+The one Windows-only manual-check item M7.6's acceptance-pass progress note left open
+("Autostart toggle not yet reported," `docs/M7_SCOPE.md`) is now closed: the user confirmed
+enabling 开机自启动 in Settings actually registers LifeAgent with Windows startup (`save_settings`
+calling `tauri_plugin_autostart`'s `enable`, per M7.5). This was the last unconfirmed real-input
+item from M7.5's own "done when" (close-to-tray, single-instance relaunch, and quick-entry were
+already confirmed during the M7.6 run) — every Windows-only manual-check item for M7 is now
+verified.

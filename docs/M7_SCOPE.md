@@ -256,7 +256,7 @@ sandbox has neither); a second launch focusing the existing window and quick-ent
 message end-to-end are the same story. All three need a real Windows pass — see the environment
 caveat below and `docs/DECISIONS.md`'s M7.2 precedent for this exact gap.
 
-## M7.6 — Full acceptance pass
+## M7.6 — Full acceptance pass — Done
 
 Run all seven steps of §15 manually against a real provider, per CLAUDE.md's "no real LLM in
 automated tests" rule — this is the one sub-step that's manually verified rather than
@@ -267,8 +267,9 @@ the fixes in `docs/DECISIONS.md`'s two "M7.6" entries): memory note saved; plan 
 target, v2 (revision) −1.2%, no cilantro; close-to-tray + scheduled generation + toast;
 catch-up on relaunch (both plans `trigger = schedule`); logs hold only `llm call` metadata
 lines — no key, no personal text. M7.5's Windows-only checks also pass: single instance,
-quick-entry (logged a latte end to end), tray 生成明日计划 toast. Autostart toggle not yet
-reported. Fixes found along the way (not blocking §15) — **done**, see `docs/DECISIONS.md`'s "M7.6 queued fixes" entry:
+quick-entry (logged a latte end to end), tray 生成明日计划 toast, and (confirmed 2026-09-26) the
+autostart toggle — enabling it in Settings registers LifeAgent with Windows startup. Fixes
+found along the way (not blocking §15) — **done**, see `docs/DECISIONS.md`'s "M7.6 queued fixes" entry:
 - Corrections drift: re-logging after a correction re-parses from text, so unchanged items get
   new guessed grams (beef 80→50 g, broth 400→300 g; lunch fell 662→617 kcal after *adding* an
   egg). Tell the conversation model to carry over unchanged items' grams from the previous
@@ -285,16 +286,18 @@ reported. Fixes found along the way (not blocking §15) — **done**, see `docs/
   (drop "referencing recent adherence" when there is none), and revision took 85 s on Opus 5
   at `high` effort — the chat just shows a spinner meanwhile.
 
-**Done when**: all seven §15 steps pass in one sitting against a real provider, with the result
-noted in a commit message the way M6's manual verification was.
+**Done when** (met): all seven §15 steps pass in one sitting against a real provider, with the
+result noted in a commit message the way M6's manual verification was. The autostart toggle —
+the one M7.5 real-input item still unconfirmed when this progress note was first written — was
+verified working by the user on 2026-09-26, closing the last open manual-check item for M7.
 
 ## Environment caveat and open decisions
 
 The dev sandbox for this project is Linux (WSL2). The tray icon, Windows toast notifications,
 autostart, and the keyring backend are all platform-specific. The Rust and React layers can be
 built and unit-tested here, but M7.6's manual acceptance pass and the tray/notification/autostart
-pieces of M7.5 need real verification on Windows — record this the same way M6's manual
-verification note called out testing with a real API key.
+pieces of M7.5 needed real verification on Windows — done, per the entries above; every
+Windows-only manual-check item for M7 is now confirmed.
 
 No open decisions remain. Resolved: the `CommandError`/`auth` vs `llm` question (see the
 2026-09-25 M7.1-step-1 entry), and `get_history`'s activity chips — omitted on history replay,
