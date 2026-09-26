@@ -20,7 +20,8 @@ pub struct OpenAiCompatibleProvider {
 impl OpenAiCompatibleProvider {
     pub fn new(base_url: String, api_key: String) -> Self {
         Self {
-            base_url,
+            // `complete` appends `/chat/completions`; a pasted trailing slash would double it.
+            base_url: base_url.trim().trim_end_matches('/').to_string(),
             api_key,
             client: reqwest::Client::new(),
         }
@@ -204,6 +205,12 @@ fn parse_tool_call(tc: &Value) -> Result<ToolCall, LlmError> {
 mod tests {
     use super::*;
     use crate::types::ToolSpec;
+
+    #[test]
+    fn base_url_trailing_slash_is_trimmed() {
+        let p = OpenAiCompatibleProvider::new("https://api.deepseek.com/v1/".into(), "k".into());
+        assert_eq!(p.base_url, "https://api.deepseek.com/v1");
+    }
 
     #[test]
     fn build_request_body_maps_every_message_variant() {

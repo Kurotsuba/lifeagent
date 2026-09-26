@@ -10,16 +10,22 @@ use crate::router::{LlmRouter, RoleRequest};
 use crate::types::{ChatResponse, Message, ResponseFormat, Role};
 
 /// Strips a leading/trailing ```` ```json ```` or ```` ``` ```` fence, if present.
+/// Extracts the body of a ```` ``` ```` fence, with any info string (`json`, `JSON`, …) and any
+/// prose around the fence. Text that already starts as JSON is returned as-is, so a string value
+/// containing backticks is never mistaken for a fence.
 fn strip_fences(text: &str) -> &str {
     let trimmed = text.trim();
-    let without_prefix = trimmed
-        .strip_prefix("```json")
-        .or_else(|| trimmed.strip_prefix("```"))
-        .unwrap_or(trimmed);
-    without_prefix
-        .strip_suffix("```")
-        .unwrap_or(without_prefix)
-        .trim()
+    if trimmed.starts_with(['{', '[']) {
+        return trimmed;
+    }
+    let Some(open) = trimmed.find("```") else {
+        return trimmed;
+    };
+    let body = trimmed[open + 3..].trim_start_matches(|c: char| c.is_ascii_alphanumeric());
+    match body.rfind("```") {
+        Some(close) => body[..close].trim(),
+        None => body.trim(),
+    }
 }
 
 fn parse_content<T: DeserializeOwned>(resp: &ChatResponse) -> Result<T, String> {
@@ -187,6 +193,17 @@ mod tests {
                 b: "z".into()
             }
         );
+    }
+
+    #[test]
+    fn strip_fences_handles_uppercase_info_string_and_leading_prose() {
+        assert_eq!(strip_fences("```JSON\n{\"a\": 1}\n```"), r#"{"a": 1}"#);
+        assert_eq!(
+            strip_fences("Here you go:\n```json\n{\"a\": 1}\n```\nDone."),
+            r#"{"a": 1}"#
+        );
+        assert_eq!(strip_fences("```json {\"a\": 1}```"), r#"{"a": 1}"#);
+        assert_eq!(strip_fences(r#"{"a": "```"}"#), r#"{"a": "```"}"#);
     }
 
     #[tokio::test]

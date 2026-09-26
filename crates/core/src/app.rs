@@ -25,7 +25,7 @@ use crate::conversation::{ConversationStore, MessageRole, NewMessage, StoredMess
 use crate::db;
 use crate::error::{CoreError, ValidationRule};
 use crate::events::{AppEvent, EventChange, EventStore};
-use crate::goals::GoalsService;
+use crate::goals::{self, GoalsService, WeightGoal};
 use crate::memory::MemoryService;
 use crate::plan::{PlanService, PlanStore, PlanTrigger, StoredPlan};
 use crate::plugin::{Plugin, PluginContext, PluginError};
@@ -440,6 +440,32 @@ impl CoreApp {
         Ok(())
     }
 
+    /// Saves the active weight goal (§10.2's `save_weight_goal`), filling in §7.4's default
+    /// target from the latest logged weight when a Lose/Gain goal has none.
+    pub async fn save_weight_goal(&self, goal: &WeightGoal) -> Result<(), CoreError> {
+        let latest_kg = self.latest_weight().await?.map(|w| w.kg);
+        self.0
+            .goals
+            .save_weight_goal(&goals::with_default_target(goal, latest_kg))
+            .await
+    }
+
+    async fn latest_weight(&self) -> Result<Option<WeightPoint>, CoreError> {
+        Ok(self
+            .0
+            .events
+            .latest("body.weight_logged")
+            .await?
+            .and_then(|event| {
+                let kg = event.payload.get("kg").and_then(Value::as_f64)?;
+                Some(WeightPoint {
+                    kg,
+                    logical_date: event.logical_date,
+                    occurred_at: event.occurred_at,
+                })
+            }))
+    }
+
     /// Records a body weight reading from the UI (§10.2's `log_weight`), same validation as the
     /// `core_log_weight` chat tool (§7.8), always at "now" (the UI has no equivalent of that
     /// tool's optional `measured_at`).
@@ -567,19 +593,7 @@ impl CoreApp {
             }
         }
 
-        let latest_weight = self
-            .0
-            .events
-            .latest("body.weight_logged")
-            .await?
-            .and_then(|event| {
-                let kg = event.payload.get("kg").and_then(Value::as_f64)?;
-                Some(WeightPoint {
-                    kg,
-                    logical_date: event.logical_date,
-                    occurred_at: event.occurred_at,
-                })
-            });
+        let latest_weight = self.latest_weight().await?;
 
         Ok(TodayView {
             logical_date: today,
@@ -907,6 +921,26 @@ mod tests {
         );
         assert_eq!(view.today_plan, None);
         assert_eq!(view.latest_weight, None);
+    }
+
+    #[tokio::test]
+    async fn save_weight_goal_fills_default_target_from_latest_weight() {
+        use crate::goals::GoalDirection;
+
+        let (builder, _dir) = builder().await;
+        let app = builder.build().await.unwrap();
+        app.log_weight(70.0).await.unwrap();
+
+        app.save_weight_goal(&WeightGoal {
+            direction: GoalDirection::Lose,
+            target_weight_kg: None,
+            rate_kg_per_week: 0.5,
+        })
+        .await
+        .unwrap();
+
+        let goal = app.goals().get_active_weight_goal().await.unwrap().unwrap();
+        assert_eq!(goal.target_weight_kg, Some(69.0));
     }
 
     #[tokio::test]

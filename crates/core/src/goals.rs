@@ -54,6 +54,24 @@ pub fn validate(goal: &WeightGoal) -> Result<(), CoreError> {
     Ok(())
 }
 
+/// Applies §7.4's default target: a Lose/Gain goal saved without `target_weight_kg` gets the
+/// latest weight ∓ 1 kg, clamped to 30–300 kg. An explicit target, a Maintain goal, or no
+/// logged weight leaves the goal unchanged.
+pub fn with_default_target(goal: &WeightGoal, latest_weight_kg: Option<f64>) -> WeightGoal {
+    let mut goal = goal.clone();
+    if goal.target_weight_kg.is_none() {
+        let delta = match goal.direction {
+            GoalDirection::Lose => Some(-1.0),
+            GoalDirection::Gain => Some(1.0),
+            GoalDirection::Maintain => None,
+        };
+        if let (Some(delta), Some(kg)) = (delta, latest_weight_kg) {
+            goal.target_weight_kg = Some((kg + delta).clamp(30.0, 300.0));
+        }
+    }
+    goal
+}
+
 #[derive(Clone)]
 pub struct GoalsService {
     db: SqlitePool,
@@ -169,6 +187,46 @@ mod tests {
             rate_kg_per_week: 0.25,
         })
         .is_err());
+    }
+
+    fn untargeted(direction: GoalDirection) -> WeightGoal {
+        WeightGoal {
+            direction,
+            target_weight_kg: None,
+            rate_kg_per_week: 0.5,
+        }
+    }
+
+    #[test]
+    fn default_target_is_latest_weight_minus_or_plus_one_kg() {
+        let lose = with_default_target(&untargeted(GoalDirection::Lose), Some(70.0));
+        assert_eq!(lose.target_weight_kg, Some(69.0));
+        let gain = with_default_target(&untargeted(GoalDirection::Gain), Some(70.0));
+        assert_eq!(gain.target_weight_kg, Some(71.0));
+    }
+
+    #[test]
+    fn default_target_is_clamped_to_30_and_300_kg() {
+        let lose = with_default_target(&untargeted(GoalDirection::Lose), Some(30.5));
+        assert_eq!(lose.target_weight_kg, Some(30.0));
+        let gain = with_default_target(&untargeted(GoalDirection::Gain), Some(299.5));
+        assert_eq!(gain.target_weight_kg, Some(300.0));
+    }
+
+    #[test]
+    fn default_target_keeps_explicit_target_and_skips_maintain_or_no_weight() {
+        assert_eq!(
+            with_default_target(&lose(0.5), Some(70.0)).target_weight_kg,
+            Some(65.0)
+        );
+        assert_eq!(
+            with_default_target(&untargeted(GoalDirection::Maintain), Some(70.0)).target_weight_kg,
+            None
+        );
+        assert_eq!(
+            with_default_target(&untargeted(GoalDirection::Lose), None).target_weight_kg,
+            None
+        );
     }
 
     #[test]

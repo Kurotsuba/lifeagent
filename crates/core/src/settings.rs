@@ -17,6 +17,16 @@ use crate::error::{CoreError, ValidationRule};
 use crate::time::{format_hhmm, parse_hhmm};
 use chrono::NaiveTime;
 
+// `match` + `panic!` so an invalid literal fails at compile time, not at runtime.
+const DEFAULT_PLAN_TIME: NaiveTime = match NaiveTime::from_hms_opt(21, 0, 0) {
+    Some(t) => t,
+    None => panic!("21:00 is a valid time"),
+};
+const DEFAULT_DAY_BOUNDARY: NaiveTime = match NaiveTime::from_hms_opt(4, 0, 0) {
+    Some(t) => t,
+    None => panic!("04:00 is a valid time"),
+};
+
 #[derive(Clone)]
 pub struct Settings {
     db: SqlitePool,
@@ -47,17 +57,7 @@ impl Settings {
         value: Value,
         now: DateTime<Utc>,
     ) -> Result<(), CoreError> {
-        let json = serde_json::to_string(&value)?;
-        sqlx::query(
-            "INSERT INTO settings (key, value_json, updated_at) VALUES (?, ?, ?)
-             ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at",
-        )
-        .bind(key)
-        .bind(json)
-        .bind(now.to_rfc3339())
-        .execute(&self.db)
-        .await?;
-        Ok(())
+        upsert(&self.db, key, &value, now).await
     }
 
     /// Generic typed read: deserializes the stored JSON as `T`, or `None` if unset.
@@ -81,7 +81,7 @@ impl Settings {
     pub async fn plan_time(&self) -> Result<NaiveTime, CoreError> {
         match self.get_json::<String>("plan_time").await? {
             Some(s) => parse_hhmm(&s),
-            None => Ok(parse_hhmm("21:00").expect("default plan_time is valid")),
+            None => Ok(DEFAULT_PLAN_TIME),
         }
     }
 
@@ -95,7 +95,7 @@ impl Settings {
     pub async fn day_boundary(&self) -> Result<NaiveTime, CoreError> {
         match self.get_json::<String>("day_boundary").await? {
             Some(s) => parse_hhmm(&s),
-            None => Ok(parse_hhmm("04:00").expect("default day_boundary is valid")),
+            None => Ok(DEFAULT_DAY_BOUNDARY),
         }
     }
 
@@ -122,10 +122,25 @@ impl Settings {
         now: DateTime<Utc>,
     ) -> Result<(), CoreError> {
         check_plan_time(plan_time, day_boundary)?;
-        self.set_json("plan_time", &format_hhmm(plan_time), now)
-            .await?;
-        self.set_json("day_boundary", &format_hhmm(day_boundary), now)
-            .await
+        // One transaction: a partial write would break `plan_time ≥ day_boundary`, which the
+        // scheduler's catch-up rule depends on (§7.13).
+        let mut tx = self.db.begin().await?;
+        upsert(
+            &mut *tx,
+            "plan_time",
+            &Value::from(format_hhmm(plan_time)),
+            now,
+        )
+        .await?;
+        upsert(
+            &mut *tx,
+            "day_boundary",
+            &Value::from(format_hhmm(day_boundary)),
+            now,
+        )
+        .await?;
+        tx.commit().await?;
+        Ok(())
     }
 
     pub async fn notifications_enabled(&self) -> Result<bool, CoreError> {
@@ -178,6 +193,28 @@ impl Settings {
     ) -> Result<(), CoreError> {
         self.set_json("models", config, now).await
     }
+}
+
+async fn upsert<'e, E>(
+    exec: E,
+    key: &str,
+    value: &Value,
+    now: DateTime<Utc>,
+) -> Result<(), CoreError>
+where
+    E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
+{
+    let json = serde_json::to_string(value)?;
+    sqlx::query(
+        "INSERT INTO settings (key, value_json, updated_at) VALUES (?, ?, ?)
+         ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at",
+    )
+    .bind(key)
+    .bind(json)
+    .bind(now.to_rfc3339())
+    .execute(exec)
+    .await?;
+    Ok(())
 }
 
 fn check_plan_time(plan_time: NaiveTime, day_boundary: NaiveTime) -> Result<(), CoreError> {

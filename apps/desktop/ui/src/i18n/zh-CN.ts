@@ -168,6 +168,7 @@ export const zhCN = {
     send: "发送",
     sending: "发送中…",
     empty: "还没有对话，说点什么吧",
+    thinking: "思考中",
     sendFailed: "发送失败",
     configureModelFirst: "请先在设置中配置模型",
   },

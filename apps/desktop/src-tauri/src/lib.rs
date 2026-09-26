@@ -47,12 +47,17 @@ pub fn run() {
             // `setup()`'s own calling thread once it returns. Both go in the same `block_on` so
             // neither runs outside that context. The stored `autostart` setting is read here too,
             // so it can be synced to the OS once we're back on `setup()`'s own (non-async) thread.
+            let handle = app.handle().clone();
             let (core_app, autostart_enabled): (CoreApp, bool) =
                 tauri::async_runtime::block_on(async {
                     let core_app = CoreAppBuilder::new(data_dir)
                         .plugin(Arc::new(DietPlugin))
                         .build()
                         .await?;
+                    // Subscribe before the scheduler starts: its first (catch-up) tick runs
+                    // immediately, and the broadcast bus drops events nobody is subscribed to yet.
+                    events::spawn(handle.clone(), &core_app);
+                    notify::spawn(handle, core_app.clone());
                     // The `JoinHandle` is discarded: dropping it doesn't stop the spawned task,
                     // which runs for the life of the process by design (§7.13); `CoreApp` itself
                     // stays alive via `app.manage` below.
@@ -67,8 +72,6 @@ pub fn run() {
             // settings UI outside the app).
             commands::sync_autostart(app.handle(), autostart_enabled);
 
-            events::spawn(app.handle().clone(), &core_app);
-            notify::spawn(app.handle().clone(), core_app.clone());
             tray::build(app.handle(), core_app.clone())?;
             app.manage(core_app);
             Ok(())

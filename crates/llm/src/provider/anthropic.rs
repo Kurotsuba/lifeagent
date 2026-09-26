@@ -27,7 +27,7 @@ pub struct AnthropicProvider {
 impl AnthropicProvider {
     pub fn new(base_url: String, api_key: String) -> Self {
         Self {
-            base_url,
+            base_url: normalize_base_url(&base_url),
             api_key,
             client: reqwest::Client::new(),
         }
@@ -51,6 +51,15 @@ impl ChatModel for AnthropicProvider {
         .await?;
         parse_response_body(&response)
     }
+}
+
+/// Trims trailing slashes and a pasted `/v1`, since `complete` appends `/v1/messages` itself.
+fn normalize_base_url(raw: &str) -> String {
+    let url = raw.trim().trim_end_matches('/');
+    url.strip_suffix("/v1")
+        .unwrap_or(url)
+        .trim_end_matches('/')
+        .to_string()
 }
 
 fn effort_str(effort: Effort) -> &'static str {
@@ -114,8 +123,11 @@ fn build_system_and_messages(messages: &[Message]) -> (Option<String>, Vec<Value
                 content,
                 tool_calls,
             } => {
+                // Anthropic rejects empty text blocks and empty assistant turns with a 400, and a
+                // stored refusal (`content: []`) replays as exactly that — so skip both. The
+                // API merges the consecutive user turns that dropping a turn can leave behind.
                 let mut blocks: Vec<Value> = Vec::new();
-                if let Some(text) = content {
+                if let Some(text) = content.as_deref().filter(|t| !t.trim().is_empty()) {
                     blocks.push(json!({"type": "text", "text": text}));
                 }
                 for tc in tool_calls {
@@ -126,7 +138,9 @@ fn build_system_and_messages(messages: &[Message]) -> (Option<String>, Vec<Value
                         "input": tc.arguments,
                     }));
                 }
-                out.push(json!({"role": "assistant", "content": blocks}));
+                if !blocks.is_empty() {
+                    out.push(json!({"role": "assistant", "content": blocks}));
+                }
                 i += 1;
             }
             Message::Tool { .. } => {
@@ -323,6 +337,58 @@ mod tests {
         req.max_tokens = Some(2048);
         let body = build_request_body(&req);
         assert_eq!(body["max_tokens"], json!(2048));
+    }
+
+    #[test]
+    fn base_url_drops_trailing_slash_and_v1() {
+        for raw in [
+            "https://api.anthropic.com",
+            "https://api.anthropic.com/",
+            "https://api.anthropic.com/v1",
+            "https://api.anthropic.com/v1/",
+        ] {
+            assert_eq!(normalize_base_url(raw), "https://api.anthropic.com");
+        }
+    }
+
+    #[test]
+    fn empty_assistant_message_is_dropped() {
+        let req = base_request(vec![
+            Message::User {
+                content: "hi".into(),
+            },
+            Message::Assistant {
+                content: None,
+                tool_calls: vec![],
+            },
+            Message::Assistant {
+                content: Some("  ".into()),
+                tool_calls: vec![],
+            },
+            Message::User {
+                content: "again".into(),
+            },
+        ]);
+        let body = build_request_body(&req);
+        let messages = body["messages"].as_array().unwrap();
+        assert_eq!(messages.len(), 2);
+        assert!(messages.iter().all(|m| m["role"] == "user"));
+    }
+
+    #[test]
+    fn empty_text_is_omitted_next_to_tool_calls() {
+        let req = base_request(vec![Message::Assistant {
+            content: Some(String::new()),
+            tool_calls: vec![ToolCall {
+                id: "toolu_1".into(),
+                name: "resolve_food".into(),
+                arguments: json!({}),
+            }],
+        }]);
+        let body = build_request_body(&req);
+        let blocks = body["messages"][0]["content"].as_array().unwrap();
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0]["type"], "tool_use");
     }
 
     #[test]

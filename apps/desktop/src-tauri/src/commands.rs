@@ -155,7 +155,7 @@ pub async fn save_weight_goal(
     state: State<'_, CoreApp>,
     goal: WeightGoal,
 ) -> Result<(), CommandError> {
-    Ok(state.goals().save_weight_goal(&goal).await?)
+    Ok(state.save_weight_goal(&goal).await?)
 }
 
 #[tauri::command]

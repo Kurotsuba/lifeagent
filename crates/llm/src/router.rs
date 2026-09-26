@@ -111,14 +111,21 @@ pub struct LlmRouter {
 
 impl LlmRouter {
     /// Builds real HTTP providers from `config`, fetching each one's API key via
-    /// `key_provider`.
+    /// `key_provider`. Only providers some role is bound to are built, so a leftover provider
+    /// with no key doesn't take down the ones actually in use.
     pub fn new(
         config: ModelsConfig,
         key_provider: &dyn KeyProvider,
         usage_sink: Arc<dyn UsageSink>,
     ) -> Result<Self, LlmError> {
+        let bound =
+            [&config.parser, &config.planner, &config.conversation].map(|b| b.provider_id.as_str());
         let mut providers: HashMap<String, Arc<dyn ChatModel>> = HashMap::new();
-        for pc in &config.providers {
+        for pc in config
+            .providers
+            .iter()
+            .filter(|pc| bound.contains(&pc.id.as_str()))
+        {
             let key = key_provider.get_key(&pc.id)?;
             let model: Arc<dyn ChatModel> = match pc.kind {
                 ProviderKind::OpenAiCompatible => {
@@ -429,6 +436,37 @@ mod tests {
         assert!(!events[0].ok);
         assert_eq!(events[0].prompt_tokens, 0);
         assert_eq!(events[0].completion_tokens, 0);
+    }
+
+    struct KeysFor(&'static [&'static str]);
+
+    impl KeyProvider for KeysFor {
+        fn get_key(&self, provider_id: &str) -> Result<String, LlmError> {
+            if self.0.contains(&provider_id) {
+                Ok("key".into())
+            } else {
+                Err(LlmError::Config(format!("no key for {provider_id}")))
+            }
+        }
+    }
+
+    #[test]
+    fn new_skips_unbound_providers_without_a_key() {
+        let mut cfg = config(ProviderKind::OpenAiCompatible);
+        cfg.providers.push(ProviderConfig {
+            id: "unused".into(),
+            kind: ProviderKind::Anthropic,
+            base_url: "http://example.invalid".into(),
+        });
+        let sink = Arc::new(RecordingUsageSink::default());
+        assert!(LlmRouter::new(cfg, &KeysFor(&["p1"]), sink).is_ok());
+    }
+
+    #[test]
+    fn new_fails_when_a_bound_provider_has_no_key() {
+        let sink = Arc::new(RecordingUsageSink::default());
+        let result = LlmRouter::new(config(ProviderKind::OpenAiCompatible), &KeysFor(&[]), sink);
+        assert!(matches!(result, Err(LlmError::Config(_))));
     }
 
     #[tokio::test]

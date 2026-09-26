@@ -5,7 +5,7 @@
 //! credential store in production, and in memory in tests.
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use keyring::Entry;
 use lifeagent_llm::error::LlmError;
@@ -74,12 +74,14 @@ impl MemorySecretStore {
     }
 }
 
+// A poisoned lock is recovered rather than propagated: each operation is one `HashMap` call,
+// so a panicking holder can't leave the map half-updated.
 impl SecretStore for MemorySecretStore {
     fn get(&self, provider_id: &str) -> Result<Option<String>, CoreError> {
         Ok(self
             .entries
             .lock()
-            .expect("MemorySecretStore mutex poisoned")
+            .unwrap_or_else(PoisonError::into_inner)
             .get(provider_id)
             .cloned())
     }
@@ -87,7 +89,7 @@ impl SecretStore for MemorySecretStore {
     fn set(&self, provider_id: &str, key: &str) -> Result<(), CoreError> {
         self.entries
             .lock()
-            .expect("MemorySecretStore mutex poisoned")
+            .unwrap_or_else(PoisonError::into_inner)
             .insert(provider_id.to_string(), key.to_string());
         Ok(())
     }
@@ -95,7 +97,7 @@ impl SecretStore for MemorySecretStore {
     fn delete(&self, provider_id: &str) -> Result<(), CoreError> {
         self.entries
             .lock()
-            .expect("MemorySecretStore mutex poisoned")
+            .unwrap_or_else(PoisonError::into_inner)
             .remove(provider_id);
         Ok(())
     }

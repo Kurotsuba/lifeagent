@@ -230,13 +230,20 @@ impl EventStore {
             .transpose()?
             .ok_or_else(|| CoreError::NotFound(format!("event {id}")))?;
 
+        // `deleted_at IS NULL` + the row count make a concurrent second delete of the same
+        // event a `NotFound` instead of a second `Deleted` change.
         let now = self.clock.now().to_rfc3339();
-        sqlx::query("UPDATE events SET deleted_at = ?, updated_at = ? WHERE id = ?")
-            .bind(&now)
-            .bind(&now)
-            .bind(id)
-            .execute(&self.db)
-            .await?;
+        let result = sqlx::query(
+            "UPDATE events SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL",
+        )
+        .bind(&now)
+        .bind(&now)
+        .bind(id)
+        .execute(&self.db)
+        .await?;
+        if result.rows_affected() == 0 {
+            return Err(CoreError::NotFound(format!("event {id}")));
+        }
 
         let _ = self.changes.send(EventChange::Deleted(event.clone()));
         Ok(event)

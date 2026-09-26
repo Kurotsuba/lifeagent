@@ -145,7 +145,13 @@ export function Chat({ draftText, onDraftConsumed, onGoToSettings }: ChatProps) 
                       : "bg-neutral-100 text-neutral-900 dark:bg-neutral-800 dark:text-neutral-100")
                   }
                 >
-                  <p className="whitespace-pre-wrap">{m.content}</p>
+                  {m.role === "assistant" && !m.content?.trim() ? (
+                    <p className="italic text-neutral-500 dark:text-neutral-400">
+                      {zhCN.chat.thinking}
+                    </p>
+                  ) : (
+                    <p className="whitespace-pre-wrap">{m.content}</p>
+                  )}
                   {chips.length > 0 ? (
                     <div className="mt-2 flex flex-wrap gap-1">
                       {chips.map((chip, j) => (

@@ -475,7 +475,8 @@ these resolutions:
   joined with "、".
 - Snack's zh-CN label is "加餐".
 - Still not implemented: B1's default target weight at goal save (§7.4). It belongs in
-  `CoreApp`'s save-goal path, which comes with M6/M7.
+  `CoreApp`'s save-goal path, which comes with M6/M7. (Done later — see "Phase 1 review fixes
+  (M0–M2)".)
 
 Verification: fmt, clippy (`-D warnings`, all targets) and all 232 workspace tests pass. That's
 core 125 unit + 3 orchestrator integration, llm 46, and diet 56 unit + 2 logging integration.
@@ -1544,3 +1545,77 @@ calling `tauri_plugin_autostart`'s `enable`, per M7.5). This was the last unconf
 item from M7.5's own "done when" (close-to-tray, single-instance relaunch, and quick-entry were
 already confirmed during the M7.6 run) — every Windows-only manual-check item for M7 is now
 verified.
+
+## 2026-09-26 — Phase 1 review fixes (M3–M8)
+
+From a code review of the M3–M8 commits.
+
+**Tool-call-only assistant turns show 思考中 in Chat.** `get_history` returns the assistant rows
+that carry only tool calls (no text), and Chat rendered them as empty bubbles. By the user's
+choice, these rows stay in the history and render as a muted "思考中" (`zhCN.chat.thinking`)
+instead of being filtered out in `recent_visible`. Known side effects, left as-is: they still
+count toward `get_history`'s `limit`, and after a turn that failed mid-tool-loop, Chat's retry
+check (`last?.role === "user"`) sees the tool-call row last, so the resent user message can
+briefly show twice until the next history refetch.
+
+**Event listeners subscribe before the scheduler starts.** The scheduler's first tick (catch-up)
+runs immediately, and `broadcast` drops events with no receiver, so a fast `PlanReady`/
+`PlanFailed` at launch could be lost before `events::spawn`/`notify::spawn` subscribed. Both now
+run inside the same `block_on` in `lib.rs`, before `start_scheduler()`.
+
+**`set_plan_time_and_day_boundary` writes both keys in one transaction.** A failed second write
+used to leave the new `plan_time` with the old `day_boundary`, which can break the
+`plan_time ≥ day_boundary` invariant the scheduler's catch-up rule relies on (B3).
+
+**Logged, not fixed: the event dispatcher's `PluginContext` is stale after `reload_models`.**
+`CoreApp::spawn_dispatcher` (`crates/core/src/app.rs`) builds its `PluginContext` once, at
+startup. After `reload_models` swaps in a new router (e.g. onboarding's first model setup),
+`ctx.llm` inside `Plugin::on_event` still points at the old one — the unconfigured placeholder
+on a fresh install. Latent: no plugin calls the LLM from `on_event` in Phase 1. Fix when one
+does: build the context per event (`self.plugin_context()` inside the loop) or have
+`PluginContext` hold the router through the same swappable handle `CoreApp` uses.
+
+## 2026-09-26 — Phase 1 review fixes (M0–M2)
+
+From a code review of the M0–M2 code (workspace scaffold, foundations, LLM layer) as it stands.
+
+**Anthropic requests drop empty assistant turns and empty text blocks.** A refusal comes back as
+`content: []` and is stored as an assistant row with no text and no tool calls. Replayed, it was
+sent as `{"role":"assistant","content":[]}`, which Anthropic rejects with a 400 — on every later
+turn until the row left the history window. `Some("")` next to tool calls (what OpenAI-compatible
+providers return, stored before a provider switch) became an empty text block, also a 400. Both
+are now skipped; the consecutive user turns a dropped turn leaves behind are merged by the API
+itself.
+
+**B1's default target weight is applied at goal save (§7.4).** `goals::with_default_target`
+fills in latest weight ∓ 1 kg (clamped 30–300) for a Lose/Gain goal saved without a target;
+`CoreApp::save_weight_goal` reads the latest `body.weight_logged` and applies it, and the
+desktop `save_weight_goal` command now goes through it. `GoalsService::save_weight_goal` stays
+the raw store (tests call it directly). Onboarding logs the weight before saving the goal, so a
+first-run goal gets its default too.
+
+**The router only builds providers some role is bound to.** `LlmRouter::new` fetched a key for
+every entry in `providers`, so one leftover provider without a key failed the whole router and
+the app fell back to "not configured" even though the bound provider had a valid key.
+
+**Smaller fixes from the same review:**
+- **`base_url` is normalized** in both providers' constructors: trailing slashes are trimmed, and
+  the Anthropic provider also drops a pasted `/v1` (it appends `/v1/messages` itself). Before,
+  `https://api.deepseek.com/v1/` or `https://api.anthropic.com/v1` produced a doubled path and a
+  bare 404.
+- **`EventStore::soft_delete` is idempotent under concurrency**: the `UPDATE` now requires
+  `deleted_at IS NULL` and a zero row count returns `NotFound`, so two simultaneous deletes of one
+  entry (Today's button and chat's `core_delete_entry`) publish one `Deleted` change, not two.
+  Same pattern `memory.rs` already used.
+- **The webview has a CSP** (`tauri.conf.json`), replacing `null`: `default-src 'self'`,
+  `connect-src` adds Tauri IPC (`ipc:`, `http://ipc.localhost`), `img-src` adds `data:`, and
+  `style-src` allows `'unsafe-inline'` (Vite injects styles at dev time; React `style` props).
+  Checked with `npm run tauri dev` against a fresh data dir: onboarding renders styled, which
+  needs `get_app_state` over IPC. Not yet checked in a Windows release build.
+- **`strip_fences` accepts any info string and surrounding prose** (```` ```JSON ````, a lead-in
+  line before the fence, a same-line fence), saving a repair round-trip. Text that already
+  starts with `{`/`[` is returned untouched, so a JSON string containing backticks isn't
+  mistaken for a fence.
+- **No uncommented `expect()` left in these files**: the `plan_time`/`day_boundary` defaults are
+  compile-time `const`s, and `MemorySecretStore` recovers a poisoned lock (each operation is a
+  single `HashMap` call, so there is no half-updated state to protect).
