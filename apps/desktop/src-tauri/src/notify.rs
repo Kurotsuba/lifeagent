@@ -79,7 +79,9 @@ async fn handle(app: &AppHandle, core_app: &CoreApp, event: AppEvent) {
 /// Which `AppEvent`s notify, and their title — pure, so it's testable without a live `CoreApp`
 /// or `AppHandle`. `PlanReady` only notifies for a *scheduled* plan (§10.1): a manual or
 /// revision generation is something the user just did themselves in the UI and already sees the
-/// result of, without needing a toast to tell them.
+/// result of, without needing a toast to tell them. `PlanFailed` needs no such filter: only the
+/// scheduler publishes it (a manual generation's failure is returned to its caller instead), so
+/// every `PlanFailed` is already a scheduled one.
 fn notification_target(event: &AppEvent) -> Option<(&'static str, NaiveDate)> {
     match event {
         AppEvent::PlanReady {
@@ -102,6 +104,20 @@ fn first_sentence(text: &str) -> String {
     match end {
         Some(end) => text[..end].trim().to_string(),
         None => text.trim().to_string(),
+    }
+}
+
+/// Result toast for the tray's 生成明日计划 (`tray.rs`). That's a `Manual` generation, so the
+/// event-driven path above never notifies on success, and a manual failure never publishes
+/// `PlanFailed` at all (only the scheduler does) — but the main window is usually hidden in the
+/// tray when this is clicked, so without this the click would have no visible outcome.
+/// Shown regardless of `notifications_enabled`: it's the direct response to the user's own click,
+/// not an unsolicited notification. `failure` is a user-facing zh-CN message (a
+/// `CommandError`'s), so it's specific (e.g. "not configured") rather than the generic body.
+pub fn show_tray_plan_result(app: &AppHandle, result: Result<&str, &str>) {
+    match result {
+        Ok(summary) => show(app, PLAN_READY_TITLE, &first_sentence(summary)),
+        Err(message) => show(app, PLAN_FAILED_TITLE, message),
     }
 }
 

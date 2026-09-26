@@ -42,6 +42,18 @@ impl Plugin for TestPlugin {
         }]
     }
 
+    async fn context_snippet(
+        &self,
+        ctx: &PluginContext,
+        _date: chrono::NaiveDate,
+    ) -> Result<Option<String>, PluginError> {
+        let logged = ctx.events.latest("test.thing_logged").await?;
+        Ok(Some(match logged {
+            Some(event) => format!("logged: {}", event.payload["value"]),
+            None => "nothing logged yet".into(),
+        }))
+    }
+
     async fn call_tool(
         &self,
         ctx: &PluginContext,
@@ -144,6 +156,36 @@ async fn logs_via_tool_then_answers() {
 }
 
 #[tokio::test]
+async fn system_prompt_is_not_rebuilt_after_a_tool_call_within_a_turn() {
+    let (builder, _dir) = builder().await;
+    let mock = Arc::new(MockChatModel::new());
+    mock.push_response(tool_call_response(
+        "call_1",
+        "test_log_thing",
+        json!({"value": "燕麦牛奶"}),
+    ));
+    mock.push_response(text_response("已经帮你记下啦"));
+    let app = builder
+        .chat_model_override(mock.clone())
+        .build()
+        .await
+        .unwrap();
+
+    app.send_message("测试记录一下燕麦牛奶").await.unwrap();
+
+    // Otherwise the second call's status already shows the thing as logged, and the model
+    // reads the user's message as a repeat (seen in the M7.6 Windows run).
+    let system_of = |req: &lifeagent_llm::types::ChatRequest| match &req.messages[0] {
+        lifeagent_llm::types::Message::System { content } => content.clone(),
+        other => panic!("expected a system message first, got {other:?}"),
+    };
+    let received = mock.received_requests();
+    assert_eq!(received.len(), 2);
+    assert!(system_of(&received[0]).contains("nothing logged yet"));
+    assert_eq!(system_of(&received[0]), system_of(&received[1]));
+}
+
+#[tokio::test]
 async fn invalid_tool_args_return_an_error_the_model_can_retry_from() {
     let (builder, _dir) = builder().await;
     let mock = Arc::new(MockChatModel::new());
@@ -201,4 +243,31 @@ async fn stops_after_the_iteration_cap_with_no_empty_tool_calls() {
     assert_eq!(turn.activities.len(), 6);
     // Exactly 6 rounds were sent to the model — the cap, not one more.
     assert_eq!(mock.received_requests().len(), 6);
+}
+
+#[tokio::test]
+async fn retrying_a_failed_turn_does_not_store_the_user_message_twice() {
+    let (builder, _dir) = builder().await;
+    let mock = Arc::new(MockChatModel::new());
+    mock.push_error(lifeagent_llm::error::LlmError::Auth);
+    mock.push_response(text_response("好的"));
+    let app = builder
+        .chat_model_override(mock.clone())
+        .build()
+        .await
+        .unwrap();
+
+    assert!(app.send_message("重试的消息").await.is_err());
+    let turn = app.send_message("重试的消息").await.unwrap();
+    assert_eq!(turn.reply, "好的");
+
+    let recent = app.conversation().recent(10).await.unwrap();
+    let contents: Vec<_> = recent.iter().map(|m| m.content.as_deref()).collect();
+    assert_eq!(contents, vec![Some("重试的消息"), Some("好的")]);
+
+    // A new, different message after a completed turn is stored normally, and so is sending
+    // the same text again once its earlier turn has finished.
+    mock.push_response(text_response("再次收到"));
+    app.send_message("重试的消息").await.unwrap();
+    assert_eq!(app.conversation().recent(10).await.unwrap().len(), 4);
 }

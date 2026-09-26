@@ -61,6 +61,24 @@ fn effort_str(effort: Effort) -> &'static str {
     }
 }
 
+/// Whether `model` accepts `output_config.effort`. Haiku 4.5 (the suggested parser model,
+/// §10.3) and models older than Opus 4.5 / Sonnet 4.6 reject it with a 400, so the router's
+/// per-role default effort is dropped for them rather than failing every call. Unknown
+/// (newer) models are assumed to support it.
+fn supports_effort(model: &str) -> bool {
+    const UNSUPPORTED_PREFIXES: &[&str] = &[
+        "claude-haiku",
+        "claude-3",
+        "claude-sonnet-4-5",
+        "claude-sonnet-4-0",
+        "claude-sonnet-4-2",
+        "claude-opus-4-1",
+        "claude-opus-4-0",
+        "claude-opus-4-2",
+    ];
+    !UNSUPPORTED_PREFIXES.iter().any(|p| model.starts_with(p))
+}
+
 /// Hoists every `Message::System` into a single joined `system` string and maps the rest,
 /// collapsing runs of consecutive `Message::Tool` into one `user` message with `tool_result`
 /// blocks (§6.2.2 "Tool-result merging").
@@ -162,7 +180,7 @@ pub(crate) fn build_request_body(req: &ChatRequest) -> Value {
             .collect();
         body.insert("tools".into(), json!(tools));
     }
-    if let Some(effort) = req.effort {
+    if let Some(effort) = req.effort.filter(|_| supports_effort(&req.model)) {
         body.insert(
             "output_config".into(),
             json!({"effort": effort_str(effort)}),
@@ -408,6 +426,41 @@ mod tests {
         assert!(!obj.contains_key("top_p"));
         assert!(!obj.contains_key("top_k"));
         assert!(!obj.contains_key("response_format"));
+    }
+
+    #[test]
+    fn effort_is_omitted_for_models_that_reject_it() {
+        for model in [
+            "claude-haiku-4-5",
+            "claude-haiku-4-5-20251001",
+            "claude-sonnet-4-5",
+        ] {
+            let mut req = base_request(vec![Message::User {
+                content: "hi".into(),
+            }]);
+            req.model = model.into();
+            req.effort = Some(Effort::Low);
+            let body = build_request_body(&req);
+            assert!(body.get("output_config").is_none(), "{model}");
+        }
+    }
+
+    #[test]
+    fn effort_is_sent_for_current_models() {
+        for model in [
+            "claude-sonnet-5",
+            "claude-opus-5",
+            "claude-opus-4-5",
+            "claude-fable-5-1",
+        ] {
+            let mut req = base_request(vec![Message::User {
+                content: "hi".into(),
+            }]);
+            req.model = model.into();
+            req.effort = Some(Effort::Low);
+            let body = build_request_body(&req);
+            assert_eq!(body["output_config"], json!({"effort": "low"}), "{model}");
+        }
     }
 
     #[test]

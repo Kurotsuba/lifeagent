@@ -1,6 +1,6 @@
 /**
- * Thin, typed wrappers around `invoke()` for every Tauri command the onboarding flow uses
- * (`docs/PHASE1_SPEC.md` §10.2). One function per command, no logic beyond the call itself —
+ * Thin, typed wrappers around `invoke()` for every Tauri command in `docs/PHASE1_SPEC.md`
+ * §10.2. One function per command, no logic beyond the call itself —
  * business logic (validation, defaults, what to do with the result) stays in the components
  * that call these, per CLAUDE.md's "no business logic in the frontend" for anything that isn't
  * this kind of pure forwarding.
@@ -9,11 +9,18 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   AppState,
+  ChatTurn,
+  HistoryMessage,
+  MemoryNote,
   ModelsConfig,
   NutritionTargets,
   Profile,
   Role,
+  RoleUsage,
+  SettingsDto,
+  StoredPlan,
   TestModelResult,
+  TodayView,
   WeightGoal,
 } from "./types";
 
@@ -71,4 +78,63 @@ export function hasApiKey(providerId: string): Promise<boolean> {
 
 export function testModel(role: Role): Promise<TestModelResult> {
   return invoke("test_model", { role });
+}
+
+export function getSettings(): Promise<SettingsDto> {
+  return invoke("get_settings");
+}
+
+// ---- Chat --------------------------------------------------------------------------------
+
+export function sendMessage(text: string): Promise<ChatTurn> {
+  return invoke("send_message", { text });
+}
+
+export function getHistory(limit: number): Promise<HistoryMessage[]> {
+  return invoke("get_history", { limit });
+}
+
+// ---- Today / plan --------------------------------------------------------------------------
+
+export function getToday(): Promise<TodayView> {
+  return invoke("get_today");
+}
+
+export function getPlan(date: string): Promise<StoredPlan | null> {
+  return invoke("get_plan", { date });
+}
+
+/** `date` omitted means tomorrow (§10.2's own default). */
+export function generatePlan(date?: string): Promise<StoredPlan> {
+  return invoke("generate_plan", { date: date ?? null });
+}
+
+export function acceptPlan(date: string): Promise<void> {
+  return invoke("accept_plan", { date });
+}
+
+export function deleteEntry(id: string): Promise<void> {
+  return invoke("delete_entry", { id });
+}
+
+// ---- Settings ----------------------------------------------------------------------------
+
+export function saveSettings(settings: SettingsDto): Promise<void> {
+  return invoke("save_settings", { settings });
+}
+
+// ---- Memory --------------------------------------------------------------------------------
+
+export function getMemory(limit: number): Promise<MemoryNote[]> {
+  return invoke("get_memory", { limit });
+}
+
+export function deleteMemory(id: string): Promise<void> {
+  return invoke("delete_memory", { id });
+}
+
+// ---- Usage ----------------------------------------------------------------------------------
+
+export function getUsageSummary(): Promise<RoleUsage[]> {
+  return invoke("get_usage_summary");
 }

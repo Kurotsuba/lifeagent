@@ -10,6 +10,9 @@
 use std::sync::Arc;
 
 use lifeagent_core::app::{CoreApp, CoreAppBuilder};
+use lifeagent_core::secrets::MemorySecretStore;
+use lifeagent_llm::mock::MockChatModel;
+use lifeagent_llm::types::{ChatResponse, Usage};
 use lifeagent_plugin_diet::DietPlugin;
 use serde_json::{json, Value};
 use tauri::ipc::{CallbackFn, InvokeBody};
@@ -17,14 +20,27 @@ use tauri::test::{mock_builder, MockRuntime};
 use tauri::webview::InvokeRequest;
 use tauri::{WebviewWindow, WebviewWindowBuilder};
 
+/// Always an in-memory `SecretStore`: the builder's default `KeyringSecretStore` is the real OS
+/// credential store, so `set_api_key` here would overwrite the developer's actual key (e.g.
+/// `provider:anthropic`) on every `cargo test` run.
 async fn core_app() -> (CoreApp, tempfile::TempDir) {
+    build_core_app(None).await
+}
+
+/// `core_app` with every LLM role answered by `mock` — never a real provider (CLAUDE.md).
+async fn core_app_with_mock(mock: Arc<MockChatModel>) -> (CoreApp, tempfile::TempDir) {
+    build_core_app(Some(mock)).await
+}
+
+async fn build_core_app(mock: Option<Arc<MockChatModel>>) -> (CoreApp, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
-    let app = CoreAppBuilder::new(dir.path().to_path_buf())
-        .plugin(Arc::new(DietPlugin))
-        .build()
-        .await
-        .unwrap();
-    (app, dir)
+    let mut builder = CoreAppBuilder::new(dir.path().to_path_buf())
+        .secrets(Arc::new(MemorySecretStore::new()))
+        .plugin(Arc::new(DietPlugin));
+    if let Some(mock) = mock {
+        builder = builder.chat_model_override(mock);
+    }
+    (builder.build().await.unwrap(), dir)
 }
 
 /// Uses the project's *real* `tauri.conf.json` and `capabilities/` (via `generate_context!`),
@@ -49,6 +65,18 @@ fn setup(core_app: CoreApp) -> (tauri::App<MockRuntime>, WebviewWindow<MockRunti
             lifeagent_desktop_lib::commands::set_api_key,
             lifeagent_desktop_lib::commands::has_api_key,
             lifeagent_desktop_lib::commands::test_model,
+            lifeagent_desktop_lib::commands::get_history,
+            lifeagent_desktop_lib::commands::get_plan,
+            lifeagent_desktop_lib::commands::generate_plan,
+            lifeagent_desktop_lib::commands::accept_plan,
+            lifeagent_desktop_lib::commands::get_settings,
+            lifeagent_desktop_lib::commands::get_models,
+            lifeagent_desktop_lib::commands::save_models,
+            lifeagent_desktop_lib::commands::get_memory,
+            lifeagent_desktop_lib::commands::delete_memory,
+            lifeagent_desktop_lib::commands::get_usage_summary,
+            // `save_settings` is deliberately absent: it syncs OS autostart, which a test must
+            // not touch for real (see `docs/DECISIONS.md`'s M7.5 entry).
         ])
         .manage(core_app)
         .build(tauri::generate_context!())
@@ -229,4 +257,148 @@ async fn test_model_without_models_configured_resolves_ok_false() {
 
     assert_eq!(result["ok"], json!(false));
     assert!(result["error"].is_string());
+}
+
+/// The quick-entry popup hides itself (Esc, and after showing a reply) via the JS
+/// `getCurrentWindow().hide()`, which needs `core:window:allow-hide` — `core:default` alone only
+/// grants read-only window permissions, so without it the call is silently rejected and the
+/// undecorated popup can't be dismissed. Also checks the window stays least-privilege: none of
+/// the main window's data commands are reachable from it.
+#[tokio::test]
+async fn quick_entry_window_can_hide_itself_but_not_reach_data_commands() {
+    let (core_app, _dir) = core_app().await;
+    let (app, _main) = setup(core_app);
+    let quick_entry = WebviewWindowBuilder::new(&app, "quick-entry", Default::default())
+        .build()
+        .unwrap();
+
+    invoke(
+        &quick_entry,
+        "plugin:window|hide",
+        json!({ "label": "quick-entry" }),
+    )
+    .unwrap();
+
+    assert!(invoke(&quick_entry, "get_today", json!({})).is_err());
+}
+
+fn text_response(content: &str) -> ChatResponse {
+    ChatResponse {
+        content: Some(content.to_string()),
+        tool_calls: vec![],
+        usage: Usage::default(),
+        finish_reason: "stop".into(),
+    }
+}
+
+#[tokio::test]
+async fn send_message_then_get_history_returns_both_sides_of_the_turn() {
+    let mock = Arc::new(MockChatModel::new());
+    mock.push_response(text_response("你好！"));
+    let (core_app, _dir) = core_app_with_mock(mock).await;
+    let (_app, webview) = setup(core_app);
+
+    let turn = invoke(&webview, "send_message", json!({ "text": "在吗" })).unwrap();
+    assert_eq!(turn["reply"], json!("你好！"));
+    assert_eq!(turn["activities"], json!([]));
+
+    let history = invoke(&webview, "get_history", json!({ "limit": 10 })).unwrap();
+    let pairs: Vec<(Value, Value)> = history
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| (m["role"].clone(), m["content"].clone()))
+        .collect();
+    assert_eq!(
+        pairs,
+        vec![
+            (json!("user"), json!("在吗")),
+            (json!("assistant"), json!("你好！")),
+        ]
+    );
+    assert!(history[0]["created_at"].is_string());
+}
+
+#[tokio::test]
+async fn plan_commands_report_missing_plans_and_bad_dates_with_the_right_codes() {
+    let (core_app, _dir) = core_app_with_mock(Arc::new(MockChatModel::new())).await;
+    let (_app, webview) = setup(core_app);
+
+    assert_eq!(
+        invoke(&webview, "get_plan", json!({ "date": "2026-09-27" })).unwrap(),
+        Value::Null
+    );
+    let bad_date = invoke(&webview, "get_plan", json!({ "date": "27/09/2026" })).unwrap_err();
+    assert_eq!(bad_date["code"], json!("invalid_input"));
+
+    let accept = invoke(&webview, "accept_plan", json!({ "date": "2026-09-27" })).unwrap_err();
+    assert_eq!(accept["code"], json!("not_found"));
+
+    // No profile or weight yet: nothing to plan from, reported as the user's own input problem
+    // (with its own zh-CN hint), before any model call is made.
+    let generate = invoke(&webview, "generate_plan", json!({ "date": null })).unwrap_err();
+    assert_eq!(generate["code"], json!("invalid_input"));
+}
+
+#[tokio::test]
+async fn get_settings_returns_the_defaults_in_the_dto_shape() {
+    let (core_app, _dir) = core_app().await;
+    let (_app, webview) = setup(core_app);
+
+    let settings = invoke(&webview, "get_settings", json!({})).unwrap();
+
+    assert_eq!(settings["plan_time"], json!("21:00"));
+    assert_eq!(settings["day_boundary"], json!("04:00"));
+    assert!(settings["notifications_enabled"].is_boolean());
+    assert!(settings["autostart"].is_boolean());
+}
+
+/// Also proves `save_models` reloads the router on the running app: `models_configured` flips
+/// without a restart, which onboarding's save-then-test flow depends on.
+#[tokio::test]
+async fn save_models_then_get_models_round_trips_and_configures_the_running_app() {
+    let (core_app, _dir) = core_app().await;
+    let (_app, webview) = setup(core_app);
+    assert_eq!(
+        invoke(&webview, "get_models", json!({})).unwrap(),
+        Value::Null
+    );
+
+    let binding = |model: &str| json!({ "provider_id": "anthropic", "model": model, "temperature": null, "effort": null });
+    let models = json!({
+        "providers": [
+            { "id": "anthropic", "kind": "anthropic", "base_url": "https://api.anthropic.com" }
+        ],
+        "parser": binding("claude-haiku-4-5"),
+        "planner": binding("claude-opus-5"),
+        "conversation": binding("claude-sonnet-5"),
+    });
+    invoke(
+        &webview,
+        "set_api_key",
+        json!({ "providerId": "anthropic", "key": "sk-test" }),
+    )
+    .unwrap();
+    invoke(&webview, "save_models", json!({ "models": models })).unwrap();
+
+    assert_eq!(invoke(&webview, "get_models", json!({})).unwrap(), models);
+    let state = invoke(&webview, "get_app_state", json!({})).unwrap();
+    assert_eq!(state["models_configured"], json!(true));
+}
+
+#[tokio::test]
+async fn memory_and_usage_commands_work_on_an_empty_store() {
+    let (core_app, _dir) = core_app().await;
+    let (_app, webview) = setup(core_app);
+
+    assert_eq!(
+        invoke(&webview, "get_memory", json!({ "limit": 100 })).unwrap(),
+        json!([])
+    );
+    let delete = invoke(&webview, "delete_memory", json!({ "id": "no-such-note" })).unwrap_err();
+    assert_eq!(delete["code"], json!("not_found"));
+
+    assert!(invoke(&webview, "get_usage_summary", json!({}))
+        .unwrap()
+        .is_array());
 }

@@ -1059,3 +1059,356 @@ warnings`, `cargo test --workspace` all pass — 316 tests (+4 real-IPC tests). 
 (`tsc -b && vite build`) passes clean, strict mode, no unused locals/params. Screenshotted all
 three onboarding steps (both model-step layouts) against the running app via `npm run tauri dev`;
 confirmed the layout fix by comparing before/after screenshots.
+
+## 2026-09-26 — M7.3: Today + Chat pages
+
+`docs/PHASE1_SPEC.md` §10.3: main shell (sidebar + 今日/对话/设置 tabs) and the Today and Chat
+pages. Full breakdown in `docs/M7_SCOPE.md`'s M7.3 entry; the decisions worth recording here:
+
+**Activity chips are matched to a rendered message by content equality, not by index or id.**
+`get_history` doesn't reconstruct `activities` for past turns (M7.1's own decision), so `Chat`
+keeps the last live `send_message` result's `{content, activities}` separately and only shows
+the chips on a rendered assistant message when that message's `content` equals the live reply's
+`content` *and* it's the last message in the list. This is simple and correct for the normal
+case (one new assistant reply at a time) and degrades safely (chips just don't show) if two
+consecutive replies were ever byte-identical, which never happens in practice for this app's
+LLM-generated prose.
+
+**No browser `confirm()` for meal deletion.** §10.3 asks for "delete button per meal with
+confirm" without specifying the mechanism; a native `confirm()` popup would break the app's own
+styling and dark-mode support. Used a two-step in-place button instead (tap once to arm a
+red 确认删除/取消 pair, tap again to actually delete) — same pattern as GitHub's own inline
+delete confirmations, no modal/dialog component needed.
+
+**Tomorrow's no-plan-yet message reads `plan_time` from `get_settings` live**, rather than
+hardcoding §10.3's own example "21:00" — that string is the *default* `plan_time`, not a
+constant, and a user who changes it in Settings (M7.4) should see the real value here.
+
+**Kcal ring and macro bars use fixed, non-cycled hues** (sky for the ring; indigo/amber/violet
+for protein/carbs/fat, always in that order) per the dataviz skill's categorical-color rule,
+with the number always shown as text alongside the color so nothing is color-only. Skipped the
+skill's palette validator script (`scripts/validate_palette.js`) for this one, since these are
+small in-app meters reusing the app's own already-established Tailwind neutral/emerald/red
+system, not a new standalone palette being shipped — worth revisiting with the validator if
+Settings (M7.4) or later work introduces more chart-like surfaces.
+
+**Verification without click automation, again.** Same sandbox gap as M7.2 (no `xdotool`/
+equivalent, no way to install one without a password). Unlike M7.2, this machine's actual data
+dir (`~/.local/share/lifeagent`, from earlier M7.1/M7.2 manual runs) already has a real profile,
+a logged weight, and prior chat history in it — so rather than needing to click through
+onboarding, `App`'s `screen`/tab state was temporarily forced (`useState` initial value edited
+directly, the onboarding-gate `useEffect` temporarily no-op'd) to land straight on each page,
+screenshotted with `GDK_BACKEND=x11 npm run tauri dev` + `import -window <id>` (M0's own
+recipe), then the edit was reverted and confirmed clean with `git diff --stat`. This exercised
+real backend data end-to-end (computed nutrition targets, real conversation history rendering,
+correct button disabled-states) without ever calling `send_message`/`generate_plan` against the
+real configured provider, which this check had no reason to trigger. A real click-through
+(actually sending a message, generating/accepting a plan) still needs a real environment with
+input automation or a human at the keyboard — same caveat M7.2 recorded, now also covering M7.3.
+
+Verification: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D
+warnings`, `cargo test --workspace` all pass (no Rust changed — M7.1 already exposed every
+command this milestone needed). `npm run build` (`tsc -b && vite build`) passes clean, strict
+mode. Screenshotted Today (kcal ring, macro bars, empty meal list, no-plan-yet state) and Chat
+(real prior conversation, correctly disabled send button) against the real running app.
+
+## 2026-09-26 — M7.4: Settings page
+
+`docs/PHASE1_SPEC.md` §10.3's Settings section. Full breakdown in `docs/M7_SCOPE.md`'s M7.4
+entry; the decisions worth recording here:
+
+**A dedicated `ModelDraft` type for Settings, not a reused `OnboardingDraft`.** Onboarding's
+`StepModel` always shows a blank API key field and gates a "finish" action on a fresh successful
+test — neither applies once a key is already stored. Rather than bend `OnboardingDraft`/
+`StepModel` to cover both a blank-slate wizard and an edit-existing-config settings page, Settings
+got its own small `ModelDraft` (`settings/ModelSection.tsx`) with a `newApiKey` field that means
+"replace with this" when non-empty and "keep what's stored" when blank, plus a `has_api_key`-
+driven status hint instead of ever trying to display or pre-fill a real key.
+
+**Plan time and general toggles share one save, not two.** §10.3 lists 计划 and 通用 as separate
+bullets, but `SettingsDto`/`save_settings` (M7.1) already persist all four fields — plan time,
+day boundary, notifications, autostart — as one atomic write with no partial-update variant.
+Two separately-saved forms would only create a false impression that saving one leaves the other
+untouched, when in fact either save round-trips (and re-persists) all four. Built as one
+`GeneralSection` instead.
+
+**`ConfirmDeleteButton` extracted to `components/`.** M7.3's `MealList` already had a two-step
+(tap-to-arm) delete confirmation; `MemorySection` needed the exact same behavior for memory
+notes. Pulled it out to `components/ConfirmDeleteButton.tsx` and switched `MealList` over to it
+rather than duplicating the same ~25 lines a second time — a legitimate shared component (used
+identically in two places now), not a premature abstraction for a single call site.
+
+**Screenshot verification without working scroll, again a sandbox gap.** Programmatically
+setting a scrollable container's `scrollTop` from a `useEffect` (both immediately and via a
+repeating `setInterval`) had no visible effect in this environment's WebKitGTK webview, even
+though Vite's HMR log confirmed the edits were applied each time (`hmr update
+/src/settings/Settings.tsx`) and the *previous* two milestones' state-forcing technique (editing
+a `useState` initial value) worked fine in the same session. Root cause not chased down (likely
+some interaction between this WebKitGTK build, WSLg, and imperative scroll — not worth solving
+for a one-off manual check when a working alternative existed). Worked around by temporarily
+applying a CSS `transform: scale(0.25)` (with a matching `width: 400%`, since `transform` is a
+paint-only operation that doesn't affect layout/overflow) to Settings' content wrapper, which
+fit the entire page — all four sections — into one screenshot without needing to scroll at all.
+Reverted afterward; confirmed clean with `grep -rn "TEMP" apps/desktop/ui/src`.
+
+Verification: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D
+warnings`, `cargo test --workspace` all pass (no Rust changed). `npm run build` (`tsc -b && vite
+build`) passes clean, strict mode. Screenshotted the full Settings page (scaled to fit) against
+the real running app with this machine's real, already-configured data — every section showed
+correct real data: profile/goal fields, a goal preview matching Today's own kcal ring exactly,
+model config, a non-empty 本月用量 table from real prior API usage, plan/general settings, and
+one real memory note.
+
+## 2026-09-26 — M7.5: Shell chrome (tray, single instance, autostart, quick-entry)
+
+`docs/PHASE1_SPEC.md` §10.1/§10.3's remaining desktop-shell pieces. Full breakdown in
+`docs/M7_SCOPE.md`'s M7.5 entry; the decisions worth recording here:
+
+**Quick-entry routes by window label, not a URL/hash.** The spec calls for the quick-entry
+popup to have "its own tiny route," which suggested a client-side router at first read. This
+app has none (`App.tsx` is state-driven, no `react-router`), and adding one for a single second
+screen would be the kind of dependency CLAUDE.md's "keep dependencies minimal" rule argues
+against. `@tauri-apps/api/window`'s `getCurrentWindow()` already resolves synchronously to
+metadata Tauri injects at page load (no IPC round-trip needed), so `main.tsx` just picks
+`<QuickEntry />` vs `<App />` based on `getCurrentWindow().label === "quick-entry"`. Both windows
+load the exact same `index.html` (`WebviewUrl::App("index.html".into())`, same as the main
+window) — nothing about the served page itself differs, only what mounts.
+
+**Quick-entry gets its own capabilities file, scoped to just `allow-send-message`.** The main
+window's `capabilities/default.json` grants every command (profile, goals, models, memory,
+usage, plan actions, ...) — appropriate for the full app shell, wildly excessive for a popup
+whose only job is "type a message, send it." A second capability file
+(`capabilities/quick-entry.json`, `"windows": ["quick-entry"]`) keeps it to `core:default` +
+`allow-send-message`, per §12's least-privilege principle already established for `default.json`
+itself (see M7.1's entry on `capabilities/default.json` needing explicit grants at all).
+
+**`generate_plan`'s tray action calls `CoreApp` directly, not through a synthetic IPC call.**
+The 生成明日计划 menu item's click handler already has the real `CoreApp` (cloned into the tray's
+`on_menu_event` closure at `tray::build` time) and runs on the backend, not in the webview — so
+there's no reason to round-trip through `commands::generate_plan` and its `CommandError`
+mapping, which exists specifically for the boundary a real frontend `invoke()` call crosses.
+Made `commands::resolve_plan_date` `pub(crate)` instead of duplicating its "no date -> tomorrow"
+logic, so both paths pick the same date without copy-pasting the one-line `succ_opt()` call.
+
+**Autostart sync is deliberately untested by automated tests, unlike almost everything else in
+this codebase.** `tauri_plugin_autostart`'s `AutoLaunchManager::enable`/`disable` write real
+OS-level state (a Windows registry run key, an XDG `.desktop` file, a macOS launch agent) —
+calling either for real inside `cargo test` would leave side effects on whatever machine runs
+the suite, CI included, which is a materially different risk than this project's existing
+"never call a real LLM in tests" rule (CLAUDE.md) is even about, but the same *spirit*: don't let
+an automated test run touch anything real outside its own temp dir. `apps/desktop/src-tauri/
+tests/commands.rs`'s mock builder doesn't register the autostart plugin either (confirmed by
+reading `setup()` — it never calls `.plugin(tauri_plugin_autostart::init(...))`), so an IPC test
+that invoked `save_settings` today would panic on `state() called before manage()` for
+`AutoLaunchManager`; deliberately did not add such a test rather than register the plugin in the
+mock builder just to make one panic-free while still executing a real `enable`/`disable` in the
+test process. `save_settings` joins several other commands (`get_models`/`save_models`,
+`get_memory`/`delete_memory`, `get_usage_summary`, the plan commands) that `tests/commands.rs`'s
+mock builder already doesn't register at all — this is consistent with, not a new gap beyond,
+that existing pattern.
+
+**Tauri 2 APIs were verified against the actual installed crate sources before writing any
+code**, not from memory or general Tauri familiarity — `~/.cargo/registry/src/.../tauri-2.11.6`
+and `tauri-plugin-autostart-2.5.1` were grepped directly for `MenuItem::with_id`,
+`TrayIconBuilder`'s builder methods, `WindowEvent::CloseRequested`'s `CloseRequestApi::
+prevent_close`, `WebviewWindowBuilder`'s window-option methods, `WebviewUrl::App`'s `PathBuf`
+shape, and `ManagerExt::autolaunch`'s exact return type, before either was used. Everything
+compiled clean on the first attempt as a result.
+
+**Verification without click automation, a third time.** Same sandbox gap as M7.2–M7.4 (no
+`xdotool`/equivalent). Tray menu clicks in particular are a harder case than the webview-content
+state-forcing trick used for Today/Chat/Settings, since a tray menu is an OS-native widget with
+no React state to force — there is no way to exercise 打开/快速记录/生成明日计划/退出 by editing
+source in this sandbox. Compensated by: (1) confirming via `xwininfo -root -tree` that a real
+tray-icon proxy window (`"tray-icon tray app <pid>-1"`) exists after startup, proving
+`TrayIconBuilder::build` actually succeeded rather than erroring silently; (2) temporarily making
+`tray::open_quick_entry` `pub` and calling it once from `setup()` to screenshot the quick-entry
+window's real rendered content, then reverting (confirmed via `grep -rn "TEMP"`); (3) reading
+Tauri's own source for the parts that can't be exercised at all here (close-to-tray's
+`prevent_close`, the single-instance callback, the autostart sync) rather than trusting a mental
+model of how they behave. Real click-through verification (actually closing the main window and
+confirming the process survives in the tray, launching a second instance, sending a message
+through quick-entry end-to-end) needs a real Windows environment — the same caveat M7.2's
+onboarding screenshots and M7.3/M7.4's page checks already carry, now covering M7.5 too, and
+overlapping with M7.6's own full acceptance pass.
+
+Verification: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D
+warnings`, `cargo test --workspace` all pass, no new failures. `npm run build` (`tsc -b && vite
+build`) passes clean, strict mode. Ran the real app; no panic or logged error from
+`tray::build`, the single-instance plugin, or the startup autostart sync; confirmed the tray
+icon's proxy window and the quick-entry window's correct rendering as described above.
+
+## 2026-09-26 — M7 review fixes
+
+A review of all M7 work (everything checkable without a real Windows environment) found seven
+issues; all fixed. The decisions worth recording:
+
+**Quick-entry needs `core:window:allow-hide`.** `core:default`'s window set is read-only
+(`allow-is-visible`, `allow-title`, ...), so the popup's own `getCurrentWindow().hide()` (Esc,
+and after a reply) was denied by the ACL and swallowed by `void` — an undecorated,
+taskbar-less window with no way to dismiss it but Alt+F4. Added the one permission; a real-IPC
+test (`quick_entry_window_can_hide_itself_but_not_reach_data_commands`) was confirmed to fail
+without it ("window.hide not allowed") and pass with it.
+
+**`send_message` is retry-safe instead of the Chat page deduplicating.** The user message is
+stored before the first model call, so a failed turn leaves it behind; resending the same text
+used to store it twice. Now, if the latest user message has no final (tool-call-free) assistant
+reply after it and `text` equals it, `send_message` resumes that turn rather than appending
+again (`ConversationStore::unfinished_user_message`). Done in core rather than as a new
+`retry_message` command so the §10.2 table stays as specified and quick-entry/CLI get the same
+behaviour. Any tool results the failed turn already stored stay in the history window, so the
+model sees e.g. a meal it already logged instead of logging it again. Chat now resyncs via
+`get_history` on failure instead of dropping its optimistic bubble (which could drop the wrong
+message if an event-triggered refetch had already replaced the list).
+
+**Tray 生成明日计划 always toasts its result**, ignoring `notifications_enabled`: it's the
+direct response to the user's own click (with the main window usually hidden), not an
+unsolicited notification. On failure, the body is the `CommandError`'s zh-CN message, so
+"not configured" and "complete your profile first" are distinguishable.
+
+**Desktop logging (§12)** goes to `data_dir/logs/lifeagent.YYYY-MM-DD.log` (daily, 14 kept) plus
+stdout, INFO by default, `LIFEAGENT_LOG` overriding. It uses the rolling appender as a blocking
+writer, not `non_blocking`: Tauri's exit path never unwinds `run()`, so a `WorkerGuard` would
+never flush the last buffered lines. If the data dir can't be resolved, logging falls back to
+stdout and `setup()` still fails as before.
+
+**Settings shows the §12 "what is sent to cloud models" paragraph** at the top of 模型.
+**Settings sections show their load error** instead of 加载中… forever (shared
+`settings/LoadState.tsx`), and 模型 falls back to onboarding's Anthropic defaults when no config is
+stored instead of never rendering. **Commands take "now" from `CoreApp::clock()`** (made `pub`)
+rather than `Utc::now()`.
+
+Verification: fmt/clippy/`cargo test --workspace` clean (319 tests, +3); `npm run build` clean.
+Ran the real binary against a fresh throwaway data dir (`XDG_DATA_HOME`, so no models and no LLM
+calls): the log file is created and written (checked with `LIFEAGENT_LOG=debug`), with no ANSI
+codes and no first-run appender error.
+
+## 2026-09-26 — M7 review: smaller fixes
+
+The review's remaining smaller items, plus one more serious problem found while fixing them:
+
+**The desktop IPC tests were writing to the real OS keyring.** `tests/commands.rs`'s
+`core_app()` never overrode `CoreAppBuilder`'s default `KeyringSecretStore`, so
+`set_api_key_then_has_api_key_round_trips_with_camel_case_args` stored `sk-test` under
+`LifeAgent / provider:anthropic` in the developer's real credential store on every
+`cargo test --workspace` — overwriting a real Anthropic key configured under that same provider
+ID. The harness now always uses `MemorySecretStore`, like every other `CoreAppBuilder` in the
+workspace's tests already did (checked all of them). A key overwritten this way has to be
+re-entered (Settings → 模型, or `lifeagent-cli models set-key anthropic`).
+
+**Settings → 模型 got onboarding's guards.** Save/测试 are disabled (with a hint) unless provider
+ID, base URL and model name(s) are filled and there's a key to use — stored for this provider ID
+(re-checked via `has_api_key` whenever the ID changes, since keys are stored per ID) or newly
+typed. Toggling "same model for all" carries the current value(s) across so a blank model is
+never saved for every role. Changing provider kind applies the same prefill as onboarding
+(`prefillFor`, now exported from `StepModel.tsx`).
+
+**Quick-entry**: the post-reply hide timer is cancelled by typing or a new submit (it used to
+hide the window mid-sentence), hiding resets the reply/error so a reopened window is clean, and
+the input is refocused whenever the reused window regains focus (`autoFocus` only fires on the
+first open).
+
+**Onboarding 完成 retry** no longer logs the same weight twice when a later step
+(`save_weight_goal`) failed on the first attempt.
+
+**Not changed — `PlanFailed` notifications.** The review suspected a failed manual 立即生成
+would also toast. It can't: only the scheduler publishes `PlanFailed`; a manual failure is
+returned to its caller. Documented on `notify::notification_target`.
+
+Also: `tauri-plugin-single-instance` is registered first, per its docs; the weight dialog says
+"enter a weight > 0" instead of "required" for invalid input; stale comments fixed (`error.rs`'s
+leftover `allow(dead_code)`, `commands.rs`/`lib.rs`/`App.tsx`/`api/commands.ts` module docs,
+`M7_SCOPE.md`'s already-resolved open decision). Five new real-IPC tests cover `get_history`, the
+plan commands' error codes, `get_settings`, `get_models`/`save_models` (including the live
+router reload) and the memory/usage commands, with `send_message` driven by `MockChatModel`.
+`save_settings` stays untested over IPC on purpose (real OS autostart, see M7.5).
+
+Verification: fmt/clippy/`cargo test --workspace` clean (324 tests); `npm run build` clean.
+
+## 2026-09-26 — M7.6 step 1 (Windows onboarding) fixes
+
+Found during the first real Windows acceptance run, onboarding step:
+
+**Anthropic `effort` is dropped for models that reject it.** With onboarding's suggested
+per-role models, 测试连接 failed with `400 "This model does not support the effort
+parameter."`: §6.3 pairs the parser role with `effort: low`, but §10.3 suggests
+`claude-haiku-4-5` for that role, and Haiku 4.5 rejects `output_config.effort`. It passed with
+`claude-sonnet-5` for all roles only because Sonnet 5 accepts it. The provider now omits
+`output_config` for a denylist of model-ID prefixes (`claude-haiku*`, `claude-3*`, Sonnet ≤ 4.5,
+Opus ≤ 4.1) rather than an allowlist, so newer models keep getting the per-role effort.
+Done in the provider rather than the router because it's an Anthropic-API fact, like "no
+`temperature`". Haiku therefore runs the parser at its own default (no thinking), which is
+what "low" was for anyway.
+
+**Autostart sync no longer errors on every launch.** Startup reconciliation called
+`disable()` whenever the setting was off, and on Windows disabling a never-registered entry
+fails with "file not found" (os error 2), logged at ERROR on every launch. `sync_autostart`
+now checks `is_enabled()` first and only changes a registration that differs; startup reuses
+the same function instead of its own copy.
+
+**Onboarding 测试连接 shows per-role latency and names the failing role**, e.g.
+"连接成功（解析 320ms · 规划 910ms · 对话 450ms）" / "连接失败：解析：…". The failure message also
+lost a stray "Error: " prefix (an `Error` object was being stringified).
+
+**LLM calls are now logged at INFO (§12).** The Windows run's log file was empty after a
+successful onboarding: nothing in `llm`/`core` logged at INFO, so §12's "log each LLM call at
+INFO with role, model, tokens, latency, ok" was never implemented. `LlmRouter::complete` now
+emits one `llm call` line with exactly those fields (plus provider ID) — no content — next to
+the existing `UsageSink` record, so it covers every caller (orchestrator, planner, parser,
+`test_model`).
+
+## 2026-09-26 — M7.6 steps 2–4 (Windows chat) fixes
+
+Steps 2–4 stored the right data (one breakfast, one lunch, the correction soft-deleted and
+re-logged), but two replies/parses were wrong:
+
+**The system prompt is built once per turn, not per tool-loop iteration.** After
+`diet_log_meal` succeeded, the model replied "看到这份早餐已经记录过了" — "already recorded".
+`send_message` rebuilt the system prompt on every iteration, so the second call's "Today's
+status" already listed the meal the first call had just logged, and the model read the user's
+message as a repeat. §7.11's pseudocode doesn't say which; building it once means the status
+describes the day as it was when the user spoke, and tool results carry the updated totals
+(they already return `day_total`/`remaining`). It also keeps the prompt prefix stable across
+iterations. Regression test: `system_prompt_is_not_rebuilt_after_a_tool_call_within_a_turn`
+(fails without the fix).
+
+**The meal parser prompt (§9.2) now gives a concrete decomposition example.** Haiku 4.5 returned
+"牛肉拉面(熟)" as a single 300 g item despite "split composite dishes" — on a fresh database
+KNOWN_FOODS is empty, so nothing anchored it. §8.4 already names this exact example
+("牛肉拉面" → noodles, beef, broth, vegetables); it's now in the prompt itself, plus a
+stir-fry one, and "a dish name is not an item by itself". Once a whole-dish food exists in the
+table, §8.4 deliberately keeps reusing it, so a database that already learned "牛肉拉面(熟)" has
+to be reset (or the food deleted) to re-test this.
+
+## 2026-09-26 — M7.6 queued fixes (found during the Windows acceptance run)
+
+All three are prompt/context changes; none touch validation or the numbers engine. Prompt
+texts changed in code and in the spec's verbatim copies (§8.5, §9.1–§9.3, §9.4 planner header).
+
+**Corrections keep unchanged items' grams.** Re-logging after "卤蛋其实是两个" re-parsed the whole
+meal from text, so Haiku re-guessed every portion (beef 80→50 g, broth 400→300 g) and lunch
+*fell* 662→617 kcal after adding an egg. The system prompt's correction rule and the
+`diet_log_meal` description now tell the conversation model to describe the corrected meal item
+by item, carrying the earlier tool result's names and grams for everything the user didn't
+correct — the one exception to "pass the user's original wording". The parser prompt gained
+"use grams exactly as stated" so those carried-over grams stick. Rejected: a dedicated
+`diet_correct_meal` tool editing the stored items directly — more exact, but new tool surface
+and schema beyond §8.5 for what the model already does correctly when told.
+
+**Food names say dry/raw vs cooked when it matters.** "燕麦 40g" (a dry portion) was resolved as
+cooked oats at 68 kcal/100 g — 27 kcal instead of ~150. The parser must now name the state the
+grams refer to ("燕麦片(干)" vs "燕麦粥", "大米(生)" vs "熟米饭"), and the food-estimate prompt
+uses the state the name gives (干/生/熟) instead of defaulting to "as normally eaten".
+
+**Plan numbers come from the app, not the model.** Plan summaries stated "约2160千卡、蛋白质135克"
+(the targets, not the computed 2024/2135 kcal), and the step-7 chat reply repeated it — against
+CLAUDE.md's "numbers shown to the user are computed in Rust". The planner prompt now forbids
+nutrition figures in `summary`, and only lets it reference recent adherence when the brief has
+data (v1 had claimed "和前几天不重样" with no history). `render_plan_compact` — the plan text in
+the system prompt and in `core_get_plan`/`core_revise_plan` results — now carries the
+validator-computed `total.kcal` per meal and a "day total (computed by the app)" line, so the
+conversation model has real numbers to quote. Core still knows no section schema: it reads
+`total.kcal` only when present.
+
+Not changed: revision latency (85 s on Opus 5 at `high` effort). It's the planner's quality
+lever per §6.3; revisit with real usage data, not from one run.

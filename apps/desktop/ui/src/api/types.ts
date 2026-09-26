@@ -90,6 +90,145 @@ export interface AppState {
   logical_date: string;
 }
 
+export interface SettingsDto {
+  plan_time: string; // "HH:MM"
+  day_boundary: string; // "HH:MM"
+  notifications_enabled: boolean;
+  autostart: boolean;
+}
+
+// ---- Chat --------------------------------------------------------------------------------
+
+export type MessageRole = "user" | "assistant" | "tool";
+
+export interface ChatTurn {
+  reply: string;
+  activities: string[];
+}
+
+export interface HistoryMessage {
+  role: MessageRole;
+  content: string | null;
+  created_at: string;
+}
+
+// ---- Today / plan --------------------------------------------------------------------------
+
+export interface WeightPoint {
+  kg: number;
+  logical_date: string;
+  occurred_at: string;
+}
+
+/** `{kcal, protein_g, carbs_g, fat_g, fiber_g}` — the shape every diet tool result and card
+ * uses (`crates/plugin-diet/src/model.rs`'s `Macros::to_json`). Distinct from `NutritionTargets`
+ * above, which is onboarding's richer preview shape (bmr/tdee/delta/floor_applied). */
+export interface DietMacros {
+  kcal: number;
+  protein_g: number;
+  carbs_g: number;
+  fat_g: number;
+  fiber_g: number;
+}
+
+export type MealType = "breakfast" | "lunch" | "dinner" | "snack";
+
+export interface DietMealItem {
+  name: string;
+  grams: number;
+  kcal: number;
+  protein_g: number;
+  estimated: boolean;
+}
+
+/** One logged meal, as `cards.diet.meals` lists it (§8.8). */
+export interface DietLoggedMeal {
+  entry_id: string;
+  meal_type: MealType;
+  time: string; // "HH:MM"
+  items: DietMealItem[];
+  total: DietMacros;
+}
+
+/** `TodayView.cards["diet"]` (§8.8): `null` total/target when there's no profile/weight yet. */
+export interface DietCard {
+  date: string;
+  total: DietMacros | null;
+  target: DietMacros | null;
+  meals: DietLoggedMeal[];
+}
+
+/** One planned meal inside a plan's `diet` section (§8.10's `finalize`). */
+export interface DietPlanMeal {
+  meal_type: MealType;
+  title: string;
+  prep_note: string | null;
+  items: DietMealItem[];
+  total: DietMacros;
+}
+
+/** `StoredPlan.content.sections["diet"]`. */
+export interface DietPlanSection {
+  targets: DietMacros;
+  total: DietMacros;
+  meals: DietPlanMeal[];
+  tips: string[];
+}
+
+export type PlanStatus = "proposed" | "accepted";
+export type PlanTrigger = "schedule" | "manual" | "revision";
+
+export interface PlanContent {
+  summary: string;
+  /** Plugin id -> that plugin's finalized section data; only `"diet"` exists in Phase 1. */
+  sections: Record<string, unknown>;
+  disclaimer: string | null;
+}
+
+export interface StoredPlan {
+  plan_date: string;
+  version: number;
+  status: PlanStatus;
+  trigger: PlanTrigger;
+  instruction: string | null;
+  content: PlanContent;
+  warnings: string[];
+  created_at: string;
+}
+
+export interface TodayView {
+  logical_date: string;
+  /** Plugin id -> that plugin's `today_card`; only `"diet"` exists in Phase 1. */
+  cards: Record<string, unknown>;
+  today_plan: StoredPlan | null;
+  tomorrow_plan: StoredPlan | null;
+  latest_weight: WeightPoint | null;
+}
+
+/** `TodayView.cards["diet"]`, narrowed from the untyped `Record`. */
+export function dietCard(view: TodayView): DietCard | null {
+  const card = view.cards["diet"];
+  return (card as DietCard | undefined) ?? null;
+}
+
+/** `StoredPlan.content.sections["diet"]`, narrowed from the untyped `Record`. */
+export function dietPlanSection(plan: StoredPlan): DietPlanSection | null {
+  const section = plan.content.sections["diet"];
+  return (section as DietPlanSection | undefined) ?? null;
+}
+
+export interface MemoryNote {
+  id: string;
+  note: string;
+  created_at: string;
+}
+
+export interface RoleUsage {
+  role: Role;
+  prompt_tokens: number;
+  completion_tokens: number;
+}
+
 export type CommandErrorCode =
   | "not_configured"
   | "auth"

@@ -374,7 +374,9 @@ Per-role tuning depends on the provider kind, because the two APIs expose differ
 | `OpenAiCompatible` | `temperature` | 0.0 | 0.7 | 0.5 |
 | `Anthropic` | `output_config.effort` | `low` | `high` | `medium` |
 
-Each provider ignores the other's field. Effort matters: the parser role is the app's most
+Each provider ignores the other's field. The Anthropic provider also drops `effort` for models
+that reject it with a 400 (Haiku 4.5 — the suggested parser model — and models older than
+Opus 4.5 / Sonnet 4.6); see `docs/DECISIONS.md` 2026-09-26 "M7.6 step 1". Effort matters: the parser role is the app's most
 frequent call, and leaving it at the API default (`high`) makes every food lookup slow and
 expensive.
 
@@ -814,7 +816,8 @@ Default meal type when neither the user nor the parser gives one, by local time:
 
 Deleting a meal uses `core_delete_entry`. Tool descriptions tell the model: always pass the
 user's original wording in `description`; when the user corrects a portion, delete the entry
-and log it again.
+and log it again, describing the corrected meal item by item with the earlier result's names and
+grams for every item the user did not correct (otherwise the parser re-guesses their portions).
 
 ### 8.6 Targets engine (pure functions, fully unit tested)
 
@@ -972,6 +975,8 @@ Rules:
 - If a report is ambiguous in a way that changes the numbers a lot (e.g. "ate some rice"),
   log it with a reasonable typical portion and tell the user which portion you assumed.
 - When the user corrects a logged entry, delete it with core_delete_entry and log it again.
+  In the new description, keep every item the user did not correct with the name and grams
+  from the earlier tool result, and change only what they corrected.
 - Save durable preferences with core_remember; do not save one-off events.
 - To change a plan, call core_revise_plan with the user's request as the instruction.
 - Be brief and warm. Reply in the language the user writes in (default Simplified Chinese).
@@ -1008,10 +1013,14 @@ Rules:
 - Use a name from KNOWN_FOODS when it refers to the same food. Otherwise use a short,
   specific, generic food name in the user's language (e.g. "熟米饭", "卤蛋", "牛肉(熟)").
 - Split composite dishes into main components with separate grams, unless the whole dish
-  appears in KNOWN_FOODS.
+  appears in KNOWN_FOODS. A dish name is not an item by itself: "牛肉拉面" becomes
+  "拉面(熟)", "牛肉(熟)", "牛骨汤" and "青菜"; "番茄炒蛋" becomes "番茄", "鸡蛋" and "食用油".
 - Include cooking oil for fried or stir-fried dishes as a separate item ("食用油") with a
   typical amount.
-- Use typical portions when not stated. Counts ("两个鸡蛋") become grams.
+- Use grams exactly as stated in the description. Use typical portions when not stated.
+  Counts ("两个鸡蛋") become grams.
+- When a food's nutrition differs a lot between dry/raw and cooked, the name must say which
+  state the grams are for: "燕麦片(干)" 40 g but "燕麦粥" 250 g; "大米(生)" but "熟米饭".
 - Drinks with calories count as items. Plain water, black coffee and tea without sugar are
   omitted.
 - meal_type only if the text states or clearly implies it; otherwise null.
@@ -1025,8 +1034,8 @@ Description: {description}
 
 ```
 Give typical nutrition values per 100 g of the edible portion of this food, as eaten
-(cooked if it is normally eaten cooked). Use values consistent with standard food
-composition tables.
+(cooked if it is normally eaten cooked). If the name states a state such as 干, 生 or 熟, give
+values for that state. Use values consistent with standard food composition tables.
 
 `carbs_g` is total carbohydrate, fiber included — the same convention standard food composition
 tables use. Do not subtract fiber from it.
@@ -1055,7 +1064,9 @@ General rules:
 - Allergies are absolute. Avoid disliked foods.
 - Vary dishes compared with recent days.
 - "summary": 2–4 sentences to the user in {user_language}: the plan's focus for tomorrow,
-  referencing recent adherence if helpful. Encouraging, never guilt-tripping.
+  referencing recent adherence only if recent data is given below. Encouraging, never
+  guilt-tripping. No kcal, gram or other nutrition figures: the app shows its own computed
+  totals next to the summary, and yours would not match them.
 
 Return JSON: {"summary": string, "sections": {<section id>: <section object>}}
 

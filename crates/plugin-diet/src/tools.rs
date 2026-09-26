@@ -23,7 +23,11 @@ pub fn specs() -> Vec<ToolSpec> {
                 works out foods, portions and nutrition itself. Set `meal_type` only if the \
                 user states it. Set `eaten_at` (local time, YYYY-MM-DDTHH:MM) only if the user \
                 ate at a different time than now. When the user corrects a logged meal (wrong \
-                portion or item), delete that entry with core_delete_entry and log it again. \
+                portion or item), delete that entry with core_delete_entry and log it again; \
+                this re-log is the one exception to the original wording: describe the \
+                corrected meal item by item, keeping the name and grams of each item the \
+                user did not correct from the earlier result (e.g. \"拉面(熟)150g、牛肉(熟)80g、\
+                卤蛋2个\"), otherwise unchanged items get new guessed portions. \
                 Quote the returned numbers; never compute your own."
                 .into(),
             parameters: json!({

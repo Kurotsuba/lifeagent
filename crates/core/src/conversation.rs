@@ -180,6 +180,22 @@ impl ConversationStore {
         }
     }
 
+    /// The latest `user` message if its turn never finished — no final (tool-call-free)
+    /// assistant reply follows it, e.g. because the model call failed after the user message
+    /// was stored. `CoreApp::send_message` uses this to resume that turn on a retry instead of
+    /// storing the same user message a second time.
+    pub async fn unfinished_user_message(&self) -> Result<Option<StoredMessage>, CoreError> {
+        let messages = self.recent(HISTORY_WINDOW).await?;
+        for m in messages.into_iter().rev() {
+            match m.role {
+                MessageRole::User => return Ok(Some(m)),
+                MessageRole::Assistant if m.tool_calls_json.is_none() => return Ok(None),
+                _ => {}
+            }
+        }
+        Ok(None)
+    }
+
     fn row_to_message(row: MessageRow) -> Result<StoredMessage, CoreError> {
         let (id, role, content, tool_calls_json, tool_call_id, tool_name, created_at) = row;
         Ok(StoredMessage {
@@ -231,6 +247,34 @@ mod tests {
             ConversationStore::new(pool, Arc::new(crate::clock::FixedClock::new(Utc::now()))),
             dir,
         )
+    }
+
+    #[tokio::test]
+    async fn unfinished_user_message_is_the_last_user_message_without_a_final_reply() {
+        let (store, _dir) = store().await;
+        assert_eq!(store.unfinished_user_message().await.unwrap(), None);
+
+        store.append(user("一")).await.unwrap();
+        store.append(assistant("二")).await.unwrap();
+        assert_eq!(store.unfinished_user_message().await.unwrap(), None);
+
+        let pending = store.append(user("三")).await.unwrap();
+        store
+            .append(NewMessage {
+                role: MessageRole::Assistant,
+                tool_calls_json: Some("[]".into()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        store.append(tool("{}", "call_1")).await.unwrap();
+        assert_eq!(
+            store.unfinished_user_message().await.unwrap(),
+            Some(pending)
+        );
+
+        store.append(assistant("四")).await.unwrap();
+        assert_eq!(store.unfinished_user_message().await.unwrap(), None);
     }
 
     #[tokio::test]

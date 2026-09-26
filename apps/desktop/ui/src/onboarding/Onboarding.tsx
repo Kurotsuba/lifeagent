@@ -30,9 +30,13 @@ export function Onboarding({ onComplete }: OnboardingProps) {
   const [testing, setTesting] = useState(false);
   const [testError, setTestError] = useState<string | null>(null);
   const [testedSignature, setTestedSignature] = useState<string | null>(null);
+  const [testLatencies, setTestLatencies] = useState<Partial<Record<Role, number>>>({});
 
   const [finishing, setFinishing] = useState(false);
   const [finishError, setFinishError] = useState<string | null>(null);
+  // The weight already logged by an earlier, partly-failed 完成 attempt — so retrying (e.g.
+  // after `save_weight_goal` rejected the goal) doesn't log the same weight a second time.
+  const [loggedWeightKg, setLoggedWeightKg] = useState<number | null>(null);
 
   const update = (patch: Partial<OnboardingDraft>) => setDraft((d) => ({ ...d, ...patch }));
   const testSucceeded = testedSignature !== null && testedSignature === modelSignature(draft);
@@ -43,12 +47,16 @@ export function Onboarding({ onComplete }: OnboardingProps) {
     try {
       await setApiKey(draft.providerId, draft.apiKey);
       await saveModels(buildModelsConfig(draft));
+      const latencies: Partial<Record<Role, number>> = {};
       for (const role of ROLES) {
         const result = await testModel(role);
         if (!result.ok) {
-          throw new Error(result.error ?? t.model.testFailed);
+          // A string, not an `Error`: `commandErrorMessage` would render it as "Error: …".
+          throw `${zhCN.settings.role[role]}：${result.error ?? t.model.testFailed}`;
         }
+        latencies[role] = result.latency_ms;
       }
+      setTestLatencies(latencies);
       setTestedSignature(modelSignature(draft));
     } catch (error) {
       setTestedSignature(null);
@@ -63,7 +71,11 @@ export function Onboarding({ onComplete }: OnboardingProps) {
     setFinishError(null);
     try {
       await saveProfile(buildProfile(draft));
-      await logWeight(Number(draft.weightKg));
+      const weightKg = Number(draft.weightKg);
+      if (weightKg !== loggedWeightKg) {
+        await logWeight(weightKg);
+        setLoggedWeightKg(weightKg);
+      }
       await saveWeightGoal(buildGoal(draft));
       await completeOnboarding();
       onComplete();
@@ -92,6 +104,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
               testing={testing}
               testError={testError}
               testSucceeded={testSucceeded}
+              testLatencies={testLatencies}
               onTest={runTest}
             />
           ) : null}

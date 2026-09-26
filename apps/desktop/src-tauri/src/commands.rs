@@ -6,14 +6,13 @@
 //! `CommandError`. No business logic lives here beyond the odd default (e.g. `generate_plan`'s
 //! date) already established by the CLI in M6.
 //!
-//! **`autostart`**: `save_settings` only persists the `autostart` flag. Actually
-//! registering/unregistering the OS autostart entry via `tauri_plugin_autostart` is M7.5 work,
-//! done alongside the tray (see `docs/M7_SCOPE.md`) — it needs the `AppHandle`-level autostart
-//! manager, not just `CoreApp`.
+//! **`autostart`**: `save_settings` persists the `autostart` flag and then syncs the OS-level
+//! registration through `tauri_plugin_autostart` (`sync_autostart`), which is why it alone also
+//! takes the `AppHandle`.
 
 use std::time::Instant;
 
-use chrono::{NaiveDate, Utc};
+use chrono::NaiveDate;
 use lifeagent_core::app::{ChatTurn, CoreApp, HistoryMessage, TodayView};
 use lifeagent_core::error::CoreError;
 use lifeagent_core::goals::WeightGoal;
@@ -32,7 +31,11 @@ use crate::error::CommandError;
 
 /// `generate_plan`'s `date` if given (`YYYY-MM-DD`), else tomorrow — the plan a user is about
 /// to eat, not today's already-settled one. Mirrors `lifeagent-cli`'s own `resolve_date` (M6).
-async fn resolve_plan_date(app: &CoreApp, date: Option<String>) -> Result<NaiveDate, CommandError> {
+/// `pub(crate)` so the tray's 生成明日计划 item (`tray.rs`) can resolve the same default.
+pub(crate) async fn resolve_plan_date(
+    app: &CoreApp,
+    date: Option<String>,
+) -> Result<NaiveDate, CommandError> {
     match date {
         Some(s) => parse_date(&s),
         None => {
@@ -69,7 +72,7 @@ pub async fn get_app_state(state: State<'_, CoreApp>) -> Result<AppState, Comman
 pub async fn complete_onboarding(state: State<'_, CoreApp>) -> Result<(), CommandError> {
     state
         .settings()
-        .set_onboarding_complete(true, Utc::now())
+        .set_onboarding_complete(true, state.clock().now())
         .await?;
     Ok(())
 }
@@ -202,10 +205,11 @@ pub async fn get_settings(state: State<'_, CoreApp>) -> Result<SettingsDto, Comm
 
 #[tauri::command]
 pub async fn save_settings(
+    app: tauri::AppHandle,
     state: State<'_, CoreApp>,
     settings: SettingsDto,
 ) -> Result<(), CommandError> {
-    let now = Utc::now();
+    let now = state.clock().now();
     let plan_time = parse_hhmm(&settings.plan_time)?;
     let day_boundary = parse_hhmm(&settings.day_boundary)?;
     let s = state.settings();
@@ -214,7 +218,31 @@ pub async fn save_settings(
     s.set_notifications_enabled(settings.notifications_enabled, now)
         .await?;
     s.set_autostart(settings.autostart, now).await?;
+    sync_autostart(&app, settings.autostart);
     Ok(())
+}
+
+/// Registers/unregisters the OS-level autostart entry to match the just-saved setting. Best
+/// effort: a failure here (e.g. no permission to write the registry run key) shouldn't fail the
+/// save of the user's actual preference, which already succeeded above — logged instead, same
+/// as `notify.rs`'s own treatment of non-critical OS integration failures. Also called from
+/// `setup()` on every launch. Only touches the registration when it differs from `enabled`:
+/// disabling an entry that was never registered fails on Windows ("file not found").
+pub(crate) fn sync_autostart(app: &tauri::AppHandle, enabled: bool) {
+    use tauri_plugin_autostart::ManagerExt;
+    let autolaunch = app.autolaunch();
+    let result = autolaunch.is_enabled().and_then(|registered| {
+        if registered == enabled {
+            Ok(())
+        } else if enabled {
+            autolaunch.enable()
+        } else {
+            autolaunch.disable()
+        }
+    });
+    if let Err(e) = result {
+        tracing::error!(error = %e, enabled, "failed to sync OS autostart registration");
+    }
 }
 
 // ---- Models / API keys -----------------------------------------------------------------------
@@ -229,7 +257,10 @@ pub async fn save_models(
     state: State<'_, CoreApp>,
     models: ModelsConfig,
 ) -> Result<(), CommandError> {
-    state.settings().set_models(&models, Utc::now()).await?;
+    state
+        .settings()
+        .set_models(&models, state.clock().now())
+        .await?;
     // Takes effect on this already-running `CoreApp` immediately, not just after a restart —
     // see `docs/DECISIONS.md`'s M7.1 `reload_models` entry.
     state.reload_models().await?;

@@ -215,6 +215,17 @@ impl LlmRouter {
             Ok(resp) => (resp.usage.prompt_tokens, resp.usage.completion_tokens, true),
             Err(_) => (0, 0, false),
         };
+        // §12: one INFO line per call — metadata only, never message content.
+        tracing::info!(
+            ?role,
+            provider = %provider_id,
+            model = %model,
+            prompt_tokens,
+            completion_tokens,
+            latency_ms,
+            ok,
+            "llm call"
+        );
 
         self.usage_sink
             .record(UsageEvent {

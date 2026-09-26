@@ -333,7 +333,9 @@ impl CoreApp {
     pub(crate) fn data_dir(&self) -> &std::path::Path {
         &self.0.data_dir
     }
-    pub(crate) fn clock(&self) -> &Arc<dyn Clock> {
+    /// The injected `Clock` — composition roots use it for "now" (e.g. settings' `updated_at`)
+    /// instead of `Utc::now()`, so tests can control time.
+    pub fn clock(&self) -> &Arc<dyn Clock> {
         &self.0.clock
     }
     /// The current `RouterState`. A plain `Arc` clone under a brief, non-`.await`-holding lock
@@ -594,28 +596,44 @@ impl CoreApp {
     /// Runs one conversation turn (§7.11): stores the user message, then alternates model
     /// calls and tool dispatch — tool calls within a round run sequentially, in call order —
     /// until the model stops calling tools or the iteration cap is hit.
+    ///
+    /// Retry-safe: if the previous turn failed before a final reply and `text` is that turn's
+    /// own user message, the turn is resumed rather than the message being stored twice (the
+    /// user message is persisted before the first model call, so a failed turn leaves it
+    /// behind).
     pub async fn send_message(&self, text: &str) -> Result<ChatTurn, CoreError> {
         self.require_models()?;
         let _guard = self.0.send_lock.lock().await;
 
-        self.0
+        let is_retry = self
+            .0
             .conversation
-            .append(NewMessage {
-                role: MessageRole::User,
-                content: Some(text.to_string()),
-                ..Default::default()
-            })
-            .await?;
+            .unfinished_user_message()
+            .await?
+            .is_some_and(|m| m.content.as_deref() == Some(text));
+        if !is_retry {
+            self.0
+                .conversation
+                .append(NewMessage {
+                    role: MessageRole::User,
+                    content: Some(text.to_string()),
+                    ..Default::default()
+                })
+                .await?;
+        }
 
         let plugin_ctx = self.plugin_context();
         let router = plugin_ctx.llm.clone();
         let tool_specs = self.0.registry.specs();
         let mut activities = Vec::new();
+        // Built once per turn, not per iteration: rebuilt after a tool call, "Today's status"
+        // already lists the meal that call just logged, and the model then tells the user it
+        // was "already recorded". Tool results carry the updated totals instead.
+        let system_prompt = context::build_system_prompt(&plugin_ctx, &self.0.plugins).await?;
 
         for _ in 0..MAX_ITERATIONS {
-            let system_prompt = context::build_system_prompt(&plugin_ctx, &self.0.plugins).await?;
             let history = self.0.conversation.history_window().await?;
-            let messages = Self::to_llm_messages(system_prompt, &history)?;
+            let messages = Self::to_llm_messages(system_prompt.clone(), &history)?;
 
             let resp = router
                 .complete(

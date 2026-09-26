@@ -232,7 +232,9 @@ General rules:
 - Allergies are absolute. Avoid disliked foods.
 - Vary dishes compared with recent days.
 - "summary": 2–4 sentences to the user in {user_language}: the plan's focus for tomorrow,
-  referencing recent adherence if helpful. Encouraging, never guilt-tripping.
+  referencing recent adherence only if recent data is given below. Encouraging, never
+  guilt-tripping. No kcal, gram or other nutrition figures: the app shows its own computed
+  totals next to the summary, and yours would not match them.
 
 Return JSON: {"summary": string, "sections": {<section id>: <section object>}}
 

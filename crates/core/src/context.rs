@@ -26,6 +26,8 @@ Rules:
 - If a report is ambiguous in a way that changes the numbers a lot (e.g. \"ate some rice\"),
   log it with a reasonable typical portion and tell the user which portion you assumed.
 - When the user corrects a logged entry, delete it with core_delete_entry and log it again.
+  In the new description, keep every item the user did not correct with the name and grams
+  from the earlier tool result, and change only what they corrected.
 - Save durable preferences with core_remember; do not save one-off events.
 - To change a plan, call core_revise_plan with the user's request as the instruction.
 - Be brief and warm. Reply in the language the user writes in (default Simplified Chinese).
@@ -163,7 +165,9 @@ fn render_template(
 
 /// A plan in compact form (§7.9): summary, then each meal's title and items. Core doesn't
 /// know section schemas; it renders any section that has a `meals` array shaped like the diet
-/// section's (`meal_type`, `title`, `items[{name, grams}]`) and skips the rest.
+/// section's (`meal_type`, `title`, `items[{name, grams}]`) and skips the rest. The
+/// validator-computed `total.kcal` of each meal and of the section is included when present,
+/// so the conversation model quotes the app's numbers rather than restating targets.
 pub(crate) fn render_plan_compact(label: &str, plan: &StoredPlan) -> String {
     let status = format!("{:?}", plan.status).to_lowercase();
     let mut lines = vec![format!(
@@ -194,10 +198,18 @@ pub(crate) fn render_plan_compact(label: &str, plan: &StoredPlan) -> String {
                         .collect()
                 })
                 .unwrap_or_default();
-            lines.push(format!("- {meal_type} {title}: {}", items.join(", ")));
+            let kcal = total_kcal(meal).map_or(String::new(), |k| format!(" ({k:.0} kcal)"));
+            lines.push(format!("- {meal_type} {title}{kcal}: {}", items.join(", ")));
+        }
+        if let Some(k) = total_kcal(section) {
+            lines.push(format!("- day total (computed by the app): {k:.0} kcal"));
         }
     }
     lines.join("\n")
+}
+
+fn total_kcal(value: &Value) -> Option<f64> {
+    value.get("total")?.get("kcal")?.as_f64()
 }
 
 pub(crate) fn render_profile_summary(
@@ -388,6 +400,40 @@ mod tests {
 
         assert!(prompt.contains("### Snippet Plugin"));
         assert!(prompt.contains("today's snippet text"));
+    }
+
+    #[tokio::test]
+    async fn compact_plan_carries_the_computed_meal_and_day_kcal() {
+        use crate::plan::{PlanContent, PlanTrigger};
+        use std::collections::BTreeMap;
+
+        let (ctx, _mock, _dir) = crate::test_support::context().await;
+        let tomorrow = ctx.today().await.unwrap().succ_opt().unwrap();
+        let content = PlanContent {
+            summary: "明天多吃蛋白质".into(),
+            sections: BTreeMap::from([(
+                "diet".to_string(),
+                json!({
+                    "meals": [{
+                        "meal_type": "breakfast",
+                        "title": "燕麦牛奶",
+                        "items": [{"name": "燕麦片(干)", "grams": 50}],
+                        "total": {"kcal": 473.4}
+                    }],
+                    "total": {"kcal": 2135.0}
+                }),
+            )]),
+            disclaimer: None,
+        };
+        ctx.plans
+            .insert(tomorrow, PlanTrigger::Manual, None, &content, &[])
+            .await
+            .unwrap();
+
+        let prompt = build_system_prompt(&ctx, &[]).await.unwrap();
+
+        assert!(prompt.contains("- breakfast 燕麦牛奶 (473 kcal): 燕麦片(干) 50g"));
+        assert!(prompt.contains("- day total (computed by the app): 2135 kcal"));
     }
 
     #[tokio::test]

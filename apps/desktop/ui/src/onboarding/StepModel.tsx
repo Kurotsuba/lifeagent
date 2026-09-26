@@ -1,7 +1,7 @@
 import { Field, inputClass } from "../components/Field";
 import { secondaryButtonClass } from "../components/buttonStyles";
 import { zhCN } from "../i18n/zh-CN";
-import type { ProviderKind } from "../api/types";
+import type { ProviderKind, Role } from "../api/types";
 import type { OnboardingDraft } from "./draft";
 
 const t = zhCN.onboarding.model;
@@ -10,8 +10,9 @@ const providerKinds: ProviderKind[] = ["anthropic", "open_ai_compatible"];
 
 /** Anthropic's own defaults (§10.3): base URL with no `/v1` suffix, and suggested per-role
  * models (opus for planning, sonnet for conversation, haiku for parsing). Switching away clears
- * these rather than leaving Anthropic-specific values under a different provider kind. */
-function prefillFor(kind: ProviderKind): Partial<OnboardingDraft> {
+ * these rather than leaving Anthropic-specific values under a different provider kind. Also used
+ * by Settings' 模型 section. */
+export function prefillFor(kind: ProviderKind): Partial<OnboardingDraft> {
   if (kind === "anthropic") {
     return {
       providerKind: kind,
@@ -40,6 +41,8 @@ interface StepModelProps {
   testing: boolean;
   testError: string | null;
   testSucceeded: boolean;
+  /** Per-role latency of the last successful test. */
+  testLatencies: Partial<Record<Role, number>>;
   onTest: () => void;
 }
 
@@ -49,6 +52,7 @@ export function StepModel({
   testing,
   testError,
   testSucceeded,
+  testLatencies,
   onTest,
 }: StepModelProps) {
   return (
@@ -158,6 +162,7 @@ export function StepModel({
         {!testing && testSucceeded ? (
           <span className="text-sm text-emerald-600 dark:text-emerald-400">
             {t.testSucceeded}
+            {formatLatencies(testLatencies)}
           </span>
         ) : null}
         {!testing && !testSucceeded && testError ? (
@@ -189,4 +194,15 @@ export function isStepModelFillable(draft: OnboardingDraft): boolean {
     draft.apiKey.trim() !== "" &&
     modelsFilled
   );
+}
+
+const LATENCY_ROLES: Role[] = ["parser", "planner", "conversation"];
+
+/** "（解析 320ms · 规划 910ms · 对话 450ms）", or "" before any successful test. */
+function formatLatencies(latencies: Partial<Record<Role, number>>): string {
+  const parts = LATENCY_ROLES.flatMap((role) => {
+    const ms = latencies[role];
+    return ms === undefined ? [] : [`${zhCN.settings.role[role]} ${ms}ms`];
+  });
+  return parts.length === 0 ? "" : `（${parts.join(" · ")}）`;
 }

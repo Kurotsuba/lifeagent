@@ -10,9 +10,6 @@ use lifeagent_core::error::CoreError;
 use lifeagent_llm::error::LlmError;
 use serde::Serialize;
 
-// `CommandError` and `From<CoreError>` aren't called by any command yet — `commands.rs` (the
-// rest of M7.1) is what constructs them. Remove this once that lands.
-#[allow(dead_code)]
 #[derive(Debug, Serialize)]
 pub struct CommandError {
     pub code: String,
