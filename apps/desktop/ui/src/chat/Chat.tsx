@@ -118,6 +118,11 @@ export function Chat({ draftText, onDraftConsumed, onGoToSettings }: ChatProps) 
     <div className="flex h-full flex-col">
       <div ref={listRef} className="flex-1 overflow-y-auto px-6 py-4">
         <div className="mx-auto flex max-w-2xl flex-col gap-3">
+          {!loaded ? (
+            <p className="text-sm text-neutral-500 dark:text-neutral-400">
+              {zhCN.common.loading}
+            </p>
+          ) : null}
           {loaded && visible.length === 0 ? (
             <p className="text-sm text-neutral-500 dark:text-neutral-400">{zhCN.chat.empty}</p>
           ) : null}

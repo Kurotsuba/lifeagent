@@ -371,7 +371,7 @@ export function ModelSection() {
           disabled={saving || testing !== null || !fillable}
           onClick={() => void handleSave()}
         >
-          {zhCN.common.save}
+          {saving ? zhCN.common.saving : zhCN.common.save}
         </button>
         {status ? (
           <span

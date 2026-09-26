@@ -13,7 +13,7 @@ use sqlx::SqlitePool;
 use tokio::sync::Mutex;
 
 use crate::clock::Clock;
-use crate::error::CoreError;
+use crate::error::{CoreError, ValidationRule};
 use crate::events::AppEvent;
 use crate::i18n::USER_LANGUAGE;
 use crate::plugin::{PlanInput, PlanSection, Plugin, PluginContext};
@@ -310,9 +310,7 @@ impl PlanService {
     ) -> Result<StoredPlan, CoreError> {
         let instruction = instruction.trim();
         if instruction.is_empty() {
-            return Err(CoreError::Validation(
-                "instruction must not be empty".into(),
-            ));
+            return Err(CoreError::InvalidInput(ValidationRule::InstructionEmpty));
         }
         self.run(ctx, date, PlanTrigger::Revision, Some(instruction))
             .await

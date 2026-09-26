@@ -1412,3 +1412,125 @@ conversation model has real numbers to quote. Core still knows no section schema
 
 Not changed: revision latency (85 s on Opus 5 at `high` effort). It's the planner's quality
 lever per §6.3; revisit with real usage data, not from one run.
+
+## 2026-09-26 — M8 step 1: per-rule zh-CN validation and PlanFailed messages
+
+Per §14 M8 ("Error messages in zh-CN for every `CommandError`") and the two spots that deferred
+it here (M7.1-step-1, M7-step-4).
+
+**`CoreError` gets a new `InvalidInput(ValidationRule)` variant, alongside the existing
+`Validation(String)`.** `ValidationRule` (`crates/core/src/error.rs`) is a `Copy` enum with one
+variant per rule a user's own input can break: profile height/age/meals_per_day, goal
+rate/target weight, a logged weight, a memory note's emptiness/length, `plan_time` vs.
+`day_boundary`, and a plan revision's instruction. Every one of the ten call sites in
+`profile.rs`, `goals.rs`, `memory.rs`, `settings.rs`, `app.rs` (`log_weight`) and `plan.rs`
+(`revise`) that used to build a `Validation(format!(...))` string now builds a
+`ValidationRule` instead. `Validation(String)` stays as-is for the sites that aren't about user
+input at all — reading back a malformed value from the db, a startup-time tool-registration
+bug — since those still only need one generic message. Not changed: `core_tools.rs`'s
+`log_weight` tool (the chat path) and `commands.rs`'s date parsing, both `PluginError`/
+`CoreError::Validation` respectively but never reaching a form a per-rule zh-CN message would
+help (the first talks back to the LLM, not the user; the second only fires on a malformed date
+string the frontend itself would have to construct).
+
+**`invalid_input_message` (`apps/desktop/src-tauri/src/error.rs`) gives each `ValidationRule`
+its own sentence**, quoting the value the user entered and the bound it broke (e.g. "身高需在
+120–230 厘米之间，当前填写的是 119.9 厘米。"). `Validation(String)`'s generic message is
+unchanged.
+
+**`CoreError`/`LlmError` gained a `code()` method**, a stable classification (`"not_configured"`,
+`"invalid_input"`, `"auth"`, `"llm"`, `"not_found"`, `"internal"`) used for `CommandError.code`
+instead of being hand-picked per match arm as before — one source of truth instead of two
+independent classifications (`CommandError`'s old match, and whatever the scheduler would have
+had to invent separately) that could drift apart.
+
+**`AppEvent::PlanFailed` gained a `code: &'static str` field**, set from `CoreError::code()` at
+the one place it's still typed (`scheduler.rs`, before `e.to_string()` throws the structure
+away). `notify.rs`'s scheduled-failure toast now picks one of four specific zh-CN bodies
+(not-configured, auth, invalid-input i.e. `NothingToPlan`, llm-service) by `code`, falling back
+to the old generic sentence only for `"internal"`/unknown codes — the gap M7-step-4 flagged
+("`PlanFailed`'s notification body is a fixed zh-CN string"). The tray's own manual-generation
+toast (`show_tray_plan_result`) was already per-cause via a real `CommandError`; unchanged.
+
+Not done in this step: empty/loading states and the README — the rest of §14 M8.
+
+## 2026-09-26 — M8 step 2: log review for secrets
+
+Every `tracing::info!`/`warn!`/`error!` call site in the workspace (`grep` across `crates` and
+`apps`, tests excluded) was read against `CLAUDE.md`'s logging rule (no API keys, no full
+prompts/personal data at INFO or above, raw headers never). Api keys: never touch a `tracing`
+call anywhere (`secrets.rs`'s `KeyringSecretStore` only ever logs the *keyring* error, e.g. "no
+such entry" — never the key value itself, which the `keyring` crate never hands back on
+failure). Headers: the only header read is `Retry-After` (`provider/mod.rs`), parsed, never
+logged. The router's one INFO line (`router.rs`, "llm call") is metadata only
+(`role`/`provider`/`model`/token counts/`latency_ms`/`ok`), as its own comment already states.
+`plugin-diet`'s two `debug!` calls that do carry content (a food name, a re-ask failure) are
+DEBUG, which `CLAUDE.md` allows.
+
+**One real gap, fixed: `CommandError`'s `From<LlmError>` logged a provider's raw response text
+at ERROR.** The old catch-all (`other => tracing::error!(error = %other, ...)`) covered
+`Http`/`Status`/`InvalidResponse`, and `Status`'s `Display` includes `body_excerpt` — up to 500
+characters of the provider's actual HTTP response body. A provider that echoes part of a
+request back in a 4xx body (not something either provider we call is known to do routinely, but
+not ruled out either) would put a fragment of the user's own prompt into the log file at INFO's
+default level, past `CLAUDE.md`'s "never at INFO or above" line. Split into three explicit arms
+instead of one `other`: each now logs its detail (`body_excerpt`, the `reqwest`/`serde_json`
+message) at `debug!`, and a separate `error!` line carries only a status code or a fixed string
+— enough for an operator to see a provider call failed and roughly why, without the raw body.
+Mirrors the split `CoreError::Validation`/`NotFound` already use in the same file (English detail
+at `debug!`, generic text at the level a shell actually surfaces).
+
+**Considered and left alone: `CoreError::Json`'s catch-all `error!`.** `serde_json::Error`'s
+`Display` can include a fragment of the offending value for a type-mismatch failure. Every call
+site that builds one via `?` (`settings.rs`, `goals.rs`, `profile.rs`, `plan.rs`, `app.rs`'s
+stored tool calls) is deserializing *our own* previously-serialized data back — DB round-trips,
+not third-party input — so a mismatch only fires on genuine corruption, and the value that would
+leak is our own JSON, not attacker- or provider-supplied text. `events.rs`'s payload column
+deserializes into untyped `serde_json::Value`, which can't fail on a type mismatch at all (only
+on malformed JSON syntax, which carries no content in its error). Left as-is; revisit only if a
+typed (non-`Value`) deserialize of user-supplied JSON is added somewhere later.
+
+Not done in this step: empty/loading states and the README — the rest of §14 M8.
+
+## 2026-09-26 — M8 step 3: empty and loading states
+
+Read every page and section in `apps/desktop/ui/src` (Onboarding's three steps, Today and its
+four subcomponents, Chat, QuickEntry, Settings' four sections). Most of this was already in
+place: `LoadState` (`settings/LoadState.tsx`) is shared by all four Settings sections, Today and
+QuickEntry both have their own loading/empty/error text, `MealList`/`TodayPlanList`/
+`TomorrowPlanCard` all handle the zero-items case, and every busy button already has a distinct
+label (`测试连接`/`测试中`, `立即生成`/`生成中`, etc.) except the three found here.
+
+**Found and fixed, three small gaps, all missing a busy-state label already used elsewhere in
+the same file or a sibling one:**
+- `Chat.tsx`: nothing rendered between mount and the first `get_history` resolving — a blank
+  flash, not a stated loading state, before the empty-history/history-list branch could apply.
+  Added a `zhCN.common.loading` line for `!loaded`.
+- `Onboarding.tsx`'s 完成 button: label stayed "完成" while `finishing` (four sequential command
+  calls) ran, unlike every other busy button in the app. Added `zhCN.common.finishing` ("正在完成…").
+- `GeneralSection.tsx`/`ModelSection.tsx`/`ProfileGoalSection.tsx`'s 保存 buttons: same gap,
+  three times over (one per section, since each has its own `saving` state). Added
+  `zhCN.common.saving` ("保存中…") and used it in all three.
+
+Not changed: `ConfirmDeleteButton`'s confirm label stays static while `busy` (a local SQLite
+delete, sub-millisecond in practice) — the disabled state alone is enough feedback for something
+that fast, and matching every other button's convention here would be padding, not a real gap.
+
+`cd apps/desktop/ui && npx tsc -b` clean; no frontend test runner exists (`package.json`'s only
+scripts are `dev`/`build`/`preview` — thin view layer, no logic to unit-test per `CLAUDE.md`).
+
+Not done in this step: the README — the rest of §14 M8.
+
+## 2026-09-26 — M8 step 4: README
+
+Added a top-level `README.md` (none existed before): prerequisites (Rust, Node, an LLM
+provider key, Windows for the actual desktop app — with a pointer to `cargo-xwin` for
+cross-building from Linux/WSL, and the WSL keyring caveat this file's own 2026-09-25 entry
+already covers), setup, running the desktop app and the CLI, configuring a model provider both
+from onboarding and from the CLI, the dev commands from `CLAUDE.md`, the repository layout, and
+a short troubleshooting list keyed to the exact `CommandError`/keyring messages someone would
+actually hit. Cross-checked every command and file path it names against the current code
+(`lifeagent-cli --help`'s actual subcommands, `apps/desktop/package.json`'s scripts, the real
+`ModelsConfig` section number) rather than copying from the spec's prose. §14 M8 is now
+complete: fmt/clippy/`cargo test --workspace` clean (verified again after this step), README
+written.

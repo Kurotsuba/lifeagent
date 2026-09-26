@@ -11,7 +11,7 @@ use sqlx::SqlitePool;
 use uuid::Uuid;
 
 use crate::clock::Clock;
-use crate::error::CoreError;
+use crate::error::{CoreError, ValidationRule};
 
 const DOMAIN: &str = "body";
 const KIND: &str = "weight";
@@ -36,17 +36,18 @@ pub struct WeightGoal {
 /// rate is not checked when the direction is `Maintain`, since it is unused there.
 pub fn validate(goal: &WeightGoal) -> Result<(), CoreError> {
     if goal.direction != GoalDirection::Maintain && !(0.0..=1.0).contains(&goal.rate_kg_per_week) {
-        return Err(CoreError::Validation(format!(
-            "rate_kg_per_week must be within 0.0..=1.0 for a non-maintain goal, got {}",
-            goal.rate_kg_per_week
-        )));
+        return Err(CoreError::InvalidInput(
+            ValidationRule::GoalRateOutOfRange {
+                got: goal.rate_kg_per_week,
+            },
+        ));
     }
 
     if let Some(target) = goal.target_weight_kg {
         if !(30.0..=300.0).contains(&target) {
-            return Err(CoreError::Validation(format!(
-                "target_weight_kg must be within 30.0..=300.0, got {target}"
-            )));
+            return Err(CoreError::InvalidInput(
+                ValidationRule::GoalTargetOutOfRange { got: target },
+            ));
         }
     }
 

@@ -141,7 +141,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
               disabled={!testSucceeded || !isStepModelFillable(draft) || finishing}
               onClick={handleFinish}
             >
-              {zhCN.common.finish}
+              {finishing ? zhCN.common.finishing : zhCN.common.finish}
             </button>
           )}
         </div>

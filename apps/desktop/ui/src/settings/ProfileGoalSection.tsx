@@ -107,7 +107,7 @@ export function ProfileGoalSection() {
           disabled={saving || !isStepProfileValid(draft)}
           onClick={() => void handleSave()}
         >
-          {zhCN.common.save}
+          {saving ? zhCN.common.saving : zhCN.common.save}
         </button>
         {status ? (
           <span

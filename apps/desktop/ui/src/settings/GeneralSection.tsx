@@ -106,7 +106,7 @@ export function GeneralSection() {
           disabled={saving}
           onClick={() => void handleSave()}
         >
-          {zhCN.common.save}
+          {saving ? zhCN.common.saving : zhCN.common.save}
         </button>
         {status ? (
           <span

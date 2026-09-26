@@ -9,7 +9,7 @@ use serde::Serialize;
 use uuid::Uuid;
 
 use crate::clock::Clock;
-use crate::error::CoreError;
+use crate::error::{CoreError, ValidationRule};
 
 /// Matches the `core_remember` tool's stated limit (§7.8).
 pub const MAX_NOTE_LEN: usize = 300;
@@ -36,13 +36,13 @@ impl MemoryService {
     pub async fn add(&self, note: &str) -> Result<MemoryNote, CoreError> {
         let trimmed = note.trim();
         if trimmed.is_empty() {
-            return Err(CoreError::Validation("note must not be empty".into()));
+            return Err(CoreError::InvalidInput(ValidationRule::NoteEmpty));
         }
         if trimmed.chars().count() > MAX_NOTE_LEN {
-            return Err(CoreError::Validation(format!(
-                "note must be at most {MAX_NOTE_LEN} characters, got {}",
-                trimmed.chars().count()
-            )));
+            return Err(CoreError::InvalidInput(ValidationRule::NoteTooLong {
+                got: trimmed.chars().count(),
+                max: MAX_NOTE_LEN,
+            }));
         }
 
         let id = Uuid::now_v7().to_string();

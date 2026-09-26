@@ -23,7 +23,7 @@ use crate::clock::{Clock, SystemClock};
 use crate::context;
 use crate::conversation::{ConversationStore, MessageRole, NewMessage, StoredMessage};
 use crate::db;
-use crate::error::CoreError;
+use crate::error::{CoreError, ValidationRule};
 use crate::events::{AppEvent, EventChange, EventStore};
 use crate::goals::GoalsService;
 use crate::memory::MemoryService;
@@ -445,9 +445,9 @@ impl CoreApp {
     /// tool's optional `measured_at`).
     pub async fn log_weight(&self, kg: f64) -> Result<(), CoreError> {
         if !(30.0..=300.0).contains(&kg) {
-            return Err(CoreError::Validation(format!(
-                "kg must be within 30..=300, got {kg}"
-            )));
+            return Err(CoreError::InvalidInput(ValidationRule::WeightOutOfRange {
+                got: kg,
+            }));
         }
         self.0
             .events

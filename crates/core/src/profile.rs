@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 
 use crate::clock::Clock;
-use crate::error::CoreError;
+use crate::error::{CoreError, ValidationRule};
 use crate::time::age_years;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -59,25 +59,25 @@ pub struct Profile {
 /// (`core_log_weight`, M3), since it is not part of the profile.
 pub fn validate(profile: &Profile, today: NaiveDate) -> Result<(), CoreError> {
     if !(120.0..=230.0).contains(&profile.height_cm) {
-        return Err(CoreError::Validation(format!(
-            "height_cm must be within 120..=230, got {}",
-            profile.height_cm
-        )));
+        return Err(CoreError::InvalidInput(ValidationRule::HeightOutOfRange {
+            got: profile.height_cm,
+        }));
     }
 
     let age = age_years(profile.birth_date, today);
     if !(16..=100).contains(&age) {
-        return Err(CoreError::Validation(format!(
-            "age must be within 16..=100, got {age} (birth_date {})",
-            profile.birth_date
-        )));
+        return Err(CoreError::InvalidInput(ValidationRule::AgeOutOfRange {
+            got: age,
+            birth_date: profile.birth_date,
+        }));
     }
 
     if !(3..=5).contains(&profile.meals_per_day) {
-        return Err(CoreError::Validation(format!(
-            "meals_per_day must be within 3..=5, got {}",
-            profile.meals_per_day
-        )));
+        return Err(CoreError::InvalidInput(
+            ValidationRule::MealsPerDayOutOfRange {
+                got: profile.meals_per_day,
+            },
+        ));
     }
 
     Ok(())

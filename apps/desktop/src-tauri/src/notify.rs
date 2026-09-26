@@ -16,12 +16,22 @@ use tokio::sync::broadcast::error::RecvError;
 
 const PLAN_READY_TITLE: &str = "明日计划已生成";
 const PLAN_FAILED_TITLE: &str = "明日计划生成失败";
-/// Shown instead of the underlying `CoreError`'s own (English, developer-facing) `Display`
-/// text — not something to put in a user's toast notification. That detail is already logged by
-/// the scheduler (`scheduler.rs`'s `tracing::warn!`), so nothing is lost, just not duplicated
-/// here in a form a user would see. Per-cause zh-CN detail is M8 work, same call as
-/// `error.rs`'s `CommandError` mapping (`docs/DECISIONS.md`'s M7.1-step-1 entry).
-const PLAN_FAILED_BODY: &str = "生成明日计划失败，请稍后在\"今日\"页重试。";
+
+/// The notification body for a scheduled `PlanFailed`, chosen from its `code`
+/// (`CoreError::code()`) rather than the underlying `CoreError`'s own (English, developer-facing)
+/// `Display` text — not something to put in a user's toast. That detail is already logged by the
+/// scheduler (`scheduler.rs`'s `tracing::warn!`), so nothing is lost, just not duplicated here in
+/// a form a user would see. Mirrors `error.rs`'s `CommandError` mapping, using the same codes, so
+/// the two surfaces agree on what each cause means (`docs/DECISIONS.md`'s M7.1-step-1 entry).
+fn plan_failed_body(code: &str) -> &'static str {
+    match code {
+        "not_configured" => "尚未完成模型配置，请先在设置中完成配置后重试。",
+        "auth" => "模型鉴权失败，请在设置中检查 API Key 是否正确。",
+        "invalid_input" => "请先完善个人档案并记录一次体重，再生成计划。",
+        "llm" => "模型服务暂时不可用，请稍后在\"今日\"页重试。",
+        _ => "生成明日计划失败，请稍后在\"今日\"页重试。",
+    }
+}
 
 /// Spawns the notification task. `core_app` is a clone the task owns for the rest of the
 /// process's life (it needs `settings()`/`get_plan()` on every event, unlike `events::spawn`'s
@@ -69,7 +79,7 @@ async fn handle(app: &AppHandle, core_app: &CoreApp, event: AppEvent) {
                 return;
             }
         },
-        AppEvent::PlanFailed { .. } => PLAN_FAILED_BODY.to_string(),
+        AppEvent::PlanFailed { code, .. } => plan_failed_body(code).to_string(),
         AppEvent::DataChanged { .. } => return,
     };
 
@@ -166,11 +176,36 @@ mod tests {
         let event = AppEvent::PlanFailed {
             date: date("2026-09-26"),
             error: "boom".into(),
+            code: "internal",
         };
 
         assert_eq!(
             notification_target(&event),
             Some((PLAN_FAILED_TITLE, date("2026-09-26")))
+        );
+    }
+
+    #[test]
+    fn plan_failed_body_is_specific_per_code() {
+        assert_eq!(
+            plan_failed_body("not_configured"),
+            "尚未完成模型配置，请先在设置中完成配置后重试。"
+        );
+        assert_eq!(
+            plan_failed_body("auth"),
+            "模型鉴权失败，请在设置中检查 API Key 是否正确。"
+        );
+        assert_eq!(
+            plan_failed_body("invalid_input"),
+            "请先完善个人档案并记录一次体重，再生成计划。"
+        );
+        assert_eq!(
+            plan_failed_body("llm"),
+            "模型服务暂时不可用，请稍后在\"今日\"页重试。"
+        );
+        assert_eq!(
+            plan_failed_body("internal"),
+            "生成明日计划失败，请稍后在\"今日\"页重试。"
         );
     }
 

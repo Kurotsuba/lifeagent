@@ -108,6 +108,7 @@ impl Scheduler {
                     "scheduled plan generation failed");
                 self.app.events().publish(AppEvent::PlanFailed {
                     date: tomorrow,
+                    code: e.code(),
                     error: e.to_string(),
                 });
             }

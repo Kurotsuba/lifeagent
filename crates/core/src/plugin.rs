@@ -112,6 +112,10 @@ impl From<CoreError> for PluginError {
         match e {
             CoreError::NotFound(m) => PluginError::NotFound(m),
             CoreError::Validation(m) => PluginError::InvalidArgs(m),
+            // Same bucket as `Validation`: a named rule is still just an argument the model can
+            // fix (a note it should trim, a weight it should re-ask about), so it gets the rule's
+            // own English detail rather than falling into `Other`'s generic message below.
+            CoreError::InvalidInput(rule) => PluginError::InvalidArgs(rule.to_string()),
             // Passed through (as NotFound) so the model can tell the user what's missing.
             e @ CoreError::NothingToPlan => PluginError::NotFound(e.to_string()),
             other => PluginError::Other(other.to_string()),
@@ -317,6 +321,15 @@ mod tests {
         ));
         assert!(matches!(
             PluginError::from(CoreError::Validation("x".into())),
+            PluginError::InvalidArgs(_)
+        ));
+        // A named rule (e.g. `core_remember`/`core_revise_plan`'s empty-string checks) must stay
+        // in the same `InvalidArgs` bucket as `Validation`, not fall into `Other`'s generic
+        // "internal error" — the model needs the detail to retry or explain itself to the user.
+        assert!(matches!(
+            PluginError::from(CoreError::InvalidInput(
+                crate::error::ValidationRule::NoteEmpty
+            )),
             PluginError::InvalidArgs(_)
         ));
         assert!(matches!(

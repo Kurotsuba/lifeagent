@@ -75,6 +75,10 @@ pub enum AppEvent {
     PlanFailed {
         date: NaiveDate,
         error: String,
+        /// `CoreError::code()` of the failure — a stable classification (e.g. `"not_configured"`,
+        /// `"auth"`) a shell can use to pick a specific user-facing message, without needing to
+        /// parse `error`'s English `Display` text (§14 M8: per-cause notification text).
+        code: &'static str,
     },
 }
 

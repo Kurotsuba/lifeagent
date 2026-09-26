@@ -13,7 +13,7 @@ use serde::Serialize;
 use serde_json::Value;
 use sqlx::SqlitePool;
 
-use crate::error::CoreError;
+use crate::error::{CoreError, ValidationRule};
 use crate::time::{format_hhmm, parse_hhmm};
 use chrono::NaiveTime;
 
@@ -182,11 +182,12 @@ impl Settings {
 
 fn check_plan_time(plan_time: NaiveTime, day_boundary: NaiveTime) -> Result<(), CoreError> {
     if plan_time < day_boundary {
-        return Err(CoreError::Validation(format!(
-            "plan_time {} must not be earlier than day_boundary {}",
-            format_hhmm(plan_time),
-            format_hhmm(day_boundary)
-        )));
+        return Err(CoreError::InvalidInput(
+            ValidationRule::PlanTimeBeforeDayBoundary {
+                plan_time,
+                day_boundary,
+            },
+        ));
     }
     Ok(())
 }

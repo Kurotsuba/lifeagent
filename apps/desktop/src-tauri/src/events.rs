@@ -55,9 +55,10 @@ fn payload_for(event: &AppEvent) -> (&'static str, serde_json::Value) {
             "plan-ready",
             json!({ "date": date, "version": version, "trigger": trigger }),
         ),
-        AppEvent::PlanFailed { date, error } => {
-            ("plan-failed", json!({ "date": date, "error": error }))
-        }
+        AppEvent::PlanFailed { date, error, code } => (
+            "plan-failed",
+            json!({ "date": date, "error": error, "code": code }),
+        ),
     }
 }
 
@@ -115,11 +116,15 @@ mod tests {
         let event = AppEvent::PlanFailed {
             date: date("2026-09-26"),
             error: "boom".into(),
+            code: "internal",
         };
 
         let (name, payload) = payload_for(&event);
 
         assert_eq!(name, "plan-failed");
-        assert_eq!(payload, json!({ "date": "2026-09-26", "error": "boom" }));
+        assert_eq!(
+            payload,
+            json!({ "date": "2026-09-26", "error": "boom", "code": "internal" })
+        );
     }
 }
