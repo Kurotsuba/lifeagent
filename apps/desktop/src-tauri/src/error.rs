@@ -11,8 +11,10 @@
 //! every `CommandError`".
 
 use lifeagent_core::error::{CoreError, ValidationRule};
+use lifeagent_core::plugin::PluginError;
 use lifeagent_core::time::format_hhmm;
 use lifeagent_llm::error::LlmError;
+use lifeagent_plugin_diet::import::FoodDataError;
 use serde::Serialize;
 
 #[derive(Debug, Serialize)]
@@ -100,6 +102,46 @@ fn invalid_input_message(rule: ValidationRule) -> String {
             format_hhmm(day_boundary)
         ),
         ValidationRule::InstructionEmpty => "调整要求不能为空，请描述需要怎么调整。".to_string(),
+    }
+}
+
+/// Source-management commands (`docs/NUTRITION_SOURCES.md` §7.1, §8.2) call into
+/// `lifeagent_plugin_diet::sources`, which returns `PluginError` — the same type diet tool calls
+/// return to the conversation model. Its messages are meant for that audience (English, not
+/// user-facing), so — like `CoreError::Validation` above — only the generic zh-CN text crosses
+/// the command boundary; the detail is logged instead.
+impl From<PluginError> for CommandError {
+    fn from(err: PluginError) -> Self {
+        match err {
+            PluginError::InvalidArgs(msg) => {
+                tracing::debug!(error = %msg, "command validation error");
+                CommandError::new("invalid_input", "输入内容有误，请检查后重试。")
+            }
+            PluginError::NotFound(msg) => {
+                tracing::debug!(error = %msg, "command not-found error");
+                CommandError::new("not_found", "未找到对应的数据。")
+            }
+            other => {
+                tracing::error!(error = %other, "internal command error");
+                CommandError::new("internal", "发生内部错误，请重试。")
+            }
+        }
+    }
+}
+
+/// Batch-import commands (`docs/NUTRITION_SOURCES.md` §6, §8.2). Unlike `PluginError` above,
+/// `FoodDataError::Invalid`/`NotFound` messages are already zh-CN, built for exactly this
+/// audience (§6.2), so they pass through unchanged rather than being replaced with fixed text.
+impl From<FoodDataError> for CommandError {
+    fn from(err: FoodDataError) -> Self {
+        match err {
+            FoodDataError::Invalid(msg) => CommandError::new("invalid_input", msg),
+            FoodDataError::NotFound(msg) => CommandError::new("not_found", msg),
+            FoodDataError::Plugin(e) => {
+                tracing::error!(error = %e, "internal food data error");
+                CommandError::new("internal", "发生内部错误，请重试。")
+            }
+        }
     }
 }
 

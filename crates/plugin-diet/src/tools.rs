@@ -8,11 +8,12 @@ use lifeagent_llm::types::ToolSpec;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::foods::{validate_per_100g, FoodTable};
+use crate::foods::validate_per_100g;
 use crate::intake::{self, MEAL_EVENT};
 use crate::model::{Macros, MealItem, MealLogged, MealType};
 use crate::parser::parse_meal;
 use crate::resolver::resolve_many;
+use crate::sources::{self, SourceChain};
 
 pub fn specs() -> Vec<ToolSpec> {
     vec![
@@ -139,7 +140,9 @@ async fn log_meal(ctx: &PluginContext, args: Value) -> Result<ToolOutput, Plugin
             name: food.name,
             grams: item.grams,
             food_id: food.id,
-            source: food.source,
+            source: food.source_kind,
+            source_id: Some(food.source_id),
+            source_name: Some(food.source_name),
         })
         .collect();
     let meal = MealLogged {
@@ -206,12 +209,13 @@ struct UpdateFoodArgs {
 
 async fn update_food(ctx: &PluginContext, args: Value) -> Result<ToolOutput, PluginError> {
     let args: UpdateFoodArgs = parse_args(args)?;
-    let table = FoodTable::new(ctx);
-    // Without a new fiber value, keep the food's current one.
+    // Without a new fiber value, keep the food's current chain-winner value
+    // (`docs/NUTRITION_SOURCES.md` §7.2).
     let fiber_g = match args.fiber_g {
         Some(f) => f,
-        None => table
-            .find(&args.food_name)
+        None => SourceChain::load(ctx)
+            .await?
+            .lookup(&args.food_name)
             .await?
             .map_or(0.0, |f| f.per_100g.fiber_g),
     };
@@ -225,7 +229,7 @@ async fn update_food(ctx: &PluginContext, args: Value) -> Result<ToolOutput, Plu
     // User values always win (§16), so no kcal correction — but reject impossible ones.
     validate_per_100g(&per_100g).map_err(PluginError::InvalidArgs)?;
 
-    let food = table.upsert_user(&args.food_name, per_100g).await?;
+    let food = sources::upsert_manual_food(ctx, &args.food_name, per_100g).await?;
     Ok(ToolOutput {
         content: json!({
             "food_id": food.id,
@@ -246,11 +250,9 @@ struct AddAliasArgs {
 
 async fn add_alias(ctx: &PluginContext, args: Value) -> Result<ToolOutput, PluginError> {
     let args: AddAliasArgs = parse_args(args)?;
-    let food = FoodTable::new(ctx)
-        .add_alias(&args.food_name, &args.alias)
-        .await?;
+    let (food, alias) = sources::add_user_alias(ctx, &args.food_name, &args.alias).await?;
     Ok(ToolOutput {
-        content: json!({ "food_id": food.id, "name": food.name, "aliases": food.aliases }),
+        content: json!({ "food_id": food.id, "name": food.name, "alias": alias }),
         summary: format!("已添加别名：{} → {}", args.alias.trim(), food.name),
     })
 }
@@ -258,7 +260,7 @@ async fn add_alias(ctx: &PluginContext, args: Value) -> Result<ToolOutput, Plugi
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::NutritionSource;
+    use crate::sources::{upsert_manual_food, SourceChain};
     use crate::testutil::{env, estimate_responder, json_response, seed_person, EGG, RICE};
 
     fn parser_reply() -> lifeagent_llm::types::ChatResponse {
@@ -301,10 +303,7 @@ mod tests {
     #[tokio::test]
     async fn log_meal_uses_eaten_at_for_the_logical_date() {
         let env = env().await;
-        FoodTable::new(&env.ctx)
-            .insert("熟米饭", RICE, NutritionSource::User)
-            .await
-            .unwrap();
+        upsert_manual_food(&env.ctx, "熟米饭", RICE).await.unwrap();
         env.mock.push_response(json_response(json!({
             "meal_type": null, "items": [{"name": "熟米饭", "grams": 150}]
         })));
@@ -344,8 +343,7 @@ mod tests {
     #[tokio::test]
     async fn update_food_creates_or_corrects_with_user_source() {
         let env = env().await;
-        FoodTable::new(&env.ctx)
-            .insert("鸡蛋", EGG, NutritionSource::LlmEstimate)
+        crate::sources::insert_estimate(&env.ctx, "鸡蛋", EGG)
             .await
             .unwrap();
 
@@ -357,12 +355,14 @@ mod tests {
         .await
         .unwrap();
 
-        let egg = FoodTable::new(&env.ctx)
-            .find("鸡蛋")
+        let egg = SourceChain::load(&env.ctx)
+            .await
+            .unwrap()
+            .lookup("鸡蛋")
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(egg.source, NutritionSource::User);
+        assert_eq!(egg.source_kind, crate::model::SourceKind::Manual);
         assert_eq!(egg.per_100g.kcal, 150.0);
     }
 
@@ -383,10 +383,7 @@ mod tests {
     #[tokio::test]
     async fn add_alias_then_the_alias_resolves() {
         let env = env().await;
-        FoodTable::new(&env.ctx)
-            .insert("卤鸡蛋", EGG, NutritionSource::User)
-            .await
-            .unwrap();
+        upsert_manual_food(&env.ctx, "卤鸡蛋", EGG).await.unwrap();
 
         let out = call(
             &env.ctx,
@@ -397,8 +394,10 @@ mod tests {
         .unwrap();
 
         assert_eq!(out.summary, "已添加别名：卤蛋 → 卤鸡蛋");
-        assert!(FoodTable::new(&env.ctx)
-            .find("卤蛋")
+        assert!(SourceChain::load(&env.ctx)
+            .await
+            .unwrap()
+            .lookup("卤蛋")
             .await
             .unwrap()
             .is_some());

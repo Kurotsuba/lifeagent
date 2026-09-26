@@ -135,7 +135,9 @@ pub async fn finalize(
                 name: food.name,
                 grams: item.grams,
                 food_id: food.id,
-                source: food.source,
+                source: food.source_kind,
+                source_id: Some(food.source_id),
+                source_name: Some(food.source_name),
             };
             meal_total += entry.macros;
             items_json.push(entry.to_json());
@@ -218,8 +220,7 @@ pub async fn finalize(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::foods::FoodTable;
-    use crate::model::NutritionSource;
+    use crate::sources::upsert_manual_food;
     use crate::testutil::{env, seed_person, RICE};
     use lifeagent_core::profile::Profile;
     use lifeagent_core::test_support::TestEnv;
@@ -238,26 +239,18 @@ mod tests {
             fat_g: t.fat_g / 10.0,
             fiber_g: t.fiber_g / 10.0,
         };
-        let table = FoodTable::new(&env.ctx);
-        table
-            .insert("均衡餐", tenth, NutritionSource::User)
-            .await
-            .unwrap();
-        table
-            .insert(
-                "低纤维均衡餐",
-                Macros {
-                    fiber_g: 0.0,
-                    ..tenth
-                },
-                NutritionSource::User,
-            )
-            .await
-            .unwrap();
-        table
-            .insert("熟米饭", RICE, NutritionSource::User)
-            .await
-            .unwrap();
+        upsert_manual_food(&env.ctx, "均衡餐", tenth).await.unwrap();
+        upsert_manual_food(
+            &env.ctx,
+            "低纤维均衡餐",
+            Macros {
+                fiber_g: 0.0,
+                ..tenth
+            },
+        )
+        .await
+        .unwrap();
+        upsert_manual_food(&env.ctx, "熟米饭", RICE).await.unwrap();
         (env, date)
     }
 
@@ -364,10 +357,7 @@ mod tests {
     async fn allergy_match_in_either_direction_is_a_violation() {
         let (env, date) = setup().await;
         set_profile(&env, |p| p.allergies = vec!["虾".into()]).await;
-        FoodTable::new(&env.ctx)
-            .insert("虾仁", RICE, NutritionSource::User)
-            .await
-            .unwrap();
+        upsert_manual_food(&env.ctx, "虾仁", RICE).await.unwrap();
         let mut plan = on_target();
         plan["meals"][1]["items"]
             .as_array_mut()
@@ -401,10 +391,7 @@ mod tests {
     async fn disliked_food_is_a_warning_not_a_violation() {
         let (env, date) = setup().await;
         set_profile(&env, |p| p.dislikes = vec!["香菜".into()]).await;
-        FoodTable::new(&env.ctx)
-            .insert("香菜", RICE, NutritionSource::User)
-            .await
-            .unwrap();
+        upsert_manual_food(&env.ctx, "香菜", RICE).await.unwrap();
         let mut plan = on_target();
         plan["meals"][1]["items"]
             .as_array_mut()
@@ -438,20 +425,19 @@ mod tests {
         let t = intake::targets_for(&env.ctx, date).await.unwrap().unwrap();
         // A food with the same energy per 100 g, but fat up 50% and carbs down to match.
         let extra_fat = t.fat_g / 10.0 * 0.5;
-        FoodTable::new(&env.ctx)
-            .insert(
-                "高脂餐",
-                Macros {
-                    kcal: t.kcal / 10.0,
-                    protein_g: t.protein_g / 10.0,
-                    carbs_g: t.carbs_g / 10.0 - extra_fat * 9.0 / 4.0,
-                    fat_g: t.fat_g / 10.0 + extra_fat,
-                    fiber_g: t.fiber_g / 10.0,
-                },
-                NutritionSource::User,
-            )
-            .await
-            .unwrap();
+        upsert_manual_food(
+            &env.ctx,
+            "高脂餐",
+            Macros {
+                kcal: t.kcal / 10.0,
+                protein_g: t.protein_g / 10.0,
+                carbs_g: t.carbs_g / 10.0 - extra_fat * 9.0 / 4.0,
+                fat_g: t.fat_g / 10.0 + extra_fat,
+                fiber_g: t.fiber_g / 10.0,
+            },
+        )
+        .await
+        .unwrap();
         let mut plan = on_target();
         for i in 0..3 {
             plan["meals"][i]["items"][0]["name"] = json!("高脂餐");

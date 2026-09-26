@@ -139,6 +139,9 @@ export interface DietMealItem {
   kcal: number;
   protein_g: number;
   estimated: boolean;
+  /** The winning source's display name at logging time (`docs/NUTRITION_SOURCES.md` §5), for a
+   * tooltip. `null` for meals logged before this field existed. */
+  source_name: string | null;
 }
 
 /** One logged meal, as `cards.diet.meals` lists it (§8.8). */
@@ -215,6 +218,79 @@ export function dietCard(view: TodayView): DietCard | null {
 export function dietPlanSection(plan: StoredPlan): DietPlanSection | null {
   const section = plan.content.sections["diet"];
   return (section as DietPlanSection | undefined) ?? null;
+}
+
+// ---- Nutrition sources / batch import (`docs/NUTRITION_SOURCES.md`) ------------------------
+
+/** `SourceKind`'s serde names: manual is still `"user"`, so old `diet.meal_logged` payloads and
+ * this type agree (`crates/plugin-diet/src/model.rs`). */
+export type SourceKind = "user" | "dataset" | "llm_estimate";
+
+export interface DatasetOrigin {
+  file_name: string;
+  format: "csv" | "json";
+  imported_at: string;
+  rows: number;
+}
+
+export interface SourceInfo {
+  id: string;
+  kind: SourceKind;
+  name: string;
+  priority: number;
+  enabled: boolean;
+  food_count: number;
+  origin: DatasetOrigin | null;
+}
+
+export interface Food {
+  id: string;
+  name: string;
+  name_key: string;
+  per_100g: DietMacros;
+  source_id: string;
+  source_kind: SourceKind;
+  source_name: string;
+  use_count: number;
+}
+
+export interface RowIssue {
+  line: number;
+  name: string | null;
+  message: string;
+}
+
+export interface ImportRowView {
+  name: string;
+  kcal: number;
+  protein_g: number;
+  carbs_g: number;
+  fat_g: number;
+  fiber_g: number;
+  aliases: string[];
+}
+
+/** `preview_food_import`'s result: the parse/shadowing preview, plus the token `commit_food_import`
+ * / `cancel_food_import` need (§8.2 "Preview → commit token"). */
+export interface ImportPreview {
+  format: "csv" | "json";
+  suggested_name: string;
+  total_rows: number;
+  valid_rows: number;
+  errors: RowIssue[];
+  error_count: number;
+  warnings: RowIssue[];
+  warning_count: number;
+  shadowed_by_manual: number;
+  replaces_estimates: number;
+  sample: ImportRowView[];
+  token: string;
+}
+
+export interface ImportReport {
+  source: SourceInfo;
+  imported: number;
+  skipped: number;
 }
 
 export interface MemoryNote {

@@ -31,6 +31,15 @@
     "allow-test-model",
     "allow-get-memory",
     "allow-delete-memory",
-    "allow-get-usage-summary"
+    "allow-get-usage-summary",
+    "allow-list-food-sources",
+    "allow-list-foods",
+    "allow-reorder-food-sources",
+    "allow-set-food-source-enabled",
+    "allow-rename-food-source",
+    "allow-delete-food-source",
+    "allow-preview-food-import",
+    "allow-commit-food-import",
+    "allow-cancel-food-import"
   ]
 }

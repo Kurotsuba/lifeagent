@@ -11,9 +11,10 @@ use serde_json::json;
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 
-use crate::foods::{check_nutrition, normalize, Food, FoodTable};
-use crate::model::{Macros, NutritionSource};
+use crate::foods::{check_nutrition, normalize};
+use crate::model::Macros;
 use crate::prompts::FOOD_ESTIMATE;
+use crate::sources::{insert_estimate, Food, SourceChain};
 
 /// At most this many food estimates in flight at once (§8.2).
 const MAX_CONCURRENT_ESTIMATES: usize = 4;
@@ -32,7 +33,7 @@ pub async fn resolve(ctx: &PluginContext, name: &str) -> Result<Food, PluginErro
 /// estimated concurrently (at most 4 in flight) and inserted in input order; a name repeated
 /// in `names` is estimated once.
 pub async fn resolve_many(ctx: &PluginContext, names: &[String]) -> Result<Vec<Food>, PluginError> {
-    let table = FoodTable::new(ctx);
+    let chain = SourceChain::load(ctx).await?;
 
     let mut misses = Vec::new();
     let mut seen_keys = HashSet::new();
@@ -43,25 +44,23 @@ pub async fn resolve_many(ctx: &PluginContext, names: &[String]) -> Result<Vec<F
                 "food name must not be empty".into(),
             ));
         }
-        if table.find(name).await?.is_none() && seen_keys.insert(key) {
+        if chain.lookup(name).await?.is_none() && seen_keys.insert(key) {
             misses.push(name.trim().to_string());
         }
     }
 
     let estimates = estimate_all(ctx, &misses).await?;
     for (name, per_100g) in misses.iter().zip(estimates) {
-        table
-            .insert(name, per_100g, NutritionSource::LlmEstimate)
-            .await?;
+        insert_estimate(ctx, name, per_100g).await?;
     }
 
     let mut foods = Vec::with_capacity(names.len());
     for name in names {
-        let food = table
-            .find(name)
+        let food = chain
+            .lookup(name)
             .await?
             .ok_or_else(|| PluginError::Other(format!("food {name:?} missing after insert")))?;
-        table.record_use(&food.id).await?;
+        chain.record_use(&food).await?;
         foods.push(food);
     }
     Ok(foods)
@@ -141,14 +140,14 @@ fn macros_json_string(m: &Macros) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sources::{add_user_alias, upsert_manual_food};
     use crate::testutil::{env, estimate_responder, json_response};
     use serde_json::json;
 
     #[tokio::test]
     async fn hit_by_name_makes_no_llm_request() {
         let env = env().await;
-        FoodTable::new(&env.ctx)
-            .insert("熟米饭", crate::testutil::RICE, NutritionSource::User)
+        upsert_manual_food(&env.ctx, "熟米饭", crate::testutil::RICE)
             .await
             .unwrap();
 
@@ -161,12 +160,10 @@ mod tests {
     #[tokio::test]
     async fn hit_by_alias_returns_the_aliased_food() {
         let env = env().await;
-        let table = FoodTable::new(&env.ctx);
-        let egg = table
-            .insert("卤鸡蛋", crate::testutil::EGG, NutritionSource::User)
+        let egg = upsert_manual_food(&env.ctx, "卤鸡蛋", crate::testutil::EGG)
             .await
             .unwrap();
-        table.add_alias("卤鸡蛋", "卤蛋").await.unwrap();
+        add_user_alias(&env.ctx, "卤鸡蛋", "卤蛋").await.unwrap();
 
         assert_eq!(resolve(&env.ctx, "卤蛋").await.unwrap().id, egg.id);
         assert!(env.mock.received_requests().is_empty());
@@ -180,7 +177,7 @@ mod tests {
         let first = resolve(&env.ctx, "熟米饭").await.unwrap();
         let second = resolve(&env.ctx, "熟米饭").await.unwrap();
 
-        assert_eq!(first.source, NutritionSource::LlmEstimate);
+        assert_eq!(first.source_kind, crate::model::SourceKind::LlmEstimate);
         assert_eq!(first.per_100g.kcal, 116.0);
         assert_eq!(second.id, first.id);
         // The second call hit the table: only one LLM request in total.
@@ -199,8 +196,10 @@ mod tests {
         let got: Vec<&str> = foods.iter().map(|f| f.name.as_str()).collect();
         assert_eq!(got, vec!["熟米饭", "鸡蛋", "熟米饭"]);
         assert_eq!(env.mock.received_requests().len(), 2);
-        let rice = FoodTable::new(&env.ctx)
-            .find("熟米饭")
+        let rice = SourceChain::load(&env.ctx)
+            .await
+            .unwrap()
+            .lookup("熟米饭")
             .await
             .unwrap()
             .unwrap();
@@ -240,6 +239,14 @@ mod tests {
         let err = resolve(&env.ctx, "怪东西").await.unwrap_err();
 
         assert!(matches!(err, PluginError::Other(ref m) if m == ESTIMATE_FAILED));
-        assert_eq!(FoodTable::new(&env.ctx).find("怪东西").await.unwrap(), None);
+        assert_eq!(
+            SourceChain::load(&env.ctx)
+                .await
+                .unwrap()
+                .lookup("怪东西")
+                .await
+                .unwrap(),
+            None
+        );
     }
 }

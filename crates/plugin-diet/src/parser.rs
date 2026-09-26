@@ -6,9 +6,9 @@ use lifeagent_llm::json::complete_json;
 use lifeagent_llm::types::{Message, Role};
 use serde::Deserialize;
 
-use crate::foods::FoodTable;
 use crate::model::MealType;
 use crate::prompts::MEAL_PARSER;
+use crate::sources::known_names;
 
 /// How many known food names the parser prompt lists (§8.4).
 const KNOWN_FOODS_LIMIT: u32 = 150;
@@ -45,7 +45,7 @@ pub async fn parse_meal(
     hint: Option<MealType>,
     eaten_at: DateTime<Utc>,
 ) -> Result<ParsedMeal, PluginError> {
-    let known = FoodTable::new(ctx).known_names(KNOWN_FOODS_LIMIT).await?;
+    let known = known_names(ctx, KNOWN_FOODS_LIMIT).await?;
     let known_json =
         serde_json::to_string(&known).map_err(|e| PluginError::Other(e.to_string()))?;
     let local = eaten_at.with_timezone(&Local);
@@ -190,12 +190,7 @@ mod tests {
     #[tokio::test]
     async fn prompt_lists_known_foods_and_the_description() {
         let env = env().await;
-        FoodTable::new(&env.ctx)
-            .insert(
-                "熟米饭",
-                crate::testutil::RICE,
-                crate::model::NutritionSource::User,
-            )
+        crate::sources::upsert_manual_food(&env.ctx, "熟米饭", crate::testutil::RICE)
             .await
             .unwrap();
         env.mock.push_response(json_response(json!({

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-cancel-food-import"
+description = "Enables the cancel_food_import command without any pre-configured scope."
+commands.allow = ["cancel_food_import"]
+
+[[permission]]
+identifier = "deny-cancel-food-import"
+description = "Denies the cancel_food_import command without any pre-configured scope."
+commands.deny = ["cancel_food_import"]

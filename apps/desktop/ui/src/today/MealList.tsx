@@ -45,7 +45,7 @@ export function MealList({ meals, onDeleted }: MealListProps) {
             </p>
             <p className="mt-1 text-neutral-600 dark:text-neutral-400">
               {meal.items.map((item, i) => (
-                <span key={`${meal.entry_id}-${i}`}>
+                <span key={`${meal.entry_id}-${i}`} title={item.source_name ?? undefined}>
                   {i > 0 ? "、" : ""}
                   {item.name} {t.gramsShort(Math.round(item.grams))}
                   {item.estimated ? (

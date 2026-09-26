@@ -30,6 +30,15 @@ const COMMANDS: &[&str] = &[
     "get_memory",
     "delete_memory",
     "get_usage_summary",
+    "list_food_sources",
+    "list_foods",
+    "reorder_food_sources",
+    "set_food_source_enabled",
+    "rename_food_source",
+    "delete_food_source",
+    "preview_food_import",
+    "commit_food_import",
+    "cancel_food_import",
 ];
 
 fn main() {

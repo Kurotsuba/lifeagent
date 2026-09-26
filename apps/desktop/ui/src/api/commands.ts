@@ -10,7 +10,10 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   AppState,
   ChatTurn,
+  Food,
   HistoryMessage,
+  ImportPreview,
+  ImportReport,
   MemoryNote,
   ModelsConfig,
   NutritionTargets,
@@ -18,6 +21,7 @@ import type {
   Role,
   RoleUsage,
   SettingsDto,
+  SourceInfo,
   StoredPlan,
   TestModelResult,
   TodayView,
@@ -137,4 +141,56 @@ export function deleteMemory(id: string): Promise<void> {
 
 export function getUsageSummary(): Promise<RoleUsage[]> {
   return invoke("get_usage_summary");
+}
+
+// ---- Nutrition sources / batch import (`docs/NUTRITION_SOURCES.md` §8.2) -------------------
+
+export function listFoodSources(): Promise<SourceInfo[]> {
+  return invoke("list_food_sources");
+}
+
+export function listFoods(
+  sourceId: string | null,
+  query: string | null,
+  limit: number,
+): Promise<Food[]> {
+  return invoke("list_foods", { sourceId, query, limit });
+}
+
+export function reorderFoodSources(ids: string[]): Promise<void> {
+  return invoke("reorder_food_sources", { ids });
+}
+
+export function setFoodSourceEnabled(id: string, enabled: boolean): Promise<void> {
+  return invoke("set_food_source_enabled", { id, enabled });
+}
+
+export function renameFoodSource(id: string, name: string): Promise<void> {
+  return invoke("rename_food_source", { id, name });
+}
+
+export function deleteFoodSource(id: string): Promise<void> {
+  return invoke("delete_food_source", { id });
+}
+
+/** Raw IPC body: the file's bytes directly, with its name url-encoded in the `x-file-name`
+ * header — no JSON-encoded byte array, no business logic here beyond the forwarding itself
+ * (the file is never parsed in the frontend, per CLAUDE.md). */
+export async function previewFoodImport(file: File): Promise<ImportPreview> {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  return invoke("preview_food_import", bytes, {
+    headers: { "x-file-name": encodeURIComponent(file.name) },
+  });
+}
+
+export function commitFoodImport(
+  token: string,
+  name: string | null,
+  replaceSourceId: string | null,
+): Promise<ImportReport> {
+  return invoke("commit_food_import", { token, name, replaceSourceId });
+}
+
+export function cancelFoodImport(token: string): Promise<void> {
+  return invoke("cancel_food_import", { token });
 }

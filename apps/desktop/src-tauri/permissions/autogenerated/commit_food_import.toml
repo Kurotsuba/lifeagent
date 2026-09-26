@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-commit-food-import"
+description = "Enables the commit_food_import command without any pre-configured scope."
+commands.allow = ["commit_food_import"]
+
+[[permission]]
+identifier = "deny-commit-food-import"
+description = "Denies the commit_food_import command without any pre-configured scope."
+commands.deny = ["commit_food_import"]

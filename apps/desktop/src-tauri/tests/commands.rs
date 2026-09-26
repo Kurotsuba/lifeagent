@@ -75,10 +75,20 @@ fn setup(core_app: CoreApp) -> (tauri::App<MockRuntime>, WebviewWindow<MockRunti
             lifeagent_desktop_lib::commands::get_memory,
             lifeagent_desktop_lib::commands::delete_memory,
             lifeagent_desktop_lib::commands::get_usage_summary,
+            lifeagent_desktop_lib::commands::list_food_sources,
+            lifeagent_desktop_lib::commands::list_foods,
+            lifeagent_desktop_lib::commands::reorder_food_sources,
+            lifeagent_desktop_lib::commands::set_food_source_enabled,
+            lifeagent_desktop_lib::commands::rename_food_source,
+            lifeagent_desktop_lib::commands::delete_food_source,
+            lifeagent_desktop_lib::commands::preview_food_import,
+            lifeagent_desktop_lib::commands::commit_food_import,
+            lifeagent_desktop_lib::commands::cancel_food_import,
             // `save_settings` is deliberately absent: it syncs OS autostart, which a test must
             // not touch for real (see `docs/DECISIONS.md`'s M7.5 entry).
         ])
         .manage(core_app)
+        .manage(lifeagent_desktop_lib::commands::PendingImportState::default())
         .build(tauri::generate_context!())
         .unwrap();
     let webview = WebviewWindowBuilder::new(&app, "main", Default::default())
@@ -101,6 +111,47 @@ fn invoke(webview: &WebviewWindow<MockRuntime>, cmd: &str, args: Value) -> Resul
         },
     )
     .map(|b| b.deserialize::<Value>().unwrap())
+}
+
+/// `preview_food_import`'s raw-body IPC shape: file bytes as the body, the file name url-encoded
+/// in `x-file-name` (§8.2 "Getting the file to Rust").
+fn invoke_raw_file(
+    webview: &WebviewWindow<MockRuntime>,
+    cmd: &str,
+    file_name: &str,
+    bytes: Vec<u8>,
+) -> Result<Value, Value> {
+    let mut headers = tauri::http::HeaderMap::new();
+    headers.insert(
+        "x-file-name",
+        tauri::http::HeaderValue::from_str(&urlencoding_encode(file_name)).unwrap(),
+    );
+    tauri::test::get_ipc_response(
+        webview,
+        InvokeRequest {
+            cmd: cmd.into(),
+            callback: CallbackFn(0),
+            error: CallbackFn(1),
+            url: "tauri://localhost".parse().unwrap(),
+            body: InvokeBody::Raw(bytes),
+            headers,
+            invoke_key: tauri::test::INVOKE_KEY.to_string(),
+        },
+    )
+    .map(|b| b.deserialize::<Value>().unwrap())
+}
+
+/// Minimal `encodeURIComponent`-alike for test file names (ASCII and UTF-8 bytes as `%XX`).
+fn urlencoding_encode(s: &str) -> String {
+    s.bytes()
+        .map(|b| {
+            if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~') {
+                (b as char).to_string()
+            } else {
+                format!("%{b:02X}")
+            }
+        })
+        .collect()
 }
 
 fn sample_profile() -> Value {
@@ -401,4 +452,150 @@ async fn memory_and_usage_commands_work_on_an_empty_store() {
     assert!(invoke(&webview, "get_usage_summary", json!({}))
         .unwrap()
         .is_array());
+}
+
+// ---- Nutrition sources / batch import (`docs/NUTRITION_SOURCES.md` §8.2) --------------------
+
+#[tokio::test]
+async fn list_food_sources_starts_with_the_two_built_in_sources() {
+    let (core_app, _dir) = core_app().await;
+    let (_app, webview) = setup(core_app);
+
+    let sources = invoke(&webview, "list_food_sources", json!({})).unwrap();
+    let ids: Vec<&str> = sources
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, vec!["manual", "llm_estimate"]);
+}
+
+#[tokio::test]
+async fn preview_then_commit_food_import_round_trips_through_raw_ipc() {
+    let (core_app, _dir) = core_app().await;
+    let (_app, webview) = setup(core_app);
+
+    let csv = "name,kcal,protein_g,carbs_g,fat_g,fiber_g\n熟米饭,116,2.6,25.9,0.3,0.3\n";
+    let preview = invoke_raw_file(&webview, "preview_food_import", "米饭.csv", csv.into()).unwrap();
+    assert_eq!(preview["valid_rows"], json!(1));
+    assert_eq!(preview["error_count"], json!(0));
+    assert_eq!(preview["suggested_name"], json!("米饭"));
+    let token = preview["token"].as_str().unwrap().to_string();
+
+    let report = invoke(
+        &webview,
+        "commit_food_import",
+        json!({ "token": token, "name": "我的数据集" }),
+    )
+    .unwrap();
+    assert_eq!(report["imported"], json!(1));
+    assert_eq!(report["source"]["name"], json!("我的数据集"));
+
+    let foods = invoke(&webview, "list_foods", json!({ "limit": 50 })).unwrap();
+    assert_eq!(foods.as_array().unwrap().len(), 1);
+    assert_eq!(foods[0]["name"], json!("熟米饭"));
+}
+
+#[tokio::test]
+async fn commit_food_import_consumes_the_token_once() {
+    let (core_app, _dir) = core_app().await;
+    let (_app, webview) = setup(core_app);
+
+    let csv = "name,kcal,protein_g,carbs_g,fat_g\nx,100,1,1,1\n";
+    let preview = invoke_raw_file(&webview, "preview_food_import", "x.csv", csv.into()).unwrap();
+    let token = preview["token"].as_str().unwrap().to_string();
+
+    invoke(&webview, "commit_food_import", json!({ "token": token })).unwrap();
+    let second = invoke(&webview, "commit_food_import", json!({ "token": token })).unwrap_err();
+    assert_eq!(second["code"], json!("not_found"));
+}
+
+#[tokio::test]
+async fn cancel_food_import_then_commit_reports_not_found() {
+    let (core_app, _dir) = core_app().await;
+    let (_app, webview) = setup(core_app);
+
+    let csv = "name,kcal,protein_g,carbs_g,fat_g\nx,100,1,1,1\n";
+    let preview = invoke_raw_file(&webview, "preview_food_import", "x.csv", csv.into()).unwrap();
+    let token = preview["token"].as_str().unwrap().to_string();
+
+    invoke(&webview, "cancel_food_import", json!({ "token": token })).unwrap();
+    let err = invoke(&webview, "commit_food_import", json!({ "token": token })).unwrap_err();
+    assert_eq!(err["code"], json!("not_found"));
+}
+
+#[tokio::test]
+async fn preview_food_import_reports_row_errors_with_a_zh_cn_message() {
+    let (core_app, _dir) = core_app().await;
+    let (_app, webview) = setup(core_app);
+
+    // Not UTF-8.
+    let bytes = vec![0xFF, 0xFE, 0x00];
+    let err = invoke_raw_file(&webview, "preview_food_import", "bad.csv", bytes).unwrap_err();
+    assert_eq!(err["code"], json!("invalid_input"));
+    assert!(err["message"].as_str().unwrap().contains("UTF-8"));
+}
+
+#[tokio::test]
+async fn source_management_commands_reorder_rename_disable_and_delete() {
+    let (core_app, _dir) = core_app().await;
+    let (_app, webview) = setup(core_app);
+
+    let csv1 = "name,kcal,protein_g,carbs_g,fat_g\na,100,1,1,1\n";
+    let p1 = invoke_raw_file(&webview, "preview_food_import", "a.csv", csv1.into()).unwrap();
+    let r1 = invoke(
+        &webview,
+        "commit_food_import",
+        json!({ "token": p1["token"], "name": "数据集A" }),
+    )
+    .unwrap();
+    let id1 = r1["source"]["id"].as_str().unwrap().to_string();
+
+    let csv2 = "name,kcal,protein_g,carbs_g,fat_g\nb,100,1,1,1\n";
+    let p2 = invoke_raw_file(&webview, "preview_food_import", "b.csv", csv2.into()).unwrap();
+    let r2 = invoke(
+        &webview,
+        "commit_food_import",
+        json!({ "token": p2["token"], "name": "数据集B" }),
+    )
+    .unwrap();
+    let id2 = r2["source"]["id"].as_str().unwrap().to_string();
+
+    invoke(
+        &webview,
+        "rename_food_source",
+        json!({ "id": id1, "name": "改名后" }),
+    )
+    .unwrap();
+    invoke(
+        &webview,
+        "reorder_food_sources",
+        json!({ "ids": [id2.clone(), id1.clone()] }),
+    )
+    .unwrap();
+    invoke(
+        &webview,
+        "set_food_source_enabled",
+        json!({ "id": id2, "enabled": false }),
+    )
+    .unwrap();
+
+    let sources = invoke(&webview, "list_food_sources", json!({})).unwrap();
+    let by_id = |id: &str| {
+        sources
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["id"] == json!(id))
+            .unwrap()
+            .clone()
+    };
+    assert_eq!(by_id(&id1)["name"], json!("改名后"));
+    assert_eq!(by_id(&id2)["enabled"], json!(false));
+    assert!(by_id(&id1)["priority"].as_i64().unwrap() > by_id(&id2)["priority"].as_i64().unwrap());
+
+    invoke(&webview, "delete_food_source", json!({ "id": id1 })).unwrap();
+    let after_delete = invoke(&webview, "list_food_sources", json!({})).unwrap();
+    assert_eq!(after_delete.as_array().unwrap().len(), 3); // manual, id2, llm_estimate
 }

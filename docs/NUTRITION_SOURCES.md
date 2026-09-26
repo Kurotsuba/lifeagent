@@ -1,9 +1,11 @@
 # Design: pluggable nutrition data sources and batch import
 
-Status: **design only, not implemented.** Written 2026-09-26 against the Phase 1 code on branch
-`phase1` (after `8e7d0c9`). Extends `docs/PHASE1_SPEC.md` §5, §8.2, §8.3, §8.5, §10.2, §10.3
-and §11. Where this document and the spec disagree, this document describes the intended new
-behavior. Record any deviation made while implementing it in `docs/DECISIONS.md` as usual.
+Status: **implemented 2026-09-26** (stages 1–3 of §10; the two stages marked optional there —
+§9.3's candidate-matching step and a first `RemoteSource` — were not built). Written 2026-09-26
+against the Phase 1 code on branch `phase1` (after `8e7d0c9`). Extends `docs/PHASE1_SPEC.md` §5,
+§8.2, §8.3, §8.5, §10.2, §10.3 and §11. Where this document and the spec disagree, this document
+describes the new behavior. Deviations made while implementing it are recorded in
+`docs/DECISIONS.md`'s 2026-09-26 entry.
 
 ## 1. Goal
 

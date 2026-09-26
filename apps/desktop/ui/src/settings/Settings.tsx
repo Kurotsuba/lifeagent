@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { zhCN } from "../i18n/zh-CN";
+import { FoodDataSection } from "./FoodDataSection";
 import { GeneralSection } from "./GeneralSection";
 import { MemorySection } from "./MemorySection";
 import { ModelSection } from "./ModelSection";
@@ -28,6 +29,10 @@ export function Settings() {
 
         <SectionCard title={t.sections.profileGoal}>
           <ProfileGoalSection />
+        </SectionCard>
+
+        <SectionCard title={t.sections.foodData}>
+          <FoodDataSection />
         </SectionCard>
 
         <SectionCard title={t.sections.model}>

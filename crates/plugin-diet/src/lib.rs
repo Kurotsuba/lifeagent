@@ -7,12 +7,14 @@
 //! `docs/PHASE1_SPEC.md` §8.
 
 pub mod foods;
+pub mod import;
 pub mod intake;
 pub mod model;
 pub mod parser;
 pub mod plan;
 pub mod prompts;
 pub mod resolver;
+pub mod sources;
 pub mod targets;
 pub mod tools;
 pub mod validate;
@@ -36,10 +38,16 @@ impl Plugin for DietPlugin {
             name: "Diet",
             version: env!("CARGO_PKG_VERSION"),
             event_types: vec![intake::MEAL_EVENT],
-            migrations: vec![PluginMigration {
-                version: 1,
-                sql: foods::MIGRATION_1,
-            }],
+            migrations: vec![
+                PluginMigration {
+                    version: 1,
+                    sql: foods::MIGRATION_1,
+                },
+                PluginMigration {
+                    version: 2,
+                    sql: sources::MIGRATION_2,
+                },
+            ],
         }
     }
 

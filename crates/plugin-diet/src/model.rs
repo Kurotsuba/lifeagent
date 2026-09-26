@@ -142,25 +142,54 @@ impl MealType {
     }
 }
 
+/// Provenance kind of a food's nutrition data. Serialized names keep Phase 1's values so old
+/// event payloads still parse: `Manual` is `"user"`, as `NutritionSource::User` was.
+///
+/// This is the JSON-facing representation; `diet_food_sources.kind` in the database uses its
+/// own, unrelated set of strings (`"manual"` / `"dataset"` / `"llm_estimate"`, see
+/// `SourceKind::db_str`), per `docs/NUTRITION_SOURCES.md` §3.1/§4.1.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum NutritionSource {
-    User,
+pub enum SourceKind {
+    #[serde(rename = "user")]
+    Manual,
+    #[serde(rename = "dataset")]
+    Dataset,
+    #[serde(rename = "llm_estimate")]
     LlmEstimate,
 }
 
-impl NutritionSource {
+impl SourceKind {
     pub fn as_str(&self) -> &'static str {
         match self {
-            NutritionSource::User => "user",
-            NutritionSource::LlmEstimate => "llm_estimate",
+            SourceKind::Manual => "user",
+            SourceKind::Dataset => "dataset",
+            SourceKind::LlmEstimate => "llm_estimate",
         }
     }
 
-    pub fn parse(s: &str) -> Option<NutritionSource> {
+    pub fn parse(s: &str) -> Option<SourceKind> {
         match s {
-            "user" => Some(NutritionSource::User),
-            "llm_estimate" => Some(NutritionSource::LlmEstimate),
+            "user" => Some(SourceKind::Manual),
+            "dataset" => Some(SourceKind::Dataset),
+            "llm_estimate" => Some(SourceKind::LlmEstimate),
+            _ => None,
+        }
+    }
+
+    /// The string stored in `diet_food_sources.kind` — distinct from the serde/JSON name above.
+    pub fn db_str(&self) -> &'static str {
+        match self {
+            SourceKind::Manual => "manual",
+            SourceKind::Dataset => "dataset",
+            SourceKind::LlmEstimate => "llm_estimate",
+        }
+    }
+
+    pub fn from_db_str(s: &str) -> Option<SourceKind> {
+        match s {
+            "manual" => Some(SourceKind::Manual),
+            "dataset" => Some(SourceKind::Dataset),
+            "llm_estimate" => Some(SourceKind::LlmEstimate),
             _ => None,
         }
     }
@@ -172,20 +201,28 @@ pub struct MealItem {
     pub name: String,
     pub grams: f64,
     pub food_id: String,
-    pub source: NutritionSource,
+    pub source: SourceKind,
+    /// Snapshot of the winning source's display name at logging time, so a later rename or
+    /// delete of the source doesn't change history (`docs/NUTRITION_SOURCES.md` §5). `None` for
+    /// events logged before this field existed.
+    #[serde(default)]
+    pub source_id: Option<String>,
+    #[serde(default)]
+    pub source_name: Option<String>,
     /// For this portion.
     pub macros: Macros,
 }
 
 impl MealItem {
-    /// Display JSON: `{name, grams, kcal, protein_g, estimated}`.
+    /// Display JSON: `{name, grams, kcal, protein_g, estimated, source_name}`.
     pub fn to_json(&self) -> Value {
         json!({
             "name": self.name,
             "grams": round1(self.grams),
             "kcal": self.macros.kcal.round(),
             "protein_g": round1(self.macros.protein_g),
-            "estimated": self.source == NutritionSource::LlmEstimate,
+            "estimated": self.source == SourceKind::LlmEstimate,
+            "source_name": self.source_name,
         })
     }
 }

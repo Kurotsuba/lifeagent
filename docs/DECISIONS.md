@@ -1619,3 +1619,34 @@ the app fell back to "not configured" even though the bound provider had a valid
 - **No uncommented `expect()` left in these files**: the `plan_time`/`day_boundary` defaults are
   compile-time `const`s, and `MemorySecretStore` recovers a poisoned lock (each operation is a
   single `HashMap` call, so there is no half-updated state to protect).
+
+## 2026-09-26 — Implemented `docs/NUTRITION_SOURCES.md`: pluggable sources and batch import
+
+Implemented all three stages of §10 (schema + chain, import core + CLI, desktop), skipping the
+two stages marked optional (§9.3 candidate-matching step, a first `RemoteSource`). Deviations
+from the document's exact wording:
+
+- **The single-query chain optimization (§4.2) was not built.** `SourceChain::lookup` walks
+  `TableSource`s one at a time (up to two queries per source, per §4.2's own fallback
+  description), not the single joined query the section allows as an option. Every chain-priority
+  test in §11 passes against this path; the optimization can be added later without changing the
+  trait or any caller, exactly as §4.2 anticipates.
+- **`import::commit` inserts rows one at a time inside its transaction**, not batched a few
+  hundred per statement as §6.4 suggests. Still one transaction (atomic, and the "failure mid
+  commit leaves nothing written" test covers this), just not tuned for the 50,000-row case;
+  worth revisiting if real datasets that size turn out slow in practice.
+- **`SourceKind`'s two string forms are named, not just described**: `as_str()`/`parse()` keep
+  Phase 1's JSON names (`"user"`/`"llm_estimate"`, unchanged so old event payloads still parse);
+  a separate `db_str()`/`from_db_str()` pair holds `diet_food_sources.kind`'s own strings
+  (`"manual"`/`"dataset"`/`"llm_estimate"`), matching §3.1's table exactly. The two must not be
+  confused — a comment on the enum says so.
+- **`foods source move --to POS`** (CLI, §8.1) clamps an out-of-range `POS` to the nearest valid
+  position instead of erroring, so `--to 999` is "move to the end" rather than a failure.
+- **Desktop export (§7.1's Q3) stays CLI-only**, per the document's own open question — no save
+  dialog or blob-download UI was added.
+- UI verification for the new 食物数据 Settings section was `tsc -b` (clean) and `vite build`
+  (clean) plus the full `tauri::test` mock-runtime IPC suite (`apps/desktop/src-tauri/tests/commands.rs`),
+  which exercises the real `invoke_handler`, ACL permissions and raw-body request shape end to
+  end. This sandbox has no display/WebKitGTK, so the page was not clicked through in a live
+  window — flagging this explicitly per `CLAUDE.md`'s UI-testing rule rather than claiming full
+  manual verification.

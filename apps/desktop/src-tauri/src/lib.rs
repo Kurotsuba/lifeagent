@@ -74,6 +74,7 @@ pub fn run() {
 
             tray::build(app.handle(), core_app.clone())?;
             app.manage(core_app);
+            app.manage(commands::PendingImportState::default());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -102,6 +103,15 @@ pub fn run() {
             commands::get_memory,
             commands::delete_memory,
             commands::get_usage_summary,
+            commands::list_food_sources,
+            commands::list_foods,
+            commands::reorder_food_sources,
+            commands::set_food_source_enabled,
+            commands::rename_food_source,
+            commands::delete_food_source,
+            commands::preview_food_import,
+            commands::commit_food_import,
+            commands::cancel_food_import,
         ])
         .run(tauri::generate_context!())
         .expect("error while running lifeagent-desktop");

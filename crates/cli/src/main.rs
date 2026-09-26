@@ -21,7 +21,8 @@ use lifeagent_core::profile::Profile;
 use lifeagent_core::secrets::{KeyringSecretStore, SecretStore};
 use lifeagent_llm::mock::MockChatModel;
 use lifeagent_llm::router::ModelsConfig;
-use lifeagent_plugin_diet::foods::FoodTable;
+use lifeagent_plugin_diet::import::{self, ImportFormat, ImportTarget};
+use lifeagent_plugin_diet::sources;
 use lifeagent_plugin_diet::{intake, DietPlugin};
 
 use output::{print_json, print_turn};
@@ -94,11 +95,70 @@ enum PlanAction {
     },
 }
 
+/// `docs/NUTRITION_SOURCES.md` §8.1.
 #[derive(Subcommand)]
 enum FoodsAction {
+    /// Browse foods (existing command, gains `--source`/`--query` filters).
     List {
         #[arg(long)]
+        source: Option<String>,
+        #[arg(long)]
+        query: Option<String>,
+        #[arg(long)]
         limit: Option<u32>,
+    },
+    /// Winner first, then shadowed copies, with source names.
+    Lookup { name: String },
+    /// Table: priority, id, kind, name, enabled, foods.
+    Sources,
+    Import {
+        file: PathBuf,
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        replace: Option<String>,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Stdout by default.
+    Export {
+        #[arg(long)]
+        source: String,
+        #[arg(long, default_value = "csv")]
+        format: String,
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
+    Source {
+        #[command(subcommand)]
+        action: SourceAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum SourceAction {
+    /// `POS` is 1-based among datasets.
+    Move {
+        id: String,
+        #[arg(long = "to")]
+        to: usize,
+    },
+    Enable {
+        id: String,
+    },
+    Disable {
+        id: String,
+    },
+    Rename {
+        id: String,
+        name: String,
+    },
+    Delete {
+        id: String,
+        #[arg(long)]
+        yes: bool,
     },
 }
 
@@ -235,13 +295,168 @@ async fn resolve_date(app: &CoreApp, date: Option<String>) -> Result<NaiveDate> 
 }
 
 async fn foods(app: &CoreApp, action: FoodsAction) -> Result<()> {
+    let ctx = app.plugin_context();
     match action {
-        FoodsAction::List { limit } => {
-            let table = FoodTable::new(&app.plugin_context());
-            let foods = table.list(limit.unwrap_or(DEFAULT_FOODS_LIMIT)).await?;
+        FoodsAction::List {
+            source,
+            query,
+            limit,
+        } => {
+            let foods = sources::list_foods(
+                &ctx,
+                source.as_deref(),
+                query.as_deref(),
+                limit.unwrap_or(DEFAULT_FOODS_LIMIT),
+            )
+            .await?;
             print_json(&foods)
         }
+        FoodsAction::Lookup { name } => {
+            let copies = sources::lookup_all(&ctx, &name).await?;
+            print_json(&copies)
+        }
+        FoodsAction::Sources => print_json(&sources::list_sources(&ctx).await?),
+        FoodsAction::Import {
+            file,
+            name,
+            replace,
+            dry_run,
+            yes,
+        } => import_foods(&ctx, &file, name, replace, dry_run, yes).await,
+        FoodsAction::Export {
+            source,
+            format,
+            out,
+        } => {
+            let format = match format.as_str() {
+                "csv" => ImportFormat::Csv,
+                "json" => ImportFormat::Json,
+                other => anyhow::bail!("unknown --format {other:?}: expected csv or json"),
+            };
+            let bytes = sources::export_source(&ctx, &source, format).await?;
+            match out {
+                Some(path) => std::fs::write(&path, &bytes)
+                    .with_context(|| format!("writing {}", path.display()))?,
+                None => io::stdout().write_all(&bytes)?,
+            }
+            Ok(())
+        }
+        FoodsAction::Source { action } => source_action(&ctx, action).await,
     }
+}
+
+async fn source_action(
+    ctx: &lifeagent_core::plugin::PluginContext,
+    action: SourceAction,
+) -> Result<()> {
+    match action {
+        SourceAction::Move { id, to } => {
+            let current = sources::list_sources(ctx).await?;
+            let mut dataset_ids: Vec<String> = current
+                .iter()
+                .filter(|s| matches!(s.kind, lifeagent_plugin_diet::model::SourceKind::Dataset))
+                .map(|s| s.id.clone())
+                .collect();
+            let pos = dataset_ids
+                .iter()
+                .position(|d| *d == id)
+                .with_context(|| format!("{id:?} is not a dataset source"))?;
+            dataset_ids.remove(pos);
+            let to = to.saturating_sub(1).min(dataset_ids.len());
+            dataset_ids.insert(to, id);
+            sources::reorder_datasets(ctx, &dataset_ids).await?;
+            Ok(())
+        }
+        SourceAction::Enable { id } => Ok(sources::set_enabled(ctx, &id, true).await?),
+        SourceAction::Disable { id } => Ok(sources::set_enabled(ctx, &id, false).await?),
+        SourceAction::Rename { id, name } => Ok(sources::rename_source(ctx, &id, &name).await?),
+        SourceAction::Delete { id, yes } => {
+            if !yes && !confirm(&format!("Delete source {id}? [y/N] "))? {
+                println!("已取消");
+                return Ok(());
+            }
+            Ok(sources::delete_source(ctx, &id).await?)
+        }
+    }
+}
+
+fn confirm(prompt: &str) -> Result<bool> {
+    print!("{prompt}");
+    io::stdout().flush()?;
+    let mut line = String::new();
+    io::stdin().lock().read_line(&mut line)?;
+    Ok(matches!(
+        line.trim().to_ascii_lowercase().as_str(),
+        "y" | "yes"
+    ))
+}
+
+fn print_row_issues(label: &str, issues: &[import::RowIssue], total: usize) {
+    if issues.is_empty() {
+        return;
+    }
+    println!("{label} ({total}):");
+    for issue in issues.iter().take(20) {
+        match &issue.name {
+            Some(name) => println!("  line {} ({name}): {}", issue.line, issue.message),
+            None => println!("  {}", issue.message),
+        }
+    }
+}
+
+async fn import_foods(
+    ctx: &lifeagent_core::plugin::PluginContext,
+    file: &std::path::Path,
+    name: Option<String>,
+    replace: Option<String>,
+    dry_run: bool,
+    yes: bool,
+) -> Result<()> {
+    let bytes = std::fs::read(file).with_context(|| format!("reading {}", file.display()))?;
+    let file_name = file
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("import");
+
+    let parsed = import::parse(file_name, &bytes)?;
+    let preview = import::preview(ctx, &parsed).await?;
+
+    println!(
+        "可导入 {} · 跳过 {} · 警告 {}",
+        preview.valid_rows, preview.error_count, preview.warning_count
+    );
+    if preview.shadowed_by_manual > 0 {
+        println!("{} 种已被手动录入覆盖", preview.shadowed_by_manual);
+    }
+    if preview.replaces_estimates > 0 {
+        println!("{} 种将覆盖 AI 估算", preview.replaces_estimates);
+    }
+    print_row_issues("错误", &preview.errors, preview.error_count);
+    print_row_issues("警告", &preview.warnings, preview.warning_count);
+    println!("示例（前 {} 行）:", preview.sample.len());
+    for row in &preview.sample {
+        println!(
+            "  {} kcal={} protein_g={} carbs_g={} fat_g={} fiber_g={}",
+            row.name, row.kcal, row.protein_g, row.carbs_g, row.fat_g, row.fiber_g
+        );
+    }
+
+    if dry_run {
+        return Ok(());
+    }
+    if !yes && !confirm(&format!("Import {} foods? [y/N] ", preview.valid_rows))? {
+        println!("已取消");
+        return Ok(());
+    }
+
+    let target = match replace {
+        Some(source_id) => ImportTarget::Replace { source_id },
+        None => ImportTarget::New {
+            name: name.unwrap_or_else(|| parsed.suggested_name.clone()),
+        },
+    };
+    let report = import::commit(ctx, parsed, target).await?;
+    print_json(&report)
 }
 
 async fn profile(app: &CoreApp, action: ProfileAction) -> Result<()> {
