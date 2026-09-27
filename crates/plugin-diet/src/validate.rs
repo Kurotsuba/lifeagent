@@ -9,7 +9,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::intake;
-use crate::model::{Macros, MealItem, MealType};
+use crate::model::{ItemKind, Macros, MealItem, MealType};
 use crate::resolver::resolve_many;
 
 const KCAL_TOLERANCE: f64 = 0.08;
@@ -133,8 +133,12 @@ pub async fn finalize(
             let entry = MealItem {
                 macros: food.per_100g.for_grams(item.grams),
                 name: food.name,
-                grams: item.grams,
-                food_id: food.id,
+                kind: ItemKind::Food,
+                brand: None,
+                grams: Some(item.grams),
+                servings: None,
+                food_id: Some(food.id),
+                dish_id: None,
                 source: food.source_kind,
                 source_id: Some(food.source_id),
                 source_name: Some(food.source_name),

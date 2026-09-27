@@ -1650,3 +1650,34 @@ from the document's exact wording:
   end. This sandbox has no display/WebKitGTK, so the page was not clicked through in a live
   window — flagging this explicitly per `CLAUDE.md`'s UI-testing rule rather than claiming full
   manual verification.
+
+## 2026-09-27 — `docs/DISH_NUTRITION.md` stage 1: schema + types, no visible change
+
+Implemented exactly stage 1 of §12: migration 3 (`diet_dishes`, `diet_dish_source_aliases`,
+`diet_dish_name_aliases`, additive only), the `Dish` model type, `Macros::times`, the `MealItem`
+field changes with old-event backward-compat tests, the `FoodSource` dish methods (`lookup_dish`,
+`brand_dishes`, `record_dish_use`, all with default "always miss"/no-op bodies), `TableSource`'s
+implementation of them against `diet_dishes`, `SourceChain::lookup_dish` (mirroring `lookup`,
+including the dangling-alias fall-through and §2 rule 3's brand matching), and `dish_count`
+alongside `food_count` on `SourceInfo`. `tools.rs`'s `log_meal` and `validate.rs`'s plan
+validation now construct `MealItem { kind: Food, grams: Some(..), food_id: Some(..), brand: None,
+servings: None, dish_id: None, .. }` — compile-only changes, per §9's affected-scope table.
+
+Deliberately deferred to stage 2, since nothing calls them until parsing exists and building them
+now would be untested, unused surface:
+
+- **`SourceChain::brand_candidates` and `SourceChain::known_brands`** (§4.3). Both are listed
+  alongside `lookup_dish` in §4.3's "SourceChain gains" list, but only the §5.3 pick step and the
+  §5.1 `{known_brands}` prompt placeholder consume them, and stage 1's own bullet in §12 names
+  only "SourceChain dish lookup".
+- **`upsert_manual_dish`** and the `diet_update_dish` tool (§7.4). Only used by the tool that
+  §12 explicitly assigns to stage 2.
+
+One gap noted while implementing, not yet resolved: the design flags `{known_dishes}` (§5.1) as a
+new parser prompt placeholder ("≤ 100 most-used brandless dish names") but never defines a
+`SourceChain` method to back it, unlike `known_brands`. Whoever picks up stage 2 needs to add one
+(the natural shape mirrors `sources::known_names`, scoped to `brand_key = ''`).
+
+No behavior changed for existing callers: `MealItem::to_json`'s `"grams"` field is still a plain
+number for every food item (the only kind constructed today), since `self.grams.map(round1)`
+only produces `null` once a dish item with unknown `serving_g` exists, which stage 2 introduces.

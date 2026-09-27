@@ -10,7 +10,7 @@ use serde_json::{json, Value};
 
 use crate::foods::validate_per_100g;
 use crate::intake::{self, MEAL_EVENT};
-use crate::model::{Macros, MealItem, MealLogged, MealType};
+use crate::model::{ItemKind, Macros, MealItem, MealLogged, MealType};
 use crate::parser::parse_meal;
 use crate::resolver::resolve_many;
 use crate::sources::{self, SourceChain};
@@ -138,8 +138,12 @@ async fn log_meal(ctx: &PluginContext, args: Value) -> Result<ToolOutput, Plugin
         .map(|(item, food)| MealItem {
             macros: food.per_100g.for_grams(item.grams),
             name: food.name,
-            grams: item.grams,
-            food_id: food.id,
+            kind: ItemKind::Food,
+            brand: None,
+            grams: Some(item.grams),
+            servings: None,
+            food_id: Some(food.id),
+            dish_id: None,
             source: food.source_kind,
             source_id: Some(food.source_id),
             source_name: Some(food.source_name),

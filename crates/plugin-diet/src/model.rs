@@ -7,8 +7,8 @@ use chrono::{NaiveTime, Timelike};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-/// Energy and macronutrients — per 100 g for a food, or for a portion, meal or day.
-/// `carbs_g` is total carbohydrate, fiber included (§8.3).
+/// Energy and macronutrients — per 100 g (Food), per serving (Dish), or for a portion, meal or
+/// day. `carbs_g` is total carbohydrate, fiber included (§8.3).
 #[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
 pub struct Macros {
     pub kcal: f64,
@@ -29,6 +29,17 @@ impl Macros {
             carbs_g: self.carbs_g * f,
             fat_g: self.fat_g * f,
             fiber_g: self.fiber_g * f,
+        }
+    }
+
+    /// Scales per-serving values (a `Dish`) by a number of servings.
+    pub fn times(&self, servings: f64) -> Macros {
+        Macros {
+            kcal: self.kcal * servings,
+            protein_g: self.protein_g * servings,
+            carbs_g: self.carbs_g * servings,
+            fat_g: self.fat_g * servings,
+            fiber_g: self.fiber_g * servings,
         }
     }
 
@@ -195,12 +206,57 @@ impl SourceKind {
     }
 }
 
+/// Whether a logged meal item came from a per-100 g `Food` or a per-serving `Dish`
+/// (`docs/DISH_NUTRITION.md` §2, §6). `#[serde(default)]` on `MealItem::kind` means an event
+/// logged before dishes existed deserializes as `Food`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ItemKind {
+    #[default]
+    Food,
+    Dish,
+}
+
+/// A per-serving nutrition row (`docs/DISH_NUTRITION.md` §2, §4.1): a chain restaurant menu item
+/// or similar, identified by `(brand_key, name_key)` rather than by name alone. `brand == ""` is
+/// a brandless dish. `source_kind` is never `LlmEstimate`: dishes are never AI-estimated (D3).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Dish {
+    pub id: String,
+    pub brand: String,
+    pub brand_key: String,
+    pub name: String,
+    pub name_key: String,
+    pub serving_g: Option<f64>,
+    pub per_serving: Macros,
+    pub source_id: String,
+    pub source_kind: SourceKind,
+    pub source_name: String,
+    pub use_count: i64,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MealItem {
-    /// Canonical food name from the food table.
+    /// Canonical food name, or dish name including size, from the food/dish table.
     pub name: String,
-    pub grams: f64,
-    pub food_id: String,
+    /// `#[serde(default)]`: absent in every event logged before dishes existed, which are all
+    /// `Food`.
+    #[serde(default)]
+    pub kind: ItemKind,
+    /// Dish items only.
+    #[serde(default)]
+    pub brand: Option<String>,
+    /// Food: always. Dish: `serving_g * servings` when `serving_g` is known, else `None`.
+    pub grams: Option<f64>,
+    /// Dish items only.
+    #[serde(default)]
+    pub servings: Option<f64>,
+    /// Food items. `None` for a dish item; always present on food items, including events
+    /// logged before this field existed (so no `#[serde(default)]`).
+    pub food_id: Option<String>,
+    /// Dish items only.
+    #[serde(default)]
+    pub dish_id: Option<String>,
     pub source: SourceKind,
     /// Snapshot of the winning source's display name at logging time, so a later rename or
     /// delete of the source doesn't change history (`docs/NUTRITION_SOURCES.md` §5). `None` for
@@ -218,7 +274,7 @@ impl MealItem {
     pub fn to_json(&self) -> Value {
         json!({
             "name": self.name,
-            "grams": round1(self.grams),
+            "grams": self.grams.map(round1),
             "kcal": self.macros.kcal.round(),
             "protein_g": round1(self.macros.protein_g),
             "estimated": self.source == SourceKind::LlmEstimate,
@@ -320,5 +376,62 @@ mod tests {
         assert_eq!(MealType::parse("Lunch"), Some(MealType::Lunch));
         assert_eq!(MealType::parse("null"), None);
         assert_eq!(MealType::parse("brunch"), None);
+    }
+
+    #[test]
+    fn times_scales_per_serving_values() {
+        let per_serving = Macros {
+            kcal: 733.0,
+            protein_g: 25.0,
+            carbs_g: 90.0,
+            fat_g: 28.0,
+            fiber_g: 3.0,
+        };
+        let two_servings = per_serving.times(2.0);
+        assert!((two_servings.kcal - 1466.0).abs() < 1e-9);
+        assert!((two_servings.protein_g - 50.0).abs() < 1e-9);
+    }
+
+    /// `docs/DISH_NUTRITION.md` §6/§10: a Phase 1 `diet.meal_logged` payload — `grams`/`food_id`
+    /// always bare values, no `kind`/`brand`/`servings`/`dish_id`/`source_id`/`source_name` keys
+    /// at all — must still deserialize, defaulting to a food item.
+    #[test]
+    fn old_meal_item_payload_without_dish_fields_deserializes_as_food() {
+        let raw = r#"{
+            "name": "熟米饭",
+            "grams": 150.0,
+            "food_id": "id-rice",
+            "source": "llm_estimate",
+            "macros": {"kcal": 174.0, "protein_g": 3.9, "carbs_g": 38.85, "fat_g": 0.45, "fiber_g": 0.45}
+        }"#;
+        let item: MealItem = serde_json::from_str(raw).unwrap();
+        assert_eq!(item.kind, ItemKind::Food);
+        assert_eq!(item.brand, None);
+        assert_eq!(item.grams, Some(150.0));
+        assert_eq!(item.servings, None);
+        assert_eq!(item.food_id, Some("id-rice".to_string()));
+        assert_eq!(item.dish_id, None);
+        assert_eq!(item.source_id, None);
+        assert_eq!(item.source_name, None);
+        assert_eq!(item.to_json()["estimated"], true);
+    }
+
+    /// A migration-2-era payload, which already has `source_id`/`source_name` but predates
+    /// dishes, also deserializes as a food item.
+    #[test]
+    fn migration_2_era_meal_item_payload_deserializes_as_food() {
+        let raw = r#"{
+            "name": "熟米饭",
+            "grams": 150.0,
+            "food_id": "id-rice",
+            "source": "user",
+            "source_id": "manual",
+            "source_name": "手动录入",
+            "macros": {"kcal": 174.0, "protein_g": 3.9, "carbs_g": 38.85, "fat_g": 0.45, "fiber_g": 0.45}
+        }"#;
+        let item: MealItem = serde_json::from_str(raw).unwrap();
+        assert_eq!(item.kind, ItemKind::Food);
+        assert_eq!(item.source_id, Some("manual".to_string()));
+        assert_eq!(item.source_name, Some("手动录入".to_string()));
     }
 }

@@ -47,6 +47,10 @@ impl Plugin for DietPlugin {
                     version: 2,
                     sql: sources::MIGRATION_2,
                 },
+                PluginMigration {
+                    version: 3,
+                    sql: sources::MIGRATION_3,
+                },
             ],
         }
     }
