@@ -44,7 +44,7 @@ lookup "熟米饭"
 - Importing through chat. Files never pass through the LLM (cost, privacy, and the rule that
   numbers never come from the model).
 - Per-serving data. The stored basis is always per 100 g of the edible portion. The importer
-  can convert other bases (§6.2).
+  can convert other bases (§6.2). *(Lifted by `docs/DISH_NUTRITION.md`: per-serving dishes.)*
 - Changing past meals. Logged meals keep a snapshot of their values (already true today:
   `MealItem.macros` is stored in the event payload). Import, reorder or delete never rewrites
   history.
