@@ -47,7 +47,20 @@ export function MealList({ meals, onDeleted }: MealListProps) {
               {meal.items.map((item, i) => (
                 <span key={`${meal.entry_id}-${i}`} title={item.source_name ?? undefined}>
                   {i > 0 ? "、" : ""}
-                  {item.name} {t.gramsShort(Math.round(item.grams))}
+                  {item.kind === "dish" ? (
+                    <>
+                      {item.brand ? (
+                        <span className="text-neutral-400 dark:text-neutral-500">
+                          {item.brand}{" "}
+                        </span>
+                      ) : null}
+                      {item.name} {t.servingsShort(item.servings ?? 1)}
+                    </>
+                  ) : (
+                    <>
+                      {item.name} {t.gramsShort(Math.round(item.grams ?? 0))}
+                    </>
+                  )}
                   {item.estimated ? (
                     <span className="ml-1 rounded bg-neutral-200 px-1 text-[10px] text-neutral-600 dark:bg-neutral-700 dark:text-neutral-300">
                       {t.estimatedBadge}

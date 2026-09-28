@@ -9,7 +9,7 @@ use lifeagent_core::time::age_years;
 use serde::Serialize;
 use serde_json::{json, Value};
 
-use crate::model::{round1, Macros, MealLogged, MealType};
+use crate::model::{round1, Macros, MealItem, MealLogged, MealType};
 use crate::targets::{self, NutritionTargets};
 
 pub const MEAL_EVENT: &str = "diet.meal_logged";
@@ -199,12 +199,12 @@ pub async fn context_snippet(ctx: &PluginContext, date: NaiveDate) -> Result<Str
         meals
             .iter()
             .map(|m| {
-                let names: Vec<&str> = m.meal.items.iter().map(|i| i.name.as_str()).collect();
+                let labels: Vec<String> = m.meal.items.iter().map(MealItem::label).collect();
                 format!(
                     "{}(entry {}) {} {:.0} kcal",
                     m.meal.meal_type.zh_label(),
                     m.entry_id,
-                    names.join("、"),
+                    labels.join("、"),
                     m.meal.total.kcal
                 )
             })

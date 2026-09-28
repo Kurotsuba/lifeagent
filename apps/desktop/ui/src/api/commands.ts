@@ -10,6 +10,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   AppState,
   ChatTurn,
+  Dish,
   Food,
   HistoryMessage,
   ImportPreview,
@@ -149,12 +150,22 @@ export function listFoodSources(): Promise<SourceInfo[]> {
   return invoke("list_food_sources");
 }
 
+/** `kind` selects which array comes back (`"food"` when omitted); `query` is a food-only
+ * substring filter, `brand` a dish-only exact filter (`docs/DISH_NUTRITION.md` §8.2). */
 export function listFoods(
   sourceId: string | null,
   query: string | null,
   limit: number,
-): Promise<Food[]> {
-  return invoke("list_foods", { sourceId, query, limit });
+  kind?: "food" | "dish" | null,
+  brand?: string | null,
+): Promise<Food[] | Dish[]> {
+  return invoke("list_foods", {
+    sourceId,
+    query,
+    limit,
+    kind: kind ?? null,
+    brand: brand ?? null,
+  });
 }
 
 export function reorderFoodSources(ids: string[]): Promise<void> {

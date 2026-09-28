@@ -110,7 +110,10 @@ async fn meal_logged_via_orchestrator_shows_up_in_today_view() {
     // 2. Meal parser.
     mock.push_response(json_response(json!({
         "meal_type": "lunch",
-        "items": [{"name": "熟米饭", "grams": 200}, {"name": "鸡蛋", "grams": 100}]
+        "dishes": [
+            {"name": "熟米饭", "components": [{"name": "熟米饭", "grams": 200}]},
+            {"name": "鸡蛋", "components": [{"name": "鸡蛋", "grams": 100}]}
+        ]
     })));
     // 3–4. One estimate per new food, concurrently.
     mock.push_closure(estimate);
@@ -172,7 +175,8 @@ async fn second_meal_with_known_foods_needs_no_estimates() {
     };
     let parsed = || {
         json_response(json!({
-            "meal_type": null, "items": [{"name": "熟米饭", "grams": 200}]
+            "meal_type": null,
+            "dishes": [{"name": "熟米饭", "components": [{"name": "熟米饭", "grams": 200}]}]
         }))
     };
     // Turn 1: 熟米饭 is new, so it's estimated.

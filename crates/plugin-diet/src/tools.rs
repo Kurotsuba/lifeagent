@@ -8,6 +8,7 @@ use lifeagent_llm::types::ToolSpec;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
+use crate::dish_resolver::{self, DishOutcome};
 use crate::foods::validate_per_100g;
 use crate::intake::{self, MEAL_EVENT};
 use crate::model::{ItemKind, Macros, MealItem, MealLogged, MealType};
@@ -21,14 +22,19 @@ pub fn specs() -> Vec<ToolSpec> {
             name: "diet_log_meal".into(),
             description: "Log a meal, snack or caloric drink the user reports having eaten. \
                 Always pass the user's original wording in `description`, unchanged — the app \
-                works out foods, portions and nutrition itself. Set `meal_type` only if the \
-                user states it. Set `eaten_at` (local time, YYYY-MM-DDTHH:MM) only if the user \
-                ate at a different time than now. When the user corrects a logged meal (wrong \
-                portion or item), delete that entry with core_delete_entry and log it again; \
-                this re-log is the one exception to the original wording: describe the \
-                corrected meal item by item, keeping the name and grams of each item the \
-                user did not correct from the earlier result (e.g. \"拉面(熟)150g、牛肉(熟)80g、\
-                卤蛋2个\"), otherwise unchanged items get new guessed portions. \
+                works out dishes, foods, portions and nutrition itself. The app has its own \
+                menu and food data (chain restaurants, canteen set meals, imported tables) \
+                that you can't see, so call this tool even for items you don't recognize, \
+                such as a canteen set meal (\"A定食（大）\") or a menu item name; never ask the \
+                user for ingredients or say there's no data before logging. Set `meal_type` only if \
+                the user states it. Set `eaten_at` (local time, YYYY-MM-DDTHH:MM) only if the \
+                user ate at a different time than now. When the user corrects a logged meal \
+                (wrong portion or item), delete that entry with core_delete_entry and log it \
+                again; this re-log is the one exception to the original wording: describe the \
+                corrected meal item by item, keeping the name and grams (or, for a chain menu \
+                item, the brand, name and servings) of each item the user did not correct from \
+                the earlier result (e.g. \"拉面(熟)150g、牛肉(熟)80g、卤蛋2个\" or \"松屋 牛めし\
+                （並盛）1份、味噌汁1份\"), otherwise unchanged items get new guessed portions. \
                 Quote the returned numbers; never compute your own."
                 .into(),
             parameters: json!({
@@ -76,6 +82,30 @@ pub fn specs() -> Vec<ToolSpec> {
             }),
         },
         ToolSpec {
+            name: "diet_update_dish".into(),
+            description: "Correct the per-serving nutrition of a chain restaurant / menu item \
+                (a 'dish', not a per-100 g food) when the user gives better values, e.g. from a \
+                receipt or the chain's own site. Creates the dish if it doesn't exist. Pass \
+                `brand` when the item belongs to a specific chain; omit it only for a brandless \
+                dish (e.g. a canteen item). Only meals logged afterwards use the new values; \
+                meals already logged keep theirs."
+                .into(),
+            parameters: json!({
+                "type": "object",
+                "required": ["dish_name", "kcal", "protein_g", "carbs_g", "fat_g"],
+                "properties": {
+                    "dish_name": {"type": "string"},
+                    "brand": {"type": "string"},
+                    "kcal": {"type": "number"},
+                    "protein_g": {"type": "number"},
+                    "carbs_g": {"type": "number"},
+                    "fat_g": {"type": "number"},
+                    "fiber_g": {"type": "number"},
+                    "serving_g": {"type": "number"}
+                }
+            }),
+        },
+        ToolSpec {
             name: "diet_add_alias".into(),
             description: "Add another name for a food already in the food table (e.g. \
                 '卤蛋' for '卤鸡蛋'), so meals that use that name match it."
@@ -97,6 +127,7 @@ pub async fn call(ctx: &PluginContext, name: &str, args: Value) -> Result<ToolOu
         "diet_log_meal" => log_meal(ctx, args).await,
         "diet_get_intake" => get_intake(ctx, args).await,
         "diet_update_food" => update_food(ctx, args).await,
+        "diet_update_dish" => update_dish(ctx, args).await,
         "diet_add_alias" => add_alias(ctx, args).await,
         other => Err(PluginError::NotFound(format!(
             "unknown diet tool {other:?}"
@@ -129,26 +160,62 @@ async fn log_meal(ctx: &PluginContext, args: Value) -> Result<ToolOutput, Plugin
     };
 
     let parsed = parse_meal(ctx, description, args.meal_type, eaten_at).await?;
-    let names: Vec<String> = parsed.items.iter().map(|i| i.name.clone()).collect();
-    let foods = resolve_many(ctx, &names).await?;
-    let items: Vec<MealItem> = parsed
-        .items
-        .iter()
-        .zip(foods)
-        .map(|(item, food)| MealItem {
-            macros: food.per_100g.for_grams(item.grams),
-            name: food.name,
-            kind: ItemKind::Food,
-            brand: None,
-            grams: Some(item.grams),
-            servings: None,
-            food_id: Some(food.id),
-            dish_id: None,
-            source: food.source_kind,
-            source_id: Some(food.source_id),
-            source_name: Some(food.source_name),
-        })
-        .collect();
+    let outcomes = dish_resolver::resolve_dishes(ctx, parsed.dishes).await?;
+
+    // Stage 4 (§5.5): every unmatched dish's components go through the food resolver in one
+    // call, flattened across the whole meal.
+    let mut component_names = Vec::new();
+    for outcome in &outcomes {
+        if let DishOutcome::Unmatched(pd) = outcome {
+            component_names.extend(pd.components.iter().map(|c| c.name.clone()));
+        }
+    }
+    let mut foods = resolve_many(ctx, &component_names).await?.into_iter();
+
+    let chain = SourceChain::load(ctx).await?;
+    let mut items = Vec::with_capacity(outcomes.len());
+    for outcome in outcomes {
+        match outcome {
+            DishOutcome::Matched(m) => {
+                chain.record_dish_use(&m.dish).await?;
+                let dish = m.dish;
+                let macros = dish.per_serving.times(m.servings);
+                items.push(MealItem {
+                    macros,
+                    name: dish.name,
+                    kind: ItemKind::Dish,
+                    brand: (!dish.brand.is_empty()).then_some(dish.brand),
+                    grams: m.grams,
+                    servings: Some(m.servings),
+                    food_id: None,
+                    dish_id: Some(dish.id),
+                    source: dish.source_kind,
+                    source_id: Some(dish.source_id),
+                    source_name: Some(dish.source_name),
+                });
+            }
+            DishOutcome::Unmatched(pd) => {
+                for component in pd.components {
+                    let food = foods.next().ok_or_else(|| {
+                        PluginError::Other("resolver returned too few foods".into())
+                    })?;
+                    items.push(MealItem {
+                        macros: food.per_100g.for_grams(component.grams),
+                        name: food.name,
+                        kind: ItemKind::Food,
+                        brand: None,
+                        grams: Some(component.grams),
+                        servings: None,
+                        food_id: Some(food.id),
+                        dish_id: None,
+                        source: food.source_kind,
+                        source_id: Some(food.source_id),
+                        source_name: Some(food.source_name),
+                    });
+                }
+            }
+        }
+    }
     let meal = MealLogged {
         meal_type: parsed.meal_type,
         raw_text: description.to_string(),
@@ -247,6 +314,62 @@ async fn update_food(ctx: &PluginContext, args: Value) -> Result<ToolOutput, Plu
 }
 
 #[derive(Deserialize)]
+struct UpdateDishArgs {
+    dish_name: String,
+    brand: Option<String>,
+    kcal: f64,
+    protein_g: f64,
+    carbs_g: f64,
+    fat_g: f64,
+    fiber_g: Option<f64>,
+    serving_g: Option<f64>,
+}
+
+async fn update_dish(ctx: &PluginContext, args: Value) -> Result<ToolOutput, PluginError> {
+    let args: UpdateDishArgs = parse_args(args)?;
+    // Without a new fiber value, keep the dish's current chain-winner value, as `update_food`
+    // does (`docs/NUTRITION_SOURCES.md` §7.2).
+    let fiber_g = match args.fiber_g {
+        Some(f) => f,
+        None => SourceChain::load(ctx)
+            .await?
+            .lookup_dish(args.brand.as_deref().unwrap_or(""), &args.dish_name)
+            .await?
+            .map_or(0.0, |d| d.per_serving.fiber_g),
+    };
+    let per_serving = Macros {
+        kcal: args.kcal,
+        protein_g: args.protein_g,
+        carbs_g: args.carbs_g,
+        fat_g: args.fat_g,
+        fiber_g,
+    };
+    sources::validate_dish_macros(&per_serving, args.serving_g)
+        .map_err(PluginError::InvalidArgs)?;
+
+    let dish = sources::upsert_manual_dish(
+        ctx,
+        &args.dish_name,
+        args.brand.as_deref(),
+        per_serving,
+        args.serving_g,
+    )
+    .await?;
+    Ok(ToolOutput {
+        content: json!({
+            "dish_id": dish.id,
+            "name": dish.name,
+            "brand": dish.brand,
+            "per_serving": dish.per_serving.to_json(),
+            "serving_g": dish.serving_g,
+            "note": "Saved. Only meals logged from now on use these values; meals already \
+                     logged keep their numbers.",
+        }),
+        summary: format!("已更新菜品：{}", dish.name),
+    })
+}
+
+#[derive(Deserialize)]
 struct AddAliasArgs {
     food_name: String,
     alias: String,
@@ -270,7 +393,10 @@ mod tests {
     fn parser_reply() -> lifeagent_llm::types::ChatResponse {
         json_response(json!({
             "meal_type": "lunch",
-            "items": [{"name": "熟米饭", "grams": 200}, {"name": "鸡蛋", "grams": 100}]
+            "dishes": [
+                {"name": "熟米饭", "components": [{"name": "熟米饭", "grams": 200}]},
+                {"name": "鸡蛋", "components": [{"name": "鸡蛋", "grams": 100}]}
+            ]
         }))
     }
 
@@ -309,7 +435,8 @@ mod tests {
         let env = env().await;
         upsert_manual_food(&env.ctx, "熟米饭", RICE).await.unwrap();
         env.mock.push_response(json_response(json!({
-            "meal_type": null, "items": [{"name": "熟米饭", "grams": 150}]
+            "meal_type": null,
+            "dishes": [{"name": "熟米饭", "components": [{"name": "熟米饭", "grams": 150}]}]
         })));
         let yesterday = intake::today(&env.ctx).await.unwrap().pred_opt().unwrap();
         let eaten_at = format!("{}T19:00", yesterday.format("%Y-%m-%d"));
@@ -327,6 +454,56 @@ mod tests {
             intake::meals_on(&env.ctx, yesterday).await.unwrap().len(),
             1
         );
+    }
+
+    #[tokio::test]
+    async fn log_meal_with_a_matched_dish_and_an_unmatched_home_dish() {
+        let env = env().await;
+        crate::sources::upsert_manual_dish(
+            &env.ctx,
+            "牛めし（並盛）",
+            Some("松屋"),
+            RICE,
+            Some(350.0),
+        )
+        .await
+        .unwrap();
+        env.mock.push_response(json_response(json!({
+            "meal_type": "lunch",
+            "dishes": [
+                {"name": "牛めし（並盛）", "brand": "松屋", "servings": 1,
+                 "components": [{"name": "熟米饭", "grams": 250}, {"name": "牛肉(炖)", "grams": 85}]},
+                {"name": "鸡蛋", "components": [{"name": "鸡蛋", "grams": 100}]}
+            ]
+        })));
+        env.mock.push_closure(estimate_responder);
+
+        let out = call(
+            &env.ctx,
+            "diet_log_meal",
+            json!({"description": "松屋牛めし並盛和一个鸡蛋"}),
+        )
+        .await
+        .unwrap();
+
+        // Parser order preserved: the dish item first, then the home dish's food item.
+        assert_eq!(out.content["items"][0]["kind"], "dish");
+        assert_eq!(out.content["items"][0]["name"], "牛めし（並盛）");
+        assert_eq!(out.content["items"][0]["brand"], "松屋");
+        assert_eq!(out.content["items"][0]["servings"], 1.0);
+        assert_eq!(out.content["items"][1]["kind"], "food");
+        assert_eq!(out.content["items"][1]["name"], "鸡蛋");
+        // Total is the dish's per-serving macros plus the egg's estimate.
+        assert_eq!(out.content["total"]["kcal"], (RICE.kcal + EGG.kcal).round());
+
+        let dish = SourceChain::load(&env.ctx)
+            .await
+            .unwrap()
+            .lookup_dish("松屋", "牛めし（並盛）")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(dish.use_count, 1);
     }
 
     #[tokio::test]
@@ -378,6 +555,54 @@ mod tests {
                 &env.ctx,
                 "diet_update_food",
                 json!({"food_name": "x", "kcal": 100, "protein_g": 60, "carbs_g": 60, "fat_g": 0}),
+            )
+            .await,
+            Err(PluginError::InvalidArgs(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn update_dish_creates_a_manual_dish_that_shadows_a_dataset_copy() {
+        let env = env().await;
+        crate::sources::upsert_manual_dish(&env.ctx, "牛めし（並盛）", Some("松屋"), EGG, None)
+            .await
+            .unwrap();
+
+        let out = call(
+            &env.ctx,
+            "diet_update_dish",
+            json!({
+                "dish_name": "牛めし（並盛）", "brand": "松屋",
+                "kcal": 733, "protein_g": 25, "carbs_g": 90, "fat_g": 28, "serving_g": 350
+            }),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(out.content["per_serving"]["kcal"], 733.0);
+        assert_eq!(out.summary, "已更新菜品：牛めし（並盛）");
+        let dish = SourceChain::load(&env.ctx)
+            .await
+            .unwrap()
+            .lookup_dish("松屋", "牛めし（並盛）")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(dish.per_serving.kcal, 733.0);
+        assert_eq!(dish.serving_g, Some(350.0));
+    }
+
+    #[tokio::test]
+    async fn update_dish_rejects_impossible_values() {
+        let env = env().await;
+        assert!(matches!(
+            call(
+                &env.ctx,
+                "diet_update_dish",
+                json!({
+                    "dish_name": "怪菜", "kcal": 100, "protein_g": 10, "carbs_g": 10, "fat_g": 10,
+                    "serving_g": 1
+                }),
             )
             .await,
             Err(PluginError::InvalidArgs(_))

@@ -1681,3 +1681,212 @@ new parser prompt placeholder ("≤ 100 most-used brandless dish names") but nev
 No behavior changed for existing callers: `MealItem::to_json`'s `"grams"` field is still a plain
 number for every food item (the only kind constructed today), since `self.grams.map(round1)`
 only produces `null` once a dish item with unknown `serving_g` exists, which stage 2 introduces.
+
+## 2026-09-28 — `docs/DISH_NUTRITION.md`: `{known_dishes}` gap closed (design only)
+
+Resolves the gap noted in the stage 1 entry above: §5.1's `{known_dishes}` placeholder had no
+backing method. The design now defines `SourceChain::known_dishes(limit)` (§4.2), called with
+100 from the parser. It mirrors `sources::known_names`: brandless dishes (`brand_key = ''`) in
+enabled sources, one display name per `name_key` taken from the highest-priority source,
+ordered by `use_count` summed across sources, then by name. It's a `SourceChain` method rather
+than a free function, to sit beside `known_brands`, which §4.2 already places there.
+
+- **Branded dishes are excluded.** They reach the parser through `{known_brands}` and the
+  pick step (§5.3). Listing them would duplicate that path and use up the 100 slots.
+- **`diet_dish_name_aliases` redirects aren't listed**, the same as `known_names` ignores
+  `diet_name_aliases`. The alias only has to match the user's wording, which it already does.
+- **New §5.1 prompt rule:** a brandless item that is in `KNOWN_DISHES` is copied exactly, with
+  `size: null`. `normalize` only collapses whitespace, lowercases ASCII and trims trailing
+  punctuation, so `A定食（大）` and `A定食 大` produce different keys. Without the rule, a
+  parser that splits the size out would miss the stage 2 match, and listing the names would
+  not help.
+
+§9's scope table and §10's test list are updated to match. Implementation stays in stage 2,
+together with `known_brands`, since the parser is its only caller.
+
+## 2026-09-28 — `docs/DISH_NUTRITION.md` §5.3: size-mapping rule for the dish pick
+
+The `DISH_PICK` prompt only covered "no size stated → regular size". A size stated in another
+language or in generic words (e.g. "中碗松屋牛肉饭" against `牛めし（並盛）`) had no guidance,
+so the model could return `null` and fall back to ingredients. The prompt now maps generic
+sizes to the chain's own: 中/medium/普通 → the regular size, 小/大 → the next size down/up that
+exists on the menu, and a size with no reasonable equivalent → `null`. The mapping is left to
+the model, not a Rust size table: the model only chooses an index into local rows, so no number
+comes from it, and chains name their sizes too differently for a fixed table. §10 gains a
+mocked `中碗` → `並盛` pick test that also checks the alias is learned.
+
+## 2026-09-28 — `docs/DISH_NUTRITION.md` stage 2: parsing, dish matching, `diet_update_dish`
+
+Implemented exactly stage 2 of §12: the new `MEAL_PARSER` dish shape and prompt (`{known_brands}`
+and `{known_dishes}` filled from the now-implemented `SourceChain::known_brands`/`known_dishes`,
+§4.2's gap closed as design and now code), `parser::validate_dishes` covering every §5.1 limit,
+the new `dish_resolver` module (stage 2 exact match, stage 3 candidates + one `DISH_PICK` call
+per meal, the bigram-Dice candidate cut at 200), `tools::log_meal`'s new assembly (§5.5),
+`MealItem::label`, `intake::context_snippet` using it, and `diet_update_dish` plus
+`sources::upsert_manual_dish`/`validate_dish_macros`.
+
+Deviations and decisions not spelled out verbatim in the design:
+
+- **An exact stage-2 hit whose `grams` can't convert (no `serving_g`) never falls through to
+  stage 3.** §5.4 describes this "falls back to components" case as part of stage 4, but doesn't
+  say whether such a dish is still eligible for the stage-3 pick first. Re-attempting a pick
+  would contradict §5.3's own gate ("only for branded exact misses" — this dish is a hit, just
+  one whose grams can't be trusted), and would risk swapping in a *different* menu item than the
+  one the user's exact wording already matched. `dish_resolver::resolve_dishes` therefore keeps
+  stage 2's `Option<Dish>` separate from the final `Option<MatchedDish>`, and only dishes with no
+  `Dish` at all (from neither stage 2 nor stage 3) become stage-3 candidates. A regression test
+  (`grams_stated_without_serving_g_falls_back_to_components`) asserts zero LLM calls for this
+  case.
+- **The `DISH_PICK` input/output JSON shape** (beyond the `{"picks": [{"dish", "candidate"}]}`
+  shape §5.3 already specifies) is this implementation's own: each pending dish is sent as
+  `{"dish": <index into the pick batch>, "name", "size", "servings", "candidates": [names]}`,
+  batched across every pending dish in one array. The `"dish"` index is positional within the
+  pick batch, not the dish's position in the original meal — the model never needs to know the
+  latter.
+- **Candidate ranking** (§5.3 step 1) is a plain character-bigram Dice coefficient
+  (`2·|A∩B| / (|A|+|B|)`, bigrams matched as a multiset), ties broken by `use_count` descending.
+  No crate was added; menus are hundreds of rows, so the O(n²) multiset matching in
+  `dice_score` is trivial in memory, per the design's own note.
+- **`MealItem::label()` formatting**: `"{name} {grams}g"` for a food, `"{brand} {name}×{servings}"`
+  for a branded dish (no leading space before `×`), `"{name}×{servings}"` when brandless. Numbers
+  use Rust's own `f64` `Display`, which already prints `1` rather than `1.0` — matching the
+  design's `"×1"` example without extra formatting code.
+- **`sources::validate_dish_macros`** covers only the §7.2 *hard* rules (used by
+  `diet_update_dish`); the warning-only energy-vs-macros check is import-only and left to stage 3,
+  which will decide whether to reuse this function or fold it into `import.rs`'s own row
+  validation.
+- **`upsert_manual_dish`'s alias/display-name behavior mirrors `upsert_manual_food` exactly**,
+  including the quirk that an update only reuses the existing row when called with the *same*
+  `(brand, dish_name)` (or through a `diet_dish_name_aliases` redirect) — calling it with an
+  unrelated new name creates a new row rather than renaming the old one, exactly as
+  `upsert_manual_food` already behaves for foods.
+
+No behavior changed for a food-only meal: with no dishes matching (the common case until the user
+has chain data imported), every dish's `components` decompose exactly as Phase 1's flat items did,
+through the same `resolver::resolve_many`. `docs/PHASE1_SPEC.md` `validate.rs`'s plan path is
+untouched (`kind: ItemKind::Food` throughout, unaffected by dishes per D4).
+
+Deferred to stage 3 per §12: the §7 import/export format (`basis`/`brand` columns, dish row
+validation including the warning-only energy check, preview/report/replace/export) and the §8.1
+CLI commands. Deferred to stage 4: the desktop surfaces (§8.2) — `MealList.tsx` in particular
+still assumes every item has non-null `grams`, which a dish item with unknown `serving_g` breaks;
+this is unexercised until stage 4 wires dishes into the desktop's `list_foods`/import UI.
+
+## 2026-09-28 — `docs/DISH_NUTRITION.md` stage 3: import/export, `list_dishes`, CLI
+
+Implemented exactly stage 3 of §12: the §7.1 `basis`/`brand` columns and JSON `dishes` array (in
+`import.rs`), §7.2 dish row validation (reusing `sources::validate_dish_macros` for the hard
+rules, plus the same warning-only energy-vs-macros check foods already had), §7.3's preview/
+report/replace/export additions, and the §8.1 CLI commands (`sources::list_dishes`,
+`SourceChain::lookup_dish_all`).
+
+Deviations and decisions not spelled out verbatim in the design:
+
+- **`import.rs`'s food/dish split is two parallel row types** (`ValidFoodRow`/`ValidDishRow`,
+  each with its own dedup key — `name_key` for foods, `(brand_key, name_key)` for dishes — and
+  its own alias-collision pool, dishes' scoped per brand) rather than one row type branching
+  everywhere. The two kinds differ too much (scaled vs. as-stated macros, which alias table,
+  which uniqueness key) for a shared struct to pull its weight; `resolve_macros`,
+  `energy_mismatch_warning` and `resolve_row_aliases` are pulled out as shared helpers instead,
+  since that logic *is* identical between the two.
+- **Row kind dispatch**: a CSV row or a bare JSON array row carries its own `basis`/`"basis"`
+  value and is classified per row (`parse_row_kind`, defaulting to a food row when absent); an
+  envelope JSON object's `"foods"`/`"dishes"` arrays each fix every row's kind by construction,
+  so a stray `"basis"` key inside one is simply ignored. Both paths feed the same
+  `process_food_row`/`process_dish_row`, via a shared `(RawRow, Result<RowKind, String>)` list.
+- **The existing `basis_g`/`每份克数`/`per_g` column is reused verbatim as a dish row's
+  `serving_g`** (read straight through, never scaled), exactly as §7.1 describes; it required no
+  new column, only a new interpretation gated by the (separate, newly added) `basis`/`基准`
+  column. The envelope `"dishes"` JSON array is the one exception: its rows spell the same value
+  `"serving_g"`, matching §7.1's explicit row shape for that array.
+- **CLI `foods list --dishes` supports `--brand` but not `--query`.** §8.1 only asks for
+  `[--dishes] [--brand B]`; adding a substring search too would have meant an eight-way
+  `sqlx::query_as` combinatorial spell-out (source × brand × query) under this codebase's
+  established no-dynamic-SQL convention (`sources.rs`'s `list_foods` comment), for a filter
+  nothing asked for. `list_dishes` therefore supports `--source` × `--brand` (4 combinations,
+  matching `list_foods`'s own complexity), and `--query` is silently a no-op when `--dishes` is
+  set — acceptable for a developer CLI.
+- **`foods lookup`'s dish half has no alias redirect**, mirroring `lookup_all`'s existing
+  behavior for foods (`SourceChain::lookup_all`/`lookup_dish_all` both walk every source's own
+  `lookup`/`lookup_dish` directly, skipping the `diet_name_aliases`/`diet_dish_name_aliases`
+  redirect) — it's a raw "every copy across every source" debug view, not meal-logging
+  resolution.
+- **Export's CSV mixes food and dish rows under one `basis` column** (as import reads them back);
+  JSON keeps them in separate `foods`/`dishes` arrays, matching the envelope shape import already
+  parses. A brandless dish's `brand` cell/key is `""`/`null` on export and reads back as `""`,
+  round-tripping exactly — checked by a table-driven round-trip test for both formats, over a
+  file with one food, one branded dish (with an alias and `serving_g`) and one brandless dish (no
+  `serving_g`).
+
+No behavior changed for a foods-only import file (no `basis`/`brand` columns present): every row
+still resolves to `RowKind::Food` by default and goes through the same validation and insert path
+as before stage 3, just renamed (`ValidRow` → `ValidFoodRow`) and reachable through
+`parsed.food_rows` instead of `parsed.rows`.
+
+Deferred to stage 4 per §12: the desktop surfaces (§8.2) — `commands.rs`'s `list_foods`, the
+`Dish`/preview/report TypeScript types, `MealList.tsx`, and `FoodDataSection.tsx`'s import dialog
+and source-row counts.
+
+## 2026-09-28 — `docs/DISH_NUTRITION.md` stage 4: desktop (final stage — feature complete)
+
+Implemented exactly stage 4 of §12, the last stage: `list_foods` gains `kind`/`brand`
+(`commands.rs`), the `Dish` TypeScript type, `SourceInfo.dish_count`, the widened
+`ImportPreview`/`ImportReport`/`ImportRowView`/`DietMealItem` types, `MealList.tsx`'s dish
+rendering, and `FoodDataSection.tsx`'s source-row counts, import-dialog tiles/brands and sample
+table. `TomorrowPlanCard.tsx` itself is unchanged (D4 — plans never contain dish items), per the
+document's own note.
+
+Deviations and decisions not spelled out verbatim in the design:
+
+- **`list_foods` returns an untagged Rust enum** (`FoodOrDishList::Foods(Vec<Food>) |
+  Dishes(Vec<Dish>)`, `#[serde(untagged)]`) rather than a discriminated union with a tag field.
+  §8.2 itself describes the TS shape as a plain union `Food[] | Dish[]`, not `{kind, items}`, and
+  the caller already knows which it asked for via the new `kind` argument — an item-level
+  discriminant would be redundant. The new `kind`/`brand` command parameters are both
+  `Option<...>` (a typed `FoodsKind` enum and a plain filter string), so every existing
+  `list_foods` call with neither (including the desktop's own Tauri IPC test suite) is
+  unaffected — verified by running the full `tests/commands.rs` suite unchanged before adding a
+  new test for the dish path.
+- **The "help popover" is a small `title`-tooltip icon** (`ⓘ`, native browser tooltip) next to
+  the import button, not a new popover component. This codebase has no existing lightweight
+  popover/tooltip primitive to reuse (the one `Popover`-named file, `WeightLogDialog.tsx`, is a
+  full modal-style dialog, overkill for one paragraph of static help text), and building one
+  purely for this one documentation string isn't worth a new UI abstraction. The tooltip text
+  documents `basis`, `brand`, and that `basis_g` means the serving's weight on a `serving` row,
+  per §8.2's list.
+- **The import-dialog sample table keys rows by index, not `row.name`.** Now that `sample` can
+  mix a food and a same-named dish (or two dishes with the same name under different brands,
+  §7.3), `row.name` is no longer unique within the list; a food/dish's brand is folded into the
+  name cell (`"{brand} {name}"`) rather than a separate column, so the only new column is the
+  requested 基准 (basis) one.
+- **`DietMealItem.grams` and `TomorrowPlanCard.tsx`**: widening `grams` to `number | null` (a
+  dish item with unknown `serving_g`) is a shared-type change that also touches
+  `DietPlanSection.meals[].items`, even though a plan's items are always `kind: "food"` (D4) and
+  so never actually carry a `null` grams. `TomorrowPlanCard.tsx` therefore needed one
+  compatibility line (`item.grams ?? 0`) to keep typechecking — a consequence of the shared type,
+  not a functional or design change; the document's "no change (D4)" is still true in substance.
+
+Verification: `cargo fmt`/`clippy -D warnings`/`cargo test --workspace` all green, including a
+new `list_foods_with_kind_dish_returns_dishes_filtered_by_brand` Tauri IPC test (exercises the
+real `invoke_handler`, mirroring the stage-1 convention). `tsc -b` and `vite build` both clean.
+As in the stage-1 entry's own note, this sandbox has no working display (`import`/X11 checked:
+resource unavailable), so the pages were not clicked through in a live window — flagged
+explicitly rather than claimed.
+
+This completes all four stages of `docs/DISH_NUTRITION.md` §12: per-serving dishes now flow
+end-to-end from parsing through logging, import/export, the CLI and the desktop UI.
+
+## 2026-09-28 — `docs/DISH_NUTRITION.md`: review fixes to the dish pick step
+
+- **A failed pick never fails the meal log.** §5.3 step 3 says a wrong-shaped answer means
+  decomposition with no re-ask. `run_pick` now uses the new `lifeagent_llm::json::complete_json_once`
+  (the same as `complete_json`, but with no repair attempt), and `resolve_dishes` treats any pick
+  error (bad JSON or a provider error) as `null` for every pending dish. It logs a WARN with no
+  detail, and the error itself only at DEBUG, because it can quote model output.
+- **Candidates are numbered explicitly** as `{"index": i, "name": …}`, and the prompt tells the
+  model to copy the `index` value. Before, the model had to count positions in a plain list of
+  up to 200 names. An off-by-one there looks like a valid pick, so it would log the wrong item
+  and cache it as a permanent alias.
+- **Servings worked out from grams are rounded to 2 decimals** (at least 0.01), and the item's
+  macros use that same rounded value so the shown `×1.14` and the totals agree. Servings the
+  parser gives directly are already limited to 0.25–10 and aren't changed.

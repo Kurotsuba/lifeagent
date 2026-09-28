@@ -497,6 +497,57 @@ async fn preview_then_commit_food_import_round_trips_through_raw_ipc() {
     assert_eq!(foods[0]["name"], json!("熟米饭"));
 }
 
+/// `docs/DISH_NUTRITION.md` §8.2: `list_foods` gains `kind`/`brand`, and a source's dish count
+/// shows up alongside its food count.
+#[tokio::test]
+async fn list_foods_with_kind_dish_returns_dishes_filtered_by_brand() {
+    let (core_app, _dir) = core_app().await;
+    let (_app, webview) = setup(core_app);
+
+    let csv = "name,brand,basis,basis_g,kcal,protein_g,carbs_g,fat_g\n\
+               熟米饭,,100g,,116,2.6,25.9,0.3\n\
+               牛めし（並盛）,松屋,serving,350,733,25,90,28\n\
+               牛丼,吉野家,serving,,650,24,85,26\n";
+    let preview = invoke_raw_file(&webview, "preview_food_import", "menu.csv", csv.into()).unwrap();
+    assert_eq!(preview["valid_food_rows"], json!(1));
+    assert_eq!(preview["valid_dish_rows"], json!(2));
+    assert_eq!(preview["brands"], json!(["吉野家", "松屋"]));
+    let token = preview["token"].as_str().unwrap().to_string();
+
+    let report = invoke(&webview, "commit_food_import", json!({ "token": token })).unwrap();
+    assert_eq!(report["imported"], json!(1));
+    assert_eq!(report["imported_dishes"], json!(2));
+
+    let sources = invoke(&webview, "list_food_sources", json!({})).unwrap();
+    let menu_source = sources
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["name"] == json!("menu"))
+        .unwrap();
+    assert_eq!(menu_source["food_count"], json!(1));
+    assert_eq!(menu_source["dish_count"], json!(2));
+
+    let all_dishes = invoke(
+        &webview,
+        "list_foods",
+        json!({ "limit": 50, "kind": "dish" }),
+    )
+    .unwrap();
+    assert_eq!(all_dishes.as_array().unwrap().len(), 2);
+
+    let matsuya_dishes = invoke(
+        &webview,
+        "list_foods",
+        json!({ "limit": 50, "kind": "dish", "brand": "松屋" }),
+    )
+    .unwrap();
+    let matsuya = matsuya_dishes.as_array().unwrap();
+    assert_eq!(matsuya.len(), 1);
+    assert_eq!(matsuya[0]["name"], json!("牛めし（並盛）"));
+    assert_eq!(matsuya[0]["serving_g"], json!(350.0));
+}
+
 #[tokio::test]
 async fn commit_food_import_consumes_the_token_once() {
     let (core_app, _dir) = core_app().await;

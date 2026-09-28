@@ -9,6 +9,8 @@
 //! `SourceChain` resolution, and the management operations behind the CLI's `foods source …`
 //! commands and the desktop's 食物数据 settings section.
 
+use std::collections::HashSet;
+
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
@@ -476,6 +478,45 @@ impl SourceChain {
         Ok(out)
     }
 
+    /// Every copy of `(brand, name)` across all sources, winners first — the dish counterpart of
+    /// `lookup_all`, for `foods lookup` / debugging (`docs/DISH_NUTRITION.md` §8.1). No alias
+    /// redirect, same as `lookup_all`.
+    pub async fn lookup_dish_all(
+        ctx: &PluginContext,
+        brand: &str,
+        name: &str,
+    ) -> Result<Vec<Dish>, PluginError> {
+        let brand_key = normalize(brand);
+        let key = normalize(name);
+        if key.is_empty() {
+            return Ok(Vec::new());
+        }
+        let rows: Vec<(String, String, String, i64, String)> = sqlx::query_as(
+            "SELECT id, kind, name, priority, origin_json FROM diet_food_sources
+             ORDER BY enabled DESC, priority ASC",
+        )
+        .fetch_all(&ctx.db)
+        .await?;
+        let mut out = Vec::new();
+        for (id, kind, name, priority, origin_json) in rows {
+            let info = SourceInfo {
+                id,
+                kind: parse_kind(&kind)?,
+                name,
+                priority,
+                enabled: true,
+                food_count: 0,
+                dish_count: 0,
+                origin: parse_origin(&origin_json)?,
+            };
+            let source = TableSource::new(info, ctx.db.clone());
+            if let Some(dish) = source.lookup_dish(&brand_key, &key).await? {
+                out.push(dish);
+            }
+        }
+        Ok(out)
+    }
+
     async fn walk(&self, key: &str) -> Result<Option<Food>, PluginError> {
         for source in &self.sources {
             if let Some(food) = source.lookup(key).await? {
@@ -553,6 +594,69 @@ impl SourceChain {
             source.record_dish_use(dish).await?;
         }
         Ok(())
+    }
+
+    /// The winning copy of each of `brand_key`'s dishes across enabled sources, in priority
+    /// order (`docs/DISH_NUTRITION.md` §4.2), for the §5.3 candidate step. `self.sources` is
+    /// already priority-ordered, so the first copy seen of a `name_key` is the winner and later
+    /// (shadowed) copies are skipped.
+    pub async fn brand_candidates(&self, brand_key: &str) -> Result<Vec<Dish>, PluginError> {
+        let mut seen = HashSet::new();
+        let mut out = Vec::new();
+        for source in &self.sources {
+            for dish in source.brand_dishes(brand_key).await? {
+                if seen.insert(dish.name_key.clone()) {
+                    out.push(dish);
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    /// Distinct display brands of enabled sources' dishes, ordered by summed `use_count` (over
+    /// every menu item of that brand) then by name (§4.2), for the parser's `{known_brands}`.
+    pub async fn known_brands(&self, limit: u32) -> Result<Vec<String>, PluginError> {
+        let rows: Vec<(String,)> = sqlx::query_as(
+            "WITH enabled_dishes AS (
+                SELECT d.brand, d.brand_key, d.use_count, s.priority
+                FROM diet_dishes d JOIN diet_food_sources s ON d.source_id = s.id
+                WHERE s.enabled = 1 AND d.brand_key != ''
+             ), ranked AS (
+                SELECT brand, brand_key,
+                       ROW_NUMBER() OVER (PARTITION BY brand_key ORDER BY priority ASC) AS rn,
+                       SUM(use_count) OVER (PARTITION BY brand_key) AS total_uses
+                FROM enabled_dishes
+             )
+             SELECT brand FROM ranked WHERE rn = 1 ORDER BY total_uses DESC, brand ASC LIMIT ?",
+        )
+        .bind(limit)
+        .fetch_all(&self.db)
+        .await?;
+        Ok(rows.into_iter().map(|(b,)| b).collect())
+    }
+
+    /// Display names of **brandless** dishes of enabled sources, one per `name_key` (the copy
+    /// from the highest-priority source), ordered by summed `use_count` then by name (§4.2), for
+    /// the parser's `{known_dishes}`. Branded dishes are excluded: the parser reaches them
+    /// through `{known_brands}` and the §5.3 pick step.
+    pub async fn known_dishes(&self, limit: u32) -> Result<Vec<String>, PluginError> {
+        let rows: Vec<(String,)> = sqlx::query_as(
+            "WITH enabled_dishes AS (
+                SELECT d.name, d.name_key, d.use_count, s.priority
+                FROM diet_dishes d JOIN diet_food_sources s ON d.source_id = s.id
+                WHERE s.enabled = 1 AND d.brand_key = ''
+             ), ranked AS (
+                SELECT name, name_key,
+                       ROW_NUMBER() OVER (PARTITION BY name_key ORDER BY priority ASC) AS rn,
+                       SUM(use_count) OVER (PARTITION BY name_key) AS total_uses
+                FROM enabled_dishes
+             )
+             SELECT name FROM ranked WHERE rn = 1 ORDER BY total_uses DESC, name ASC LIMIT ?",
+        )
+        .bind(limit)
+        .fetch_all(&self.db)
+        .await?;
+        Ok(rows.into_iter().map(|(n,)| n).collect())
     }
 }
 
@@ -697,6 +801,133 @@ pub async fn upsert_manual_food(
         .ok_or_else(|| PluginError::Other(format!("manual food {key:?} missing after upsert")))
 }
 
+/// The §7.2 hard rules for a per-serving dish row (the warning-only energy-vs-macros check is
+/// import-only, stage 3). Used by `diet_update_dish`; `Err` describes the first rule that failed.
+pub fn validate_dish_macros(per_serving: &Macros, serving_g: Option<f64>) -> Result<(), String> {
+    let values = [
+        per_serving.kcal,
+        per_serving.protein_g,
+        per_serving.carbs_g,
+        per_serving.fat_g,
+        per_serving.fiber_g,
+    ];
+    if values.iter().any(|v| !v.is_finite() || *v < 0.0) {
+        return Err("all values must be numbers ≥ 0".into());
+    }
+    if per_serving.fiber_g > per_serving.carbs_g {
+        return Err(format!(
+            "fiber_g ({}) must not exceed carbs_g ({}): carbs_g is total carbohydrate, fiber included",
+            per_serving.fiber_g, per_serving.carbs_g
+        ));
+    }
+    if per_serving.kcal > 5000.0 {
+        return Err(format!(
+            "kcal must be ≤ 5000 per serving, got {}",
+            per_serving.kcal
+        ));
+    }
+    if let Some(g) = serving_g {
+        if g <= 0.0 {
+            return Err("serving_g must be > 0".into());
+        }
+        let sum = per_serving.protein_g + per_serving.carbs_g + per_serving.fat_g;
+        if sum > g {
+            return Err(format!(
+                "protein_g + carbs_g + fat_g ({sum}) must not exceed serving_g ({g})"
+            ));
+        }
+        if per_serving.kcal > 9.0 * g {
+            return Err(format!(
+                "kcal ({}) must not exceed 9 × serving_g ({g})",
+                per_serving.kcal
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// `diet_update_dish` (§7.4). Always upserts into `manual`: creates or updates the row
+/// `(manual, brand_key, key)`, where `key` is resolved through `diet_dish_name_aliases` first
+/// (the pick/user redirect), symmetric with `upsert_manual_food`. Never edits an imported dataset
+/// — it shadows it.
+pub async fn upsert_manual_dish(
+    ctx: &PluginContext,
+    dish_name: &str,
+    brand: Option<&str>,
+    per_serving: Macros,
+    serving_g: Option<f64>,
+) -> Result<Dish, PluginError> {
+    let name = dish_name.trim();
+    let raw_key = normalize(name);
+    if raw_key.is_empty() {
+        return Err(PluginError::InvalidArgs(
+            "dish name must not be empty".into(),
+        ));
+    }
+    let brand = brand.unwrap_or("").trim();
+    let brand_key = normalize(brand);
+
+    let redirect: Option<(String,)> = sqlx::query_as(
+        "SELECT target_name_key FROM diet_dish_name_aliases WHERE brand_key = ? AND alias_key = ?",
+    )
+    .bind(&brand_key)
+    .bind(&raw_key)
+    .fetch_optional(&ctx.db)
+    .await?;
+    let key = redirect.map_or(raw_key, |(t,)| t);
+
+    let existing: Option<(String, String, String)> = sqlx::query_as(
+        "SELECT id, name, brand FROM diet_dishes WHERE source_id = 'manual' AND brand_key = ? AND name_key = ?",
+    )
+    .bind(&brand_key)
+    .bind(&key)
+    .fetch_optional(&ctx.db)
+    .await?;
+    // An update keeps the row's existing display name/brand; only a brand-new row takes the
+    // caller's spelling (mirrors `upsert_manual_food`).
+    let (id, display_name, display_brand) = match existing {
+        Some((id, existing_name, existing_brand)) => (id, existing_name, existing_brand),
+        None => (
+            Uuid::now_v7().to_string(),
+            name.to_string(),
+            brand.to_string(),
+        ),
+    };
+
+    let now = ctx.clock.now().to_rfc3339();
+    sqlx::query(
+        "INSERT INTO diet_dishes
+            (id, source_id, brand, brand_key, name, name_key, serving_g, kcal, protein_g,
+             carbs_g, fat_g, fiber_g, use_count, created_at, updated_at)
+         VALUES (?, 'manual', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+         ON CONFLICT(source_id, brand_key, name_key) DO UPDATE SET
+            serving_g = excluded.serving_g, kcal = excluded.kcal, protein_g = excluded.protein_g,
+            carbs_g = excluded.carbs_g, fat_g = excluded.fat_g, fiber_g = excluded.fiber_g,
+            updated_at = excluded.updated_at",
+    )
+    .bind(&id)
+    .bind(&display_brand)
+    .bind(&brand_key)
+    .bind(&display_name)
+    .bind(&key)
+    .bind(serving_g)
+    .bind(per_serving.kcal)
+    .bind(per_serving.protein_g)
+    .bind(per_serving.carbs_g)
+    .bind(per_serving.fat_g)
+    .bind(per_serving.fiber_g)
+    .bind(&now)
+    .bind(&now)
+    .execute(&ctx.db)
+    .await?;
+
+    let manual_info = fetch_source_info(&ctx.db, MANUAL_SOURCE_ID).await?;
+    TableSource::new(manual_info, ctx.db.clone())
+        .lookup_dish(&brand_key, &key)
+        .await?
+        .ok_or_else(|| PluginError::Other(format!("manual dish {key:?} missing after upsert")))
+}
+
 // ---- User aliases (§7.3) -----------------------------------------------------------------------
 
 /// `diet_add_alias`. Returns the aliased food and the normalized alias key that was stored.
@@ -805,8 +1036,24 @@ pub async fn get_source(ctx: &PluginContext, id: &str) -> Result<SourceInfo, Plu
     Ok(info)
 }
 
+/// (id, brand, brand_key, name, serving_g, kcal, protein_g, carbs_g, fat_g, fiber_g)
+#[allow(clippy::type_complexity)]
+type ExportDishRow = (
+    String,
+    String,
+    String,
+    String,
+    Option<f64>,
+    f64,
+    f64,
+    f64,
+    f64,
+    f64,
+);
+
 /// Same CSV/JSON formats as import, so an export can be re-imported. Includes the source's own
-/// aliases. Any source can be exported, including `manual` and `llm_estimate`.
+/// aliases, for both foods and dishes (`docs/DISH_NUTRITION.md` §7.3). Any source can be
+/// exported, including `manual` and `llm_estimate` (which never has dish rows).
 pub async fn export_source(
     ctx: &PluginContext,
     source_id: &str,
@@ -820,7 +1067,7 @@ pub async fn export_source(
     .bind(source_id)
     .fetch_all(&ctx.db)
     .await?;
-    let mut rows = Vec::with_capacity(foods.len());
+    let mut food_rows = Vec::with_capacity(foods.len());
     for (id, name, kcal, protein_g, carbs_g, fat_g, fiber_g) in foods {
         let aliases: Vec<(String,)> = sqlx::query_as(
             "SELECT alias_key FROM diet_food_aliases WHERE source_id = ? AND food_id = ?",
@@ -829,7 +1076,10 @@ pub async fn export_source(
         .bind(&id)
         .fetch_all(&ctx.db)
         .await?;
-        rows.push(crate::import::ExportRow {
+        food_rows.push(crate::import::ExportRow {
+            basis: "100g",
+            brand: String::new(),
+            serving_g: None,
             name,
             macros: Macros {
                 kcal,
@@ -841,10 +1091,179 @@ pub async fn export_source(
             aliases: aliases.into_iter().map(|(a,)| a).collect(),
         });
     }
+
+    let dishes: Vec<ExportDishRow> = sqlx::query_as(
+        "SELECT id, brand, brand_key, name, serving_g, kcal, protein_g, carbs_g, fat_g, fiber_g
+             FROM diet_dishes WHERE source_id = ? ORDER BY brand ASC, name ASC",
+    )
+    .bind(source_id)
+    .fetch_all(&ctx.db)
+    .await?;
+    let mut dish_rows = Vec::with_capacity(dishes.len());
+    for (id, brand, brand_key, name, serving_g, kcal, protein_g, carbs_g, fat_g, fiber_g) in dishes
+    {
+        let aliases: Vec<(String,)> = sqlx::query_as(
+            "SELECT alias_key FROM diet_dish_source_aliases
+             WHERE source_id = ? AND brand_key = ? AND dish_id = ?",
+        )
+        .bind(source_id)
+        .bind(&brand_key)
+        .bind(&id)
+        .fetch_all(&ctx.db)
+        .await?;
+        dish_rows.push(crate::import::ExportRow {
+            basis: "serving",
+            brand,
+            serving_g,
+            name,
+            macros: Macros {
+                kcal,
+                protein_g,
+                carbs_g,
+                fat_g,
+                fiber_g,
+            },
+            aliases: aliases.into_iter().map(|(a,)| a).collect(),
+        });
+    }
+
     Ok(match format {
-        crate::import::ImportFormat::Csv => crate::import::write_csv(&rows),
-        crate::import::ImportFormat::Json => crate::import::write_json(&info.name, &rows),
+        crate::import::ImportFormat::Csv => {
+            let mut all = food_rows;
+            all.extend(dish_rows);
+            crate::import::write_csv(&all)
+        }
+        crate::import::ImportFormat::Json => {
+            crate::import::write_json(&info.name, &food_rows, &dish_rows)
+        }
     })
+}
+
+/// (id, brand, brand_key, name, name_key, serving_g, kcal, protein_g, carbs_g, fat_g, fiber_g,
+///  use_count, source_id, source_kind, source_name)
+#[allow(clippy::type_complexity)]
+type DishWithSourceRow = (
+    String,
+    String,
+    String,
+    String,
+    String,
+    Option<f64>,
+    f64,
+    f64,
+    f64,
+    f64,
+    f64,
+    i64,
+    String,
+    String,
+    String,
+);
+
+fn row_to_dish_with_source(row: DishWithSourceRow) -> Result<Dish, PluginError> {
+    let (
+        id,
+        brand,
+        brand_key,
+        name,
+        name_key,
+        serving_g,
+        kcal,
+        protein_g,
+        carbs_g,
+        fat_g,
+        fiber_g,
+        use_count,
+        source_id,
+        source_kind,
+        source_name,
+    ) = row;
+    Ok(Dish {
+        id,
+        brand,
+        brand_key,
+        name,
+        name_key,
+        serving_g,
+        per_serving: Macros {
+            kcal,
+            protein_g,
+            carbs_g,
+            fat_g,
+            fiber_g,
+        },
+        source_id,
+        source_kind: parse_kind(&source_kind)?,
+        source_name,
+        use_count,
+    })
+}
+
+/// Browsing: `foods list --dishes`. `brand`, when given, filters to that brand exactly
+/// (`docs/DISH_NUTRITION.md` §8.1). Unlike `list_foods`, there's no name substring filter — not
+/// asked for by the CLI spec, and would multiply the combinations `query_as`'s `&'static str`
+/// requirement forces us to spell out (see `list_foods`'s own comment).
+pub async fn list_dishes(
+    ctx: &PluginContext,
+    source_id: Option<&str>,
+    brand: Option<&str>,
+    limit: u32,
+) -> Result<Vec<Dish>, PluginError> {
+    let brand_key = brand.map(normalize);
+    let rows: Vec<DishWithSourceRow> = match (source_id, &brand_key) {
+        (Some(sid), Some(bk)) => {
+            sqlx::query_as(
+                "SELECT d.id, d.brand, d.brand_key, d.name, d.name_key, d.serving_g, d.kcal, \
+                        d.protein_g, d.carbs_g, d.fat_g, d.fiber_g, d.use_count, s.id, s.kind, s.name
+                 FROM diet_dishes d JOIN diet_food_sources s ON d.source_id = s.id
+                 WHERE d.source_id = ? AND d.brand_key = ?
+                 ORDER BY d.use_count DESC, d.name ASC LIMIT ?",
+            )
+            .bind(sid)
+            .bind(bk)
+            .bind(limit)
+            .fetch_all(&ctx.db)
+            .await?
+        }
+        (Some(sid), None) => {
+            sqlx::query_as(
+                "SELECT d.id, d.brand, d.brand_key, d.name, d.name_key, d.serving_g, d.kcal, \
+                        d.protein_g, d.carbs_g, d.fat_g, d.fiber_g, d.use_count, s.id, s.kind, s.name
+                 FROM diet_dishes d JOIN diet_food_sources s ON d.source_id = s.id
+                 WHERE d.source_id = ?
+                 ORDER BY d.use_count DESC, d.name ASC LIMIT ?",
+            )
+            .bind(sid)
+            .bind(limit)
+            .fetch_all(&ctx.db)
+            .await?
+        }
+        (None, Some(bk)) => {
+            sqlx::query_as(
+                "SELECT d.id, d.brand, d.brand_key, d.name, d.name_key, d.serving_g, d.kcal, \
+                        d.protein_g, d.carbs_g, d.fat_g, d.fiber_g, d.use_count, s.id, s.kind, s.name
+                 FROM diet_dishes d JOIN diet_food_sources s ON d.source_id = s.id
+                 WHERE d.brand_key = ?
+                 ORDER BY d.use_count DESC, d.name ASC LIMIT ?",
+            )
+            .bind(bk)
+            .bind(limit)
+            .fetch_all(&ctx.db)
+            .await?
+        }
+        (None, None) => {
+            sqlx::query_as(
+                "SELECT d.id, d.brand, d.brand_key, d.name, d.name_key, d.serving_g, d.kcal, \
+                        d.protein_g, d.carbs_g, d.fat_g, d.fiber_g, d.use_count, s.id, s.kind, s.name
+                 FROM diet_dishes d JOIN diet_food_sources s ON d.source_id = s.id
+                 ORDER BY d.use_count DESC, d.name ASC LIMIT ?",
+            )
+            .bind(limit)
+            .fetch_all(&ctx.db)
+            .await?
+        }
+    };
+    rows.into_iter().map(row_to_dish_with_source).collect()
 }
 
 /// (id, kind, name, priority, enabled, origin_json, food_count, dish_count)
@@ -1086,6 +1505,15 @@ pub async fn list_foods(
 /// Every copy of `name` across all sources — `foods lookup`.
 pub async fn lookup_all(ctx: &PluginContext, name: &str) -> Result<Vec<Food>, PluginError> {
     SourceChain::lookup_all(ctx, name).await
+}
+
+/// Every copy of `(brand, name)` across all sources — `foods lookup`'s dish half.
+pub async fn lookup_dish_all(
+    ctx: &PluginContext,
+    brand: &str,
+    name: &str,
+) -> Result<Vec<Dish>, PluginError> {
+    SourceChain::lookup_dish_all(ctx, brand, name).await
 }
 
 #[cfg(test)]
@@ -1570,6 +1998,176 @@ mod tests {
         .execute(&env.ctx.db)
         .await
         .unwrap();
+    }
+
+    #[tokio::test]
+    async fn known_brands_orders_by_summed_use_count_then_name() {
+        let env = env().await;
+        let a = new_dataset(&env, "A").await;
+        let b = new_dataset(&env, "B").await;
+        insert_dataset_dish(&env, &a, "松屋", "牛めし", None, RICE).await;
+        insert_dataset_dish(&env, &a, "吉野家", "牛丼", None, RICE).await;
+        // Brandless dishes never appear in known_brands.
+        insert_dataset_dish(&env, &a, "", "家常菜", None, RICE).await;
+        sqlx::query("UPDATE diet_dishes SET use_count = 5 WHERE brand_key = '吉野家'")
+            .execute(&env.ctx.db)
+            .await
+            .unwrap();
+
+        let chain = SourceChain::load(&env.ctx).await.unwrap();
+        assert_eq!(
+            chain.known_brands(10).await.unwrap(),
+            vec!["吉野家".to_string(), "松屋".to_string()]
+        );
+        assert_eq!(chain.known_brands(1).await.unwrap(), vec!["吉野家"]);
+
+        // A disabled source's brands are absent.
+        set_enabled(&env.ctx, &a, false).await.unwrap();
+        let chain = SourceChain::load(&env.ctx).await.unwrap();
+        assert_eq!(chain.known_brands(10).await.unwrap(), Vec::<String>::new());
+        let _ = b; // kept enabled but has no dishes
+    }
+
+    #[tokio::test]
+    async fn known_dishes_lists_brandless_dishes_deduped_by_priority() {
+        let env = env().await;
+        let a = new_dataset(&env, "A").await;
+        let b = new_dataset(&env, "B").await;
+        // Same brandless name_key in both sources: `a` (higher priority) wins the spelling.
+        insert_dataset_dish(&env, &a, "", "A定食（大）", None, RICE).await;
+        insert_dataset_dish(&env, &b, "", "a定食（大）", None, RICE).await;
+        // A branded dish is excluded even though it's in an enabled source.
+        insert_dataset_dish(&env, &a, "松屋", "牛めし", None, RICE).await;
+        sqlx::query("UPDATE diet_dishes SET use_count = 3 WHERE source_id = ?")
+            .bind(&b)
+            .execute(&env.ctx.db)
+            .await
+            .unwrap();
+
+        let chain = SourceChain::load(&env.ctx).await.unwrap();
+        assert_eq!(chain.known_dishes(10).await.unwrap(), vec!["A定食（大）"]);
+
+        set_enabled(&env.ctx, &a, false).await.unwrap();
+        let chain = SourceChain::load(&env.ctx).await.unwrap();
+        assert_eq!(chain.known_dishes(10).await.unwrap(), vec!["a定食（大）"]);
+    }
+
+    #[tokio::test]
+    async fn brand_candidates_returns_the_winning_copy_per_name_key_in_priority_order() {
+        let env = env().await;
+        let a = new_dataset(&env, "A").await;
+        let b = new_dataset(&env, "B").await;
+        insert_dataset_dish(&env, &a, "松屋", "牛めし（並盛）", None, RICE).await;
+        insert_dataset_dish(&env, &a, "松屋", "味噌汁", None, EGG).await;
+        // Shadowed by `a`'s copy.
+        insert_dataset_dish(&env, &b, "松屋", "牛めし（並盛）", None, EGG).await;
+        // A different brand never appears.
+        insert_dataset_dish(&env, &b, "吉野家", "牛丼", None, EGG).await;
+
+        let chain = SourceChain::load(&env.ctx).await.unwrap();
+        let candidates = chain.brand_candidates(&normalize("松屋")).await.unwrap();
+
+        assert_eq!(candidates.len(), 2);
+        let rice_row = candidates
+            .iter()
+            .find(|d| d.name == "牛めし（並盛）")
+            .unwrap();
+        assert_eq!(rice_row.source_id, a);
+        assert_eq!(rice_row.per_serving, RICE);
+    }
+
+    #[tokio::test]
+    async fn brand_candidates_empty_for_a_brand_with_no_local_rows() {
+        let env = env().await;
+        let chain = SourceChain::load(&env.ctx).await.unwrap();
+        assert!(chain
+            .brand_candidates(&normalize("不存在的品牌"))
+            .await
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn validate_dish_macros_hard_rules() {
+        assert!(validate_dish_macros(&RICE, Some(350.0)).is_ok());
+        assert!(validate_dish_macros(
+            &Macros {
+                fiber_g: 999.0,
+                ..RICE
+            },
+            None
+        )
+        .is_err());
+        assert!(validate_dish_macros(
+            &Macros {
+                kcal: 6000.0,
+                ..RICE
+            },
+            None
+        )
+        .is_err());
+        assert!(validate_dish_macros(&RICE, Some(0.0)).is_err());
+        // protein+carbs+fat exceeds serving_g.
+        assert!(validate_dish_macros(
+            &Macros {
+                protein_g: 200.0,
+                carbs_g: 200.0,
+                fat_g: 200.0,
+                ..RICE
+            },
+            Some(100.0)
+        )
+        .is_err());
+        // kcal exceeds 9 x serving_g.
+        assert!(validate_dish_macros(
+            &Macros {
+                kcal: 4000.0,
+                ..RICE
+            },
+            Some(100.0)
+        )
+        .is_err());
+    }
+
+    #[tokio::test]
+    async fn upsert_manual_dish_creates_and_updates_keeping_display_name() {
+        let env = env().await;
+        let created = upsert_manual_dish(&env.ctx, "牛めし並盛", Some("松屋"), RICE, Some(350.0))
+            .await
+            .unwrap();
+        assert_eq!(created.source_id, MANUAL_SOURCE_ID);
+        assert_eq!(created.name, "牛めし並盛");
+        assert_eq!(created.brand, "松屋");
+
+        let updated = upsert_manual_dish(&env.ctx, "牛めし並盛", Some("松屋"), EGG, Some(300.0))
+            .await
+            .unwrap();
+        assert_eq!(updated.id, created.id);
+        assert_eq!(updated.name, "牛めし並盛");
+        assert_eq!(updated.per_serving, EGG);
+        assert_eq!(updated.serving_g, Some(300.0));
+    }
+
+    #[tokio::test]
+    async fn upsert_manual_dish_shadows_a_dataset_copy_and_through_a_pick_alias() {
+        let env = env().await;
+        let dataset_id = new_dataset(&env, "松屋菜单").await;
+        insert_dataset_dish(&env, &dataset_id, "松屋", "牛めし（並盛）", None, RICE).await;
+        add_dish_name_alias(&env, "松屋", "牛肉饭", "牛めし（並盛）").await;
+
+        let manual = upsert_manual_dish(&env.ctx, "牛肉饭", Some("松屋"), EGG, None)
+            .await
+            .unwrap();
+        assert_eq!(manual.name_key, normalize("牛めし（並盛）"));
+
+        let chain = SourceChain::load(&env.ctx).await.unwrap();
+        let winner = chain
+            .lookup_dish("松屋", "牛めし（並盛）")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(winner.source_id, MANUAL_SOURCE_ID);
+        assert_eq!(winner.per_serving, EGG);
     }
 
     async fn add_dish_name_alias(

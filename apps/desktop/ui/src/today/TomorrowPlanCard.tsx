@@ -94,7 +94,7 @@ export function TomorrowPlanCard({ plan, planTime, onAdjust, onChanged }: Tomorr
                 {meal.items.map((item, j) => (
                   <span key={j}>
                     {j > 0 ? "、" : ""}
-                    {item.name} {zhCN.today.diet.gramsShort(Math.round(item.grams))}
+                    {item.name} {zhCN.today.diet.gramsShort(Math.round(item.grams ?? 0))}
                   </span>
                 ))}
               </p>

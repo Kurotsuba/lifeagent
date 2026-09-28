@@ -28,6 +28,7 @@ use lifeagent_llm::types::{Message, ResponseFormat, Role};
 use lifeagent_plugin_diet::import::{
     self, FoodDataError, ImportPreview, ImportReport, ImportTarget, ParsedImport,
 };
+use lifeagent_plugin_diet::model::Dish;
 use lifeagent_plugin_diet::sources::{self, Food, SourceInfo};
 use lifeagent_plugin_diet::targets::{self, NutritionTargets};
 use serde::{Deserialize, Serialize};
@@ -368,27 +369,51 @@ pub async fn get_usage_summary(state: State<'_, CoreApp>) -> Result<Vec<RoleUsag
     Ok(state.usage_summary().await?)
 }
 
-// ---- Nutrition sources / batch import (`docs/NUTRITION_SOURCES.md` §8.2) --------------------
+// ---- Nutrition sources / batch import (`docs/NUTRITION_SOURCES.md` §8.2, extended by
+// `docs/DISH_NUTRITION.md` §8.2 with dishes) --------------------------------------------------
 
 #[tauri::command]
 pub async fn list_food_sources(state: State<'_, CoreApp>) -> Result<Vec<SourceInfo>, CommandError> {
     Ok(sources::list_sources(&state.plugin_context()).await?)
 }
 
+/// Which array `list_foods` returns; defaults to `Food` when omitted.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FoodsKind {
+    Food,
+    Dish,
+}
+
+/// `#[serde(untagged)]`: serializes as a plain `Food[]` or `Dish[]` — the caller already knows
+/// which it asked for via `kind`, so no extra discriminant field is needed on each item.
+#[derive(Debug, Clone, Serialize)]
+#[serde(untagged)]
+pub enum FoodOrDishList {
+    Foods(Vec<Food>),
+    Dishes(Vec<Dish>),
+}
+
+/// `query` is a food-only substring filter; `brand` is a dish-only exact filter
+/// (`docs/DISH_NUTRITION.md` §8.1/§8.2 — the same split the CLI's `foods list` makes).
 #[tauri::command]
 pub async fn list_foods(
     state: State<'_, CoreApp>,
     source_id: Option<String>,
     query: Option<String>,
     limit: u32,
-) -> Result<Vec<Food>, CommandError> {
-    Ok(sources::list_foods(
-        &state.plugin_context(),
-        source_id.as_deref(),
-        query.as_deref(),
-        limit,
-    )
-    .await?)
+    kind: Option<FoodsKind>,
+    brand: Option<String>,
+) -> Result<FoodOrDishList, CommandError> {
+    let ctx = state.plugin_context();
+    Ok(match kind {
+        Some(FoodsKind::Dish) => FoodOrDishList::Dishes(
+            sources::list_dishes(&ctx, source_id.as_deref(), brand.as_deref(), limit).await?,
+        ),
+        None | Some(FoodsKind::Food) => FoodOrDishList::Foods(
+            sources::list_foods(&ctx, source_id.as_deref(), query.as_deref(), limit).await?,
+        ),
+    })
 }
 
 #[tauri::command]

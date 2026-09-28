@@ -119,7 +119,15 @@ export function FoodDataSection() {
         onChange={handleFileChosen}
       />
       <div className="flex items-center justify-between gap-3">
-        <p className="text-xs text-neutral-500 dark:text-neutral-400">{t.hint}</p>
+        <p className="text-xs text-neutral-500 dark:text-neutral-400">
+          {t.hint}{" "}
+          <span
+            className="cursor-help text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300"
+            title={t.formatHelp}
+          >
+            ⓘ
+          </span>
+        </p>
         <button
           type="button"
           className={`${secondaryButtonClass} shrink-0 !px-3 !py-1.5 text-xs`}
@@ -208,7 +216,10 @@ function SourceRow({
       <div className="min-w-0">
         <p className="truncate text-neutral-900 dark:text-neutral-50">{source.name}</p>
         <p className="text-xs text-neutral-500 dark:text-neutral-400">
-          {label} · {t.foodCount(source.food_count)}
+          {label} ·{" "}
+          {source.dish_count > 0
+            ? t.foodAndDishCount(source.food_count, source.dish_count)
+            : t.foodCount(source.food_count)}
         </p>
       </div>
       <div className="flex shrink-0 items-center gap-1">
@@ -365,8 +376,13 @@ function ImportDialog({
 
             <div className="flex flex-wrap gap-2 text-xs">
               <span className="rounded bg-neutral-100 px-2 py-1 dark:bg-neutral-700">
-                {t.countImportable(preview.valid_rows)}
+                {t.countImportableFoods(preview.valid_food_rows)}
               </span>
+              {preview.valid_dish_rows > 0 ? (
+                <span className="rounded bg-neutral-100 px-2 py-1 dark:bg-neutral-700">
+                  {t.countImportableDishes(preview.valid_dish_rows)}
+                </span>
+              ) : null}
               <span className="rounded bg-neutral-100 px-2 py-1 dark:bg-neutral-700">
                 {t.countSkipped(preview.error_count)}
               </span>
@@ -375,6 +391,11 @@ function ImportDialog({
               </span>
             </div>
 
+            {preview.brands.length > 0 ? (
+              <p className="text-xs text-neutral-500 dark:text-neutral-400">
+                {t.brandsLabel(preview.brands.join("、"))}
+              </p>
+            ) : null}
             {preview.replaces_estimates > 0 ? (
               <p className="text-xs text-neutral-500 dark:text-neutral-400">
                 {t.replacesEstimates(preview.replaces_estimates)}
@@ -383,6 +404,11 @@ function ImportDialog({
             {preview.shadowed_by_manual > 0 ? (
               <p className="text-xs text-neutral-500 dark:text-neutral-400">
                 {t.shadowedByManual(preview.shadowed_by_manual)}
+              </p>
+            ) : null}
+            {preview.dish_shadowed_by_manual > 0 ? (
+              <p className="text-xs text-neutral-500 dark:text-neutral-400">
+                {t.dishShadowedByManual(preview.dish_shadowed_by_manual)}
               </p>
             ) : null}
 
@@ -426,6 +452,7 @@ function ImportDialog({
                 <table className="w-full text-xs">
                   <thead className="bg-neutral-50 dark:bg-neutral-900">
                     <tr>
+                      <th className="px-2 py-1 text-left">{t.colBasis}</th>
                       <th className="px-2 py-1 text-left">{t.colName}</th>
                       <th className="px-2 py-1 text-right">kcal</th>
                       <th className="px-2 py-1 text-right">{t.colProtein}</th>
@@ -435,9 +462,15 @@ function ImportDialog({
                     </tr>
                   </thead>
                   <tbody>
-                    {preview.sample.map((row) => (
-                      <tr key={row.name} className="border-t border-neutral-100 dark:border-neutral-800">
-                        <td className="px-2 py-1">{row.name}</td>
+                    {preview.sample.map((row, i) => (
+                      <tr key={i} className="border-t border-neutral-100 dark:border-neutral-800">
+                        <td className="px-2 py-1 whitespace-nowrap text-neutral-500 dark:text-neutral-400">
+                          {row.basis === "serving" ? t.basisDish : t.basisFood}
+                        </td>
+                        <td className="px-2 py-1">
+                          {row.brand ? `${row.brand} ` : ""}
+                          {row.name}
+                        </td>
                         <td className="px-2 py-1 text-right">{row.kcal}</td>
                         <td className="px-2 py-1 text-right">{row.protein_g}</td>
                         <td className="px-2 py-1 text-right">{row.carbs_g}</td>

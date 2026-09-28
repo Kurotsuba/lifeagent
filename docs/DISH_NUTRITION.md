@@ -198,6 +198,13 @@ defaults, since that source never has dish rows.
   sources, in priority order.
 - `known_brands(limit) -> Vec<String>`. Distinct display brands of enabled sources, ordered by
   summed `use_count`, then by name.
+- `known_dishes(limit) -> Vec<String>`. Display names of **brandless** dishes (`brand_key =
+  ''`) in enabled sources, for the parser's `{known_dishes}` (§5.1). Same shape as
+  `sources::known_names`: one name per `name_key` (the copy from the highest-priority enabled
+  source), ordered by `use_count` summed across sources, then by name. Branded dishes are
+  excluded because the parser reaches them through `{known_brands}` and the pick step (§5.3).
+  Name redirects in `diet_dish_name_aliases` aren't listed, the same as `known_names` ignores
+  `diet_name_aliases`.
 
 ## 5. Parsing and resolution (replaces the §8.4 parse → resolve step)
 
@@ -225,13 +232,16 @@ Prompt rule changes (the existing rules about oil, raw/cooked states and drinks 
 - `brand`: only if the user names the shop or the item is unmistakably that chain's product.
   Use the exact spelling from `KNOWN_BRANDS` when it's the same brand. Otherwise `null`.
 - `size`: the size or variant as the user said it (並盛, 大盛, M, 2ピース), else `null`.
+- A brandless item that is one of `KNOWN_DISHES`: copy that name exactly (it already includes
+  any size, e.g. `A定食（大）`) and set `size` to `null`. `normalize` doesn't equate `A定食（大）`
+  with `A定食 大`, so splitting the size out would miss the stage 2 match.
 - `servings`: the count of that item (default 1). `grams`: only if the user states the weight
   of the whole item.
 - `components`: what the item consists of, with grams **for everything eaten** (servings
   already applied). The existing composite-dish splitting rules apply here.
-- Placeholders: `{known_foods}` (unchanged), new `{known_brands}` (≤ 50 names, §4.2), and new
-  `{known_dishes}` (≤ 100 most-used **brandless** dish names, so canteen datasets can match
-  exactly).
+- Placeholders: `{known_foods}` (unchanged), new `{known_brands}` (`SourceChain::known_brands(50)`,
+  §4.2), and new `{known_dishes}` (`SourceChain::known_dishes(100)`, §4.2: the most-used
+  **brandless** dish names, so canteen datasets can match exactly).
 
 Validation (`parser::validate_dishes`, which replaces `validate_items`; failures are
 `InvalidArgs` as today):
@@ -272,7 +282,10 @@ reach this stage.
    candidate list (display names only). Output:
    `{"picks": [{"dish": 0, "candidate": 12}, {"dish": 1, "candidate": null}]}`. The prompt
    says: choose only a candidate that is the same item; choose the regular size (並/M/レギュラー)
-   when no size was stated; otherwise `null`.
+   when no size was stated; otherwise `null`. **Size words may be in another language or
+   generic** (小/中/大碗, 小/中/大份, small/medium/large, 普通): map them to the chain's
+   equivalent size, where 中/medium/普通 means the regular size and 小/大 mean the next size
+   down/up that exists on the menu. A stated size that has no reasonable equivalent is `null`.
 3. **Checks.** An index out of range, or a dish missing from the output, counts as `null`.
    There's no re-ask: a wrong-shaped answer just means decomposition.
 4. **Memory.** Each pick writes `diet_dish_name_aliases(brand_key, normalize("{name} {size}"),
@@ -431,7 +444,7 @@ with §7.2's hard rules. Its result note says only future meals are affected.
 |---|---|---|
 | Schema | `plugin-diet/src/sources.rs` (or a new `dishes.rs`), `lib.rs` | Migration 3; register version 3 |
 | Model | `plugin-diet/src/model.rs` | `Dish`, `ItemKind`, `MealItem` fields, `Macros::times`, `MealItem::label` |
-| Source chain | `plugin-diet/src/sources.rs` | `FoodSource` dish methods, `TableSource` impl, `SourceChain::{lookup_dish, brand_candidates, known_brands}`, `dish_count`, `upsert_manual_dish`, delete/list include dishes |
+| Source chain | `plugin-diet/src/sources.rs` | `FoodSource` dish methods, `TableSource` impl, `SourceChain::{lookup_dish, brand_candidates, known_brands, known_dishes}`, `dish_count`, `upsert_manual_dish`, delete/list include dishes |
 | Parser | `plugin-diet/src/parser.rs`, `prompts.rs` | New output shape, `{known_brands}` / `{known_dishes}`, `validate_dishes` |
 | Dish matching | **new** `plugin-diet/src/dish_resolver.rs` | Stages 2–3, bigram ranking, `DISH_PICK` prompt, alias write |
 | Food resolver | `plugin-diet/src/resolver.rs` | **None.** It's still called with the flattened components. |
@@ -454,6 +467,11 @@ with §7.2's hard rules. Its result note says only future meals are affected.
   deserialize, with `kind = Food` and `estimated` unchanged.
 - **Parser:** the new output shape parses; `validate_dishes` covers every limit in §5.1; the
   prompt contains KNOWN_BRANDS and KNOWN_DISHES.
+- **`known_dishes`:** lists brandless dishes only; a `name_key` present in two sources appears
+  once, spelled as in the higher-priority one; a disabled source's dishes are absent; ordering
+  is by summed `use_count`, then name; `limit` is honored.
+- **Known dish hit:** a canteen dataset with `A定食（大）`; the mock parser returns that name
+  with `size: null` → exact stage 2 hit, no pick or estimate call.
 - **Exact dish hit:** "松屋 牛めし 並盛 ×2" with the dish in a dataset gives one dish item,
   `macros = 2 × per_serving`, no pick call and no estimate call (assert the request count).
 - **Brand rule:** a brandless "牛丼" with only `松屋 牛丼` in the data never hits it; it
@@ -464,6 +482,10 @@ with §7.2's hard rules. Its result note says only future meals are affected.
   **one** call. The pick prompt's candidates are exactly the brand's local rows in enabled
   sources, so a disabled source's dishes aren't listed. A brand with no local rows makes no
   pick call.
+- **Size mapping:** "中碗松屋牛肉饭" with `松屋 牛めし（並盛）` in a dataset: the pick prompt
+  contains the size-mapping rule and the user's `size: "中碗"`. A mocked pick of the 並盛
+  candidate logs that dish and writes the alias `(松屋, "牛肉饭 中碗")`, so the same wording
+  hits in stage 2 next time with no pick call.
 - **Candidate ranking:** a brand with more than 200 rows is cut to 200, and the exact-ish
   match is included.
 - **Fallback:** a matched dish with `grams` set and no `serving_g` decomposes. With

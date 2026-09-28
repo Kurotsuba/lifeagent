@@ -133,9 +133,20 @@ export interface DietMacros {
 
 export type MealType = "breakfast" | "lunch" | "dinner" | "snack";
 
+/** `"food"`: a per-100 g item, as Phase 1 always logged. `"dish"`: a per-serving chain/menu item
+ * (`docs/DISH_NUTRITION.md` §2, §6). Absent on events logged before dishes existed — treat a
+ * missing `kind` as `"food"`, matching the Rust side's `#[serde(default)]`. */
+export type MealItemKind = "food" | "dish";
+
 export interface DietMealItem {
   name: string;
-  grams: number;
+  kind: MealItemKind;
+  /** Dish items only. */
+  brand: string | null;
+  /** `null` for a dish item whose `serving_g` is unknown. */
+  grams: number | null;
+  /** Dish items only. */
+  servings: number | null;
   kcal: number;
   protein_g: number;
   estimated: boolean;
@@ -240,6 +251,7 @@ export interface SourceInfo {
   priority: number;
   enabled: boolean;
   food_count: number;
+  dish_count: number;
   origin: DatasetOrigin | null;
 }
 
@@ -254,13 +266,34 @@ export interface Food {
   use_count: number;
 }
 
+/** A per-serving chain/menu item (`docs/DISH_NUTRITION.md` §4.1). `brand === ""` is brandless
+ * (e.g. a canteen dataset). `serving_g` is `null` when the chain doesn't publish it. */
+export interface Dish {
+  id: string;
+  brand: string;
+  brand_key: string;
+  name: string;
+  name_key: string;
+  serving_g: number | null;
+  per_serving: DietMacros;
+  source_id: string;
+  source_kind: SourceKind;
+  source_name: string;
+  use_count: number;
+}
+
 export interface RowIssue {
   line: number;
   name: string | null;
   message: string;
 }
 
+/** `"100g"`: a food row. `"serving"`: a dish row, with `brand`/`serving_g` filled in
+ * (`docs/DISH_NUTRITION.md` §7.3). */
 export interface ImportRowView {
+  basis: "100g" | "serving";
+  brand: string | null;
+  serving_g: number | null;
   name: string;
   kcal: number;
   protein_g: number;
@@ -276,6 +309,9 @@ export interface ImportPreview {
   format: "csv" | "json";
   suggested_name: string;
   total_rows: number;
+  valid_food_rows: number;
+  valid_dish_rows: number;
+  /** `valid_food_rows + valid_dish_rows`. */
   valid_rows: number;
   errors: RowIssue[];
   error_count: number;
@@ -283,6 +319,9 @@ export interface ImportPreview {
   warning_count: number;
   shadowed_by_manual: number;
   replaces_estimates: number;
+  dish_shadowed_by_manual: number;
+  /** Distinct dish brands in the file, non-empty, max 20. */
+  brands: string[];
   sample: ImportRowView[];
   token: string;
 }
@@ -290,6 +329,7 @@ export interface ImportPreview {
 export interface ImportReport {
   source: SourceInfo;
   imported: number;
+  imported_dishes: number;
   skipped: number;
 }
 

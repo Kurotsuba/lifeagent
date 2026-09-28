@@ -270,16 +270,41 @@ pub struct MealItem {
 }
 
 impl MealItem {
-    /// Display JSON: `{name, grams, kcal, protein_g, estimated, source_name}`.
+    /// Display JSON: `{name, kind, brand, grams, servings, kcal, protein_g, estimated,
+    /// source_name}`. `grams` is `null` for a dish item whose `serving_g` is unknown.
     pub fn to_json(&self) -> Value {
         json!({
             "name": self.name,
+            "kind": self.kind,
+            "brand": self.brand,
             "grams": self.grams.map(round1),
+            "servings": self.servings,
             "kcal": self.macros.kcal.round(),
             "protein_g": round1(self.macros.protein_g),
             "estimated": self.source == SourceKind::LlmEstimate,
             "source_name": self.source_name,
         })
+    }
+
+    /// One-line text for `intake::context_snippet`, the desktop and the CLI
+    /// (`docs/DISH_NUTRITION.md` §6): a food reads "熟米饭 150g"; a dish reads
+    /// "松屋 牛めし（並盛）×1" (no brand: "牛めし（並盛）×1").
+    pub fn label(&self) -> String {
+        match self.kind {
+            ItemKind::Food => {
+                let grams = self.grams.map(round1).unwrap_or(0.0);
+                format!("{} {grams}g", self.name)
+            }
+            ItemKind::Dish => {
+                let servings = self.servings.unwrap_or(1.0);
+                match self.brand.as_deref() {
+                    Some(brand) if !brand.is_empty() => {
+                        format!("{brand} {}×{servings}", self.name)
+                    }
+                    _ => format!("{}×{servings}", self.name),
+                }
+            }
+        }
     }
 }
 
@@ -414,6 +439,72 @@ mod tests {
         assert_eq!(item.source_id, None);
         assert_eq!(item.source_name, None);
         assert_eq!(item.to_json()["estimated"], true);
+    }
+
+    fn dish_macros() -> Macros {
+        Macros {
+            kcal: 733.0,
+            protein_g: 25.0,
+            carbs_g: 90.0,
+            fat_g: 28.0,
+            fiber_g: 3.0,
+        }
+    }
+
+    #[test]
+    fn label_formats_a_food_item_with_grams() {
+        let item = MealItem {
+            name: "熟米饭".into(),
+            kind: ItemKind::Food,
+            brand: None,
+            grams: Some(150.0),
+            servings: None,
+            food_id: Some("id".into()),
+            dish_id: None,
+            source: SourceKind::Manual,
+            source_id: None,
+            source_name: None,
+            macros: Macros::default(),
+        };
+        assert_eq!(item.label(), "熟米饭 150g");
+    }
+
+    #[test]
+    fn label_formats_a_dish_item_with_brand_and_servings() {
+        let item = MealItem {
+            name: "牛めし（並盛）".into(),
+            kind: ItemKind::Dish,
+            brand: Some("松屋".into()),
+            grams: Some(350.0),
+            servings: Some(1.0),
+            food_id: None,
+            dish_id: Some("id".into()),
+            source: SourceKind::Dataset,
+            source_id: None,
+            source_name: None,
+            macros: dish_macros(),
+        };
+        assert_eq!(item.label(), "松屋 牛めし（並盛）×1");
+    }
+
+    #[test]
+    fn label_formats_a_brandless_dish_item() {
+        let item = MealItem {
+            name: "A定食（大）".into(),
+            kind: ItemKind::Dish,
+            brand: None,
+            grams: None,
+            servings: Some(1.0),
+            food_id: None,
+            dish_id: Some("id".into()),
+            source: SourceKind::Dataset,
+            source_id: None,
+            source_name: None,
+            macros: dish_macros(),
+        };
+        assert_eq!(item.label(), "A定食（大）×1");
+        assert_eq!(item.to_json()["grams"], Value::Null);
+        assert_eq!(item.to_json()["kind"], "dish");
     }
 
     /// A migration-2-era payload, which already has `source_id`/`source_name` but predates

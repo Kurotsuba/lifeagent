@@ -90,6 +90,28 @@ pub async fn complete_json<T: DeserializeOwned>(
     }
 }
 
+/// Like `complete_json`, but with no repair attempt: output that doesn't deserialize as `T` is
+/// `LlmError::InvalidResponse` straight away. For callers whose own fallback is cheaper than a
+/// second call.
+pub async fn complete_json_once<T: DeserializeOwned>(
+    router: &LlmRouter,
+    role: Role,
+    messages: Vec<Message>,
+) -> Result<T, LlmError> {
+    let resp = router
+        .complete(
+            role,
+            RoleRequest {
+                messages,
+                tools: vec![],
+                max_tokens: None,
+                response_format: ResponseFormat::JsonObject,
+            },
+        )
+        .await?;
+    parse_content::<T>(&resp).map_err(LlmError::InvalidResponse)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -204,6 +226,19 @@ mod tests {
         );
         assert_eq!(strip_fences("```json {\"a\": 1}```"), r#"{"a": 1}"#);
         assert_eq!(strip_fences(r#"{"a": "```"}"#), r#"{"a": "```"}"#);
+    }
+
+    #[tokio::test]
+    async fn once_variant_makes_no_repair_attempt() {
+        let mock = Arc::new(MockChatModel::new());
+        mock.push_response(ok_response("not json at all"));
+        let router = test_router(mock.clone());
+
+        let err = complete_json_once::<Sample>(&router, Role::Parser, vec![])
+            .await
+            .unwrap_err();
+        assert!(matches!(err, LlmError::InvalidResponse(_)));
+        assert_eq!(mock.received_requests().len(), 1);
     }
 
     #[tokio::test]

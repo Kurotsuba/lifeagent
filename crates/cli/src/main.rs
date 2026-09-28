@@ -95,10 +95,11 @@ enum PlanAction {
     },
 }
 
-/// `docs/NUTRITION_SOURCES.md` §8.1.
+/// `docs/NUTRITION_SOURCES.md` §8.1, extended by `docs/DISH_NUTRITION.md` §8.1 with dishes.
 #[derive(Subcommand)]
 enum FoodsAction {
-    /// Browse foods (existing command, gains `--source`/`--query` filters).
+    /// Browse foods, or with `--dishes`, dishes instead (`--query` then has no effect: dishes
+    /// have no substring search, only the exact `--brand` filter).
     List {
         #[arg(long)]
         source: Option<String>,
@@ -106,9 +107,18 @@ enum FoodsAction {
         query: Option<String>,
         #[arg(long)]
         limit: Option<u32>,
+        #[arg(long)]
+        dishes: bool,
+        #[arg(long)]
+        brand: Option<String>,
     },
-    /// Winner first, then shadowed copies, with source names.
-    Lookup { name: String },
+    /// Winner first, then shadowed copies, with source names. Also shows dish matches for
+    /// `--brand` (brandless if omitted).
+    Lookup {
+        name: String,
+        #[arg(long)]
+        brand: Option<String>,
+    },
     /// Table: priority, id, kind, name, enabled, foods.
     Sources,
     Import {
@@ -301,19 +311,25 @@ async fn foods(app: &CoreApp, action: FoodsAction) -> Result<()> {
             source,
             query,
             limit,
+            dishes,
+            brand,
         } => {
-            let foods = sources::list_foods(
-                &ctx,
-                source.as_deref(),
-                query.as_deref(),
-                limit.unwrap_or(DEFAULT_FOODS_LIMIT),
-            )
-            .await?;
-            print_json(&foods)
+            let limit = limit.unwrap_or(DEFAULT_FOODS_LIMIT);
+            if dishes {
+                let dishes =
+                    sources::list_dishes(&ctx, source.as_deref(), brand.as_deref(), limit).await?;
+                print_json(&dishes)
+            } else {
+                let foods =
+                    sources::list_foods(&ctx, source.as_deref(), query.as_deref(), limit).await?;
+                print_json(&foods)
+            }
         }
-        FoodsAction::Lookup { name } => {
-            let copies = sources::lookup_all(&ctx, &name).await?;
-            print_json(&copies)
+        FoodsAction::Lookup { name, brand } => {
+            let foods = sources::lookup_all(&ctx, &name).await?;
+            let dishes =
+                sources::lookup_dish_all(&ctx, brand.as_deref().unwrap_or(""), &name).await?;
+            print_json(&serde_json::json!({ "foods": foods, "dishes": dishes }))
         }
         FoodsAction::Sources => print_json(&sources::list_sources(&ctx).await?),
         FoodsAction::Import {
@@ -422,29 +438,58 @@ async fn import_foods(
     let preview = import::preview(ctx, &parsed).await?;
 
     println!(
-        "可导入 {} · 跳过 {} · 警告 {}",
-        preview.valid_rows, preview.error_count, preview.warning_count
+        "可导入食物 {} · 菜品 {} · 跳过 {} · 警告 {}",
+        preview.valid_food_rows,
+        preview.valid_dish_rows,
+        preview.error_count,
+        preview.warning_count
     );
+    if !preview.brands.is_empty() {
+        println!("品牌：{}", preview.brands.join("、"));
+    }
     if preview.shadowed_by_manual > 0 {
-        println!("{} 种已被手动录入覆盖", preview.shadowed_by_manual);
+        println!("{} 种食物已被手动录入覆盖", preview.shadowed_by_manual);
     }
     if preview.replaces_estimates > 0 {
-        println!("{} 种将覆盖 AI 估算", preview.replaces_estimates);
+        println!("{} 种食物将覆盖 AI 估算", preview.replaces_estimates);
+    }
+    if preview.dish_shadowed_by_manual > 0 {
+        println!("{} 道菜品已被手动录入覆盖", preview.dish_shadowed_by_manual);
     }
     print_row_issues("错误", &preview.errors, preview.error_count);
     print_row_issues("警告", &preview.warnings, preview.warning_count);
     println!("示例（前 {} 行）:", preview.sample.len());
     for row in &preview.sample {
-        println!(
-            "  {} kcal={} protein_g={} carbs_g={} fat_g={} fiber_g={}",
-            row.name, row.kcal, row.protein_g, row.carbs_g, row.fat_g, row.fiber_g
-        );
+        match row.basis {
+            "serving" => {
+                println!(
+                "  [菜品] {}{} serving_g={:?} kcal={} protein_g={} carbs_g={} fat_g={} fiber_g={}",
+                row.brand.as_deref().map(|b| format!("{b} ")).unwrap_or_default(),
+                row.name,
+                row.serving_g,
+                row.kcal,
+                row.protein_g,
+                row.carbs_g,
+                row.fat_g,
+                row.fiber_g
+            )
+            }
+            _ => println!(
+                "  {} kcal={} protein_g={} carbs_g={} fat_g={} fiber_g={}",
+                row.name, row.kcal, row.protein_g, row.carbs_g, row.fat_g, row.fiber_g
+            ),
+        }
     }
 
     if dry_run {
         return Ok(());
     }
-    if !yes && !confirm(&format!("Import {} foods? [y/N] ", preview.valid_rows))? {
+    if !yes
+        && !confirm(&format!(
+            "Import {} foods and {} dishes? [y/N] ",
+            preview.valid_food_rows, preview.valid_dish_rows
+        ))?
+    {
         println!("已取消");
         return Ok(());
     }

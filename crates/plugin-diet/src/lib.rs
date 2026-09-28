@@ -6,6 +6,7 @@
 //! `intake`, `tools`) landed in M4 and the plan section (`plan`, `validate`) in M5, per
 //! `docs/PHASE1_SPEC.md` §8.
 
+pub mod dish_resolver;
 pub mod foods;
 pub mod import;
 pub mod intake;
