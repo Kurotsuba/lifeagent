@@ -1890,3 +1890,24 @@ end-to-end from parsing through logging, import/export, the CLI and the desktop 
 - **Servings worked out from grams are rounded to 2 decimals** (at least 0.01), and the item's
   macros use that same rounded value so the shown `×1.14` and the totals agree. Servings the
   parser gives directly are already limited to 0.25–10 and aren't changed.
+
+## 2026-09-28 — `docs/FOOD_MATCHING.md`: design for matching food names to datasets (design only)
+
+A manual test showed that ingredients were still estimated even with 中国食物成分表 imported. The
+cause is `docs/NUTRITION_SOURCES.md` §9's known limit: matching is exact, and the parser's names
+(`熟米饭`) differ from the table's (`稻米饭(蒸)`). The new design replaces §9's unbuilt mitigation
+3:
+
+- **Character bigrams in memory, not FTS5 trigram.** A trigram shares nothing between `熟米饭`
+  and `稻米饭(蒸)`, and SQLite's trigram tokenizer can't search strings under 3 characters
+  (`鸡蛋`). Matching in English was also considered and rejected: both sides would need
+  translating and the translations aren't consistent. Synonyms written with different characters
+  (土豆/马铃薯) are covered by parser-supplied `alt_names` instead.
+- **A cached estimate doesn't block matching.** Otherwise every name estimated before an
+  import stays on its estimate.
+- **"None" answers are remembered** in `diet_food_match_checks`, and re-checked only when a
+  dataset's `updated_at` is newer.
+- **The state rule is explicit** (raw vs cooked is a different food). This limits matches for
+  meat and grains in raw-ingredient tables, but it's correct.
+- **No settings toggle**, since the cost is bounded. `diet_remove_alias` is added so a wrong
+  match can be undone.

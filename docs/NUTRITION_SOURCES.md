@@ -700,6 +700,9 @@ Mitigations, in order of cost:
    estimate as today. This is behind a setting because it adds one model call per new food
    name.
 
+   *(Superseded by `docs/FOOD_MATCHING.md`, which uses in-memory character bigrams instead of
+   FTS5 trigram, also matches names whose only hit is a cached estimate, and has no setting.)*
+
 ## 10. Implementation stages (suggested)
 
 Each stage ends with `cargo fmt`, `clippy -D warnings`, `cargo test --workspace` green, and
