@@ -11,7 +11,7 @@ brand/size — the breakdown is the fallback when the brand/size doesn't match a
 
 Return JSON: {"meal_type": "breakfast|lunch|dinner|snack|null", "dishes": [
   {"name": string, "brand": string|null, "size": string|null, "servings": number,
-   "grams": number|null, "components": [{"name": string, "grams": number}]}
+   "grams": number|null, "components": [{"name": string, "grams": number, "alt_names": [string]}]}
 ]}
 
 Rules:
@@ -28,6 +28,9 @@ Rules:
   applied):
   - Use a name from KNOWN_FOODS when a component refers to the same food. Otherwise use a short,
     specific, generic food name in the user's language (e.g. "熟米饭", "卤蛋", "牛肉(熟)").
+  - `alt_names`: up to 2 other common or standard Chinese names for the same food in the same
+    state (e.g. 土豆 → 马铃薯, 西红柿 → 番茄, 熟米饭 → 米饭(蒸)). Omit it when there are none.
+    Never use it for a different food or a different state.
   - Split composite dishes into main components with separate grams: "牛肉拉面" becomes
     "拉面(熟)", "牛肉(熟)", "牛骨汤" and "青菜"; "番茄炒蛋" becomes "番茄", "鸡蛋" and "食用油".
   - Include cooking oil for fried or stir-fried dishes as a separate component ("食用油") with a

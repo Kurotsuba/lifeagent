@@ -302,6 +302,7 @@ mod tests {
             components: vec![ParsedComponent {
                 name: "米饭".into(),
                 grams: 200.0,
+                alt_names: vec![],
             }],
         }
     }

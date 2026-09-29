@@ -7,6 +7,7 @@ use lifeagent_llm::json::complete_json;
 use lifeagent_llm::types::{Message, Role};
 use serde::Deserialize;
 
+use crate::foods::normalize;
 use crate::model::MealType;
 use crate::prompts::MEAL_PARSER;
 use crate::sources::{known_names, SourceChain};
@@ -24,6 +25,7 @@ const MIN_DISH_GRAMS: f64 = 1.0;
 const MAX_DISH_GRAMS: f64 = 3000.0;
 const MAX_COMPONENTS_PER_DISH: usize = 20;
 const MAX_TOTAL_COMPONENTS: usize = 40;
+const MAX_ALT_NAMES: usize = 2;
 const MIN_COMPONENT_GRAMS: f64 = 1.0;
 const MAX_COMPONENT_GRAMS: f64 = 2000.0;
 
@@ -37,6 +39,10 @@ pub struct ParsedMeal {
 pub struct ParsedComponent {
     pub name: String,
     pub grams: f64,
+    /// Up to 2 other names for the same food, used only as search queries for the match step
+    /// (`docs/FOOD_MATCHING.md` §3).
+    #[serde(default)]
+    pub alt_names: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -161,9 +167,11 @@ pub fn validate_dishes(dishes: Vec<ParsedDish>) -> Result<Vec<ParsedDish>, Plugi
                     c.grams
                 )));
             }
+            let alt_names = clean_alt_names(&cname, c.alt_names);
             components.push(ParsedComponent {
                 name: cname,
                 grams: c.grams,
+                alt_names,
             });
         }
         total_components += components.len();
@@ -192,6 +200,25 @@ pub fn validate_dishes(dishes: Vec<ParsedDish>) -> Result<Vec<ParsedDish>, Plugi
     Ok(out)
 }
 
+/// `docs/FOOD_MATCHING.md` §3: trims, drops blanks, duplicates and names equal to the component's
+/// own, and keeps the first 2. Never an error: alternate names are only a search aid.
+fn clean_alt_names(name: &str, alt_names: Vec<String>) -> Vec<String> {
+    let name_key = normalize(name);
+    let mut out: Vec<String> = Vec::new();
+    for alt in alt_names {
+        let alt = alt.trim().to_string();
+        let key = normalize(&alt);
+        if key.is_empty() || key == name_key || out.iter().any(|o| normalize(o) == key) {
+            continue;
+        }
+        out.push(alt);
+        if out.len() == MAX_ALT_NAMES {
+            break;
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -208,6 +235,7 @@ mod tests {
             components: vec![ParsedComponent {
                 name: name.into(),
                 grams,
+                alt_names: vec![],
             }],
         }
     }
@@ -249,6 +277,7 @@ mod tests {
             .map(|_| ParsedComponent {
                 name: "y".into(),
                 grams: 10.0,
+                alt_names: vec![],
             })
             .collect();
         assert!(validate_dishes(vec![many_components]).is_err());
@@ -259,6 +288,7 @@ mod tests {
             .map(|_| ParsedComponent {
                 name: "y".into(),
                 grams: 10.0,
+                alt_names: vec![],
             })
             .collect();
         assert!(validate_dishes(vec![spread.clone(), spread.clone(), spread]).is_err());
@@ -272,6 +302,56 @@ mod tests {
         let out = validate_dishes(vec![d]).unwrap();
         assert_eq!(out[0].brand, None);
         assert_eq!(out[0].size, None);
+    }
+
+    fn dish_with_alts(name: &str, alts: &[&str]) -> ParsedDish {
+        let mut d = dish(name, 100.0);
+        d.components[0].alt_names = alts.iter().map(|a| a.to_string()).collect();
+        d
+    }
+
+    #[test]
+    fn validate_keeps_at_most_two_alt_names_and_drops_blanks_duplicates_and_the_name_itself() {
+        let d = dish_with_alts("土豆", &[" ", "土豆", "马铃薯", " 马铃薯 ", "洋芋", "地蛋"]);
+
+        let out = validate_dishes(vec![d]).unwrap();
+
+        assert_eq!(out[0].components[0].alt_names, vec!["马铃薯", "洋芋"]);
+    }
+
+    #[test]
+    fn validate_treats_alt_names_that_differ_only_by_case_or_trailing_punctuation_as_duplicates() {
+        let d = dish_with_alts("Tomato", &["tomato。", "番茄", "番茄，"]);
+
+        let out = validate_dishes(vec![d]).unwrap();
+
+        assert_eq!(out[0].components[0].alt_names, vec!["番茄"]);
+    }
+
+    #[tokio::test]
+    async fn alt_names_are_read_from_the_model_output_and_are_optional() {
+        let env = env().await;
+        env.mock.push_response(json_response(json!({
+            "meal_type": null,
+            "dishes": [{"name": "炒土豆", "components": [
+                {"name": "土豆", "grams": 150, "alt_names": ["马铃薯"]},
+                {"name": "食用油", "grams": 5}
+            ]}]
+        })));
+
+        let meal = parse_meal(&env.ctx, "炒土豆", None, local_instant(12, 0))
+            .await
+            .unwrap();
+
+        let c = &meal.dishes[0].components;
+        assert_eq!(c[0].alt_names, vec!["马铃薯"]);
+        assert!(c[1].alt_names.is_empty());
+    }
+
+    #[test]
+    fn the_prompt_describes_alt_names() {
+        assert!(MEAL_PARSER.contains(r#""alt_names""#));
+        assert!(MEAL_PARSER.contains("up to 2 other"));
     }
 
     #[tokio::test]

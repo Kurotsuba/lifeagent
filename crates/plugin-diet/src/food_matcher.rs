@@ -776,6 +776,69 @@ mod tests {
         assert!(env.mock.received_requests().is_empty());
     }
 
+    fn query(name: &str, alts: &[&str]) -> FoodQuery {
+        FoodQuery {
+            name: name.into(),
+            alt_names: alts.iter().map(|a| a.to_string()).collect(),
+        }
+    }
+
+    #[tokio::test]
+    async fn alt_names_widen_the_search_and_an_exact_alt_name_ranks_first() {
+        let env = env().await;
+        add_dataset(&env, "表", &[("马铃薯", RICE), ("马铃薯泥", EGG)]).await;
+        let pool = Pool::load(&env.ctx).await.unwrap();
+
+        assert!(pool.candidates(&query("土豆", &[])).is_empty());
+        let got = pool.candidates(&query("土豆", &["马铃薯"]));
+
+        assert_eq!(names(&got), vec!["马铃薯", "马铃薯泥"]);
+    }
+
+    #[tokio::test]
+    async fn alt_names_are_neither_sent_to_the_model_nor_stored() {
+        let env = env().await;
+        add_dataset(&env, "表", &[("马铃薯", RICE)]).await;
+        env.mock.push_response(pick(0, Some(0)));
+
+        let foods = resolve_many(&env.ctx, &[query("土豆", &["马铃薯"])])
+            .await
+            .unwrap();
+
+        assert_eq!(foods[0].name, "马铃薯");
+        let requests = env.mock.received_requests();
+        let Some(Message::User { content }) = requests[0].messages.first() else {
+            panic!("expected a user message");
+        };
+        assert!(!content.contains("alt_names"));
+        // Only the picked redirect exists; the alternate name was never stored as an alias.
+        assert_eq!(
+            alias_row(&env, "土豆").await,
+            Some(("马铃薯".into(), "match".into()))
+        );
+        assert!(alias_row(&env, "马铃薯").await.is_none());
+        let (rows,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM diet_name_aliases")
+            .fetch_one(&env.ctx.db)
+            .await
+            .unwrap();
+        assert_eq!(rows, 1);
+    }
+
+    #[tokio::test]
+    async fn alt_names_of_a_repeated_name_are_merged() {
+        let env = env().await;
+        add_dataset(&env, "表", &[("马铃薯", RICE)]).await;
+        env.mock.push_response(pick(0, Some(0)));
+
+        let foods = resolve_many(&env.ctx, &[query("土豆", &[]), query("土豆", &["马铃薯"])])
+            .await
+            .unwrap();
+
+        assert_eq!(foods[0].id, foods[1].id);
+        assert_eq!(foods[0].name, "马铃薯");
+        assert_eq!(env.mock.received_requests().len(), 1);
+    }
+
     #[test]
     fn similarity_scores_short_strings_by_characters() {
         assert_eq!(similarity("梨", "梨"), 1.0);

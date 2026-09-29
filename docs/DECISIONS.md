@@ -1946,3 +1946,20 @@ Decisions not spelled out in the design:
 - **`cargo clippy`/`test --workspace` were run with `--exclude lifeagent-desktop`** in this
   container, which has no GTK development packages. Nothing in the desktop crate calls the
   resolver.
+
+## 2026-09-29 — `docs/FOOD_MATCHING.md` stage 2: parser `alt_names`
+
+`ParsedComponent` gains `alt_names` (optional in the model's JSON, so older-shaped answers still
+parse), `validate_dishes` cleans them, `MEAL_PARSER` describes them with §3's wording, and
+`diet_log_meal` passes them into `FoodQuery`. Plan validation still passes none.
+
+- **"Equal to the name" and "duplicate" compare normalized keys**, the same rule as food lookup,
+  so `番茄，` duplicates `番茄` and `Tomato` equals `tomato。`. The kept text is the trimmed
+  original, not the key.
+- **The first 2 valid entries are kept**, after blanks, duplicates and the name itself are
+  dropped, not the first 2 raw entries. `[" ", "土豆", "马铃薯", "洋芋", "地蛋"]` for `土豆`
+  keeps `马铃薯` and `洋芋`.
+- **Repeated names merge their alternate names** (done in stage 1's `resolve_many`): `土豆` in
+  two dishes, one with `alt_names`, searches with them for both.
+- **Nothing in the meal record changes.** `alt_names` are not part of `MealItem`, the
+  `diet.meal_logged` payload or any tool result.

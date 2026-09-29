@@ -167,7 +167,10 @@ async fn log_meal(ctx: &PluginContext, args: Value) -> Result<ToolOutput, Plugin
     let mut component_names = Vec::new();
     for outcome in &outcomes {
         if let DishOutcome::Unmatched(pd) = outcome {
-            component_names.extend(pd.components.iter().map(|c| FoodQuery::new(c.name.clone())));
+            component_names.extend(pd.components.iter().map(|c| FoodQuery {
+                name: c.name.clone(),
+                alt_names: c.alt_names.clone(),
+            }));
         }
     }
     let mut foods = resolve_many(ctx, &component_names).await?.into_iter();
@@ -428,6 +431,51 @@ mod tests {
         assert_eq!(stored.raw_text, "午饭一碗米饭两个鸡蛋");
         assert_eq!(stored.meal_type, MealType::Lunch);
         assert_eq!(stored.items.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn log_meal_matches_a_component_to_a_dataset_row_through_its_alt_names() {
+        let env = env().await;
+        seed_person(&env.ctx).await;
+        crate::testutil::add_dataset(
+            &env,
+            "食物成分表",
+            &[(
+                "马铃薯",
+                crate::model::Macros {
+                    kcal: 77.0,
+                    protein_g: 2.0,
+                    carbs_g: 17.0,
+                    fat_g: 0.2,
+                    fiber_g: 2.2,
+                },
+            )],
+        )
+        .await;
+        env.mock.push_response(json_response(json!({
+            "meal_type": "lunch",
+            "dishes": [{"name": "煮土豆", "components": [
+                {"name": "土豆", "grams": 200, "alt_names": ["马铃薯"]}
+            ]}]
+        })));
+        env.mock.push_response(json_response(
+            json!({"matches": [{"food": 0, "candidate": 0}]}),
+        ));
+
+        let out = call(
+            &env.ctx,
+            "diet_log_meal",
+            json!({"description": "午饭吃了煮土豆"}),
+        )
+        .await
+        .unwrap();
+
+        // 土豆 shares no character with 马铃薯; only the alternate name finds it.
+        assert_eq!(out.content["items"][0]["name"], "马铃薯");
+        assert_eq!(out.content["items"][0]["estimated"], false);
+        assert_eq!(out.content["total"]["kcal"], 154.0);
+        // The parser and the one match call: no estimate.
+        assert_eq!(env.mock.received_requests().len(), 2);
     }
 
     #[tokio::test]
