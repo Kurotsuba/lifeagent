@@ -136,6 +136,17 @@ CREATE TABLE diet_dish_name_aliases (
 );
 ";
 
+/// Diet plugin migration 4: remembers which names were already checked against the imported
+/// data, and where a redirect came from, per `docs/FOOD_MATCHING.md` §6.1. Additive only.
+pub const MIGRATION_4: &str = "
+CREATE TABLE diet_food_match_checks (
+  name_key    TEXT PRIMARY KEY,
+  checked_at  TEXT NOT NULL
+);
+
+ALTER TABLE diet_name_aliases ADD COLUMN origin TEXT NOT NULL DEFAULT 'user';
+";
+
 /// A dataset source's provenance, stored as `diet_food_sources.origin_json`. `manual` and
 /// `llm_estimate` store `{}`, which decodes to `None`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -515,6 +526,12 @@ impl SourceChain {
             }
         }
         Ok(out)
+    }
+
+    /// The first hit in priority order for an already-normalized key, with no alias redirect
+    /// (`docs/FOOD_MATCHING.md` §6.2: a picked target must not be redirected again).
+    pub(crate) async fn lookup_direct(&self, key: &str) -> Result<Option<Food>, PluginError> {
+        self.walk(key).await
     }
 
     async fn walk(&self, key: &str) -> Result<Option<Food>, PluginError> {

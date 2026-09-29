@@ -200,6 +200,78 @@ async fn deleting_a_dataset_cascades_into_dishes_and_dish_source_aliases() {
     assert!(violations.is_empty(), "{violations:?}");
 }
 
+/// Only migrations 1-3 — a stand-in for a database that hasn't seen migration 4 yet.
+fn migration_1_to_3_only() -> PluginManifest {
+    PluginManifest {
+        id: "diet",
+        name: "Diet",
+        version: "0.1.0",
+        event_types: vec![],
+        migrations: vec![
+            PluginMigration {
+                version: 1,
+                sql: foods::MIGRATION_1,
+            },
+            PluginMigration {
+                version: 2,
+                sql: sources::MIGRATION_2,
+            },
+            PluginMigration {
+                version: 3,
+                sql: sources::MIGRATION_3,
+            },
+        ],
+    }
+}
+
+#[tokio::test]
+async fn migration_4_marks_existing_aliases_as_user_and_adds_the_check_table() {
+    let env = lifeagent_core::test_support::env().await;
+    apply_migrations(&env.ctx.db, env.clock.as_ref(), &migration_1_to_3_only())
+        .await
+        .unwrap();
+    sources::upsert_manual_food(
+        &env.ctx,
+        "卤鸡蛋",
+        lifeagent_plugin_diet::model::Macros {
+            kcal: 150.0,
+            protein_g: 13.0,
+            carbs_g: 1.0,
+            fat_g: 10.0,
+            fiber_g: 0.0,
+        },
+    )
+    .await
+    .unwrap();
+    sources::add_user_alias(&env.ctx, "卤鸡蛋", "卤蛋")
+        .await
+        .unwrap();
+
+    apply_migrations(&env.ctx.db, env.clock.as_ref(), &DietPlugin.manifest())
+        .await
+        .unwrap();
+
+    let origin: (String,) =
+        sqlx::query_as("SELECT origin FROM diet_name_aliases WHERE alias_key = '卤蛋'")
+            .fetch_one(&env.ctx.db)
+            .await
+            .unwrap();
+    assert_eq!(origin.0, "user");
+    // The alias still resolves, and the new table is usable.
+    let chain = SourceChain::load(&env.ctx).await.unwrap();
+    assert_eq!(chain.lookup("卤蛋").await.unwrap().unwrap().name, "卤鸡蛋");
+    sqlx::query("INSERT INTO diet_food_match_checks (name_key, checked_at) VALUES ('x', 'y')")
+        .execute(&env.ctx.db)
+        .await
+        .unwrap();
+
+    let violations: Vec<(String,)> = sqlx::query_as("PRAGMA foreign_key_check")
+        .fetch_all(&env.ctx.db)
+        .await
+        .unwrap();
+    assert!(violations.is_empty(), "{violations:?}");
+}
+
 #[tokio::test]
 async fn deleting_a_dataset_cascades_into_foods_and_source_aliases() {
     let env = lifeagent_core::test_support::env().await;

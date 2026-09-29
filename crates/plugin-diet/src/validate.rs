@@ -10,7 +10,7 @@ use serde_json::{json, Value};
 
 use crate::intake;
 use crate::model::{ItemKind, Macros, MealItem, MealType};
-use crate::resolver::resolve_many;
+use crate::resolver::{resolve_many, FoodQuery};
 
 const KCAL_TOLERANCE: f64 = 0.08;
 const MIN_PROTEIN_SHARE: f64 = 0.9;
@@ -87,10 +87,10 @@ pub async fn finalize(
         .await?
         .ok_or_else(|| PluginError::Other("no profile".into()))?;
 
-    let names: Vec<String> = planned
+    let names: Vec<FoodQuery> = planned
         .meals
         .iter()
-        .flat_map(|m| m.items.iter().map(|i| i.name.trim().to_string()))
+        .flat_map(|m| m.items.iter().map(|i| FoodQuery::new(i.name.trim())))
         .collect();
     let mut foods = resolve_many(ctx, &names).await?.into_iter();
 
@@ -468,5 +468,25 @@ mod tests {
 
         assert_eq!(section.data["meals"][0]["items"][1]["estimated"], true);
         assert!(section.warnings.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_dataset_only_food_name_is_matched_instead_of_estimated() {
+        let (env, date) = setup().await;
+        crate::testutil::add_dataset(&env, "表", &[("鸡蛋(煮)", crate::testutil::EGG)]).await;
+        env.mock.push_response(crate::testutil::json_response(
+            json!({"matches": [{"food": 0, "candidate": 0}]}),
+        ));
+        let mut plan = on_target();
+        plan["meals"][0]["items"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"name": "鸡蛋", "grams": 1}));
+
+        let section = finalize(&env.ctx, date, plan).await.unwrap();
+
+        assert_eq!(section.data["meals"][0]["items"][1]["estimated"], false);
+        // One match call and no estimate.
+        assert_eq!(env.mock.received_requests().len(), 1);
     }
 }

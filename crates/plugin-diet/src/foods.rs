@@ -85,6 +85,32 @@ pub fn check_nutrition(n: &Macros) -> Result<Macros, String> {
     Ok(checked)
 }
 
+/// Character bigrams of `s`; empty for strings under 2 characters.
+pub fn bigrams(s: &str) -> Vec<(char, char)> {
+    let chars: Vec<char> = s.chars().collect();
+    if chars.len() < 2 {
+        return Vec::new();
+    }
+    chars.windows(2).map(|w| (w[0], w[1])).collect()
+}
+
+/// Dice coefficient over character bigrams: `2 * |A ∩ B| / (|A| + |B|)`, matched as a multiset.
+pub fn dice_score(a: &str, b: &str) -> f64 {
+    let (ba, bb) = (bigrams(a), bigrams(b));
+    if ba.is_empty() || bb.is_empty() {
+        return if a == b { 1.0 } else { 0.0 };
+    }
+    let mut pool = bb.clone();
+    let mut matches = 0usize;
+    for bg in &ba {
+        if let Some(pos) = pool.iter().position(|x| x == bg) {
+            pool.remove(pos);
+            matches += 1;
+        }
+    }
+    (2 * matches) as f64 / (ba.len() + bb.len()) as f64
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

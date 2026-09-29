@@ -13,7 +13,7 @@ use crate::foods::validate_per_100g;
 use crate::intake::{self, MEAL_EVENT};
 use crate::model::{ItemKind, Macros, MealItem, MealLogged, MealType};
 use crate::parser::parse_meal;
-use crate::resolver::resolve_many;
+use crate::resolver::{resolve_many, FoodQuery};
 use crate::sources::{self, SourceChain};
 
 pub fn specs() -> Vec<ToolSpec> {
@@ -167,7 +167,7 @@ async fn log_meal(ctx: &PluginContext, args: Value) -> Result<ToolOutput, Plugin
     let mut component_names = Vec::new();
     for outcome in &outcomes {
         if let DishOutcome::Unmatched(pd) = outcome {
-            component_names.extend(pd.components.iter().map(|c| c.name.clone()));
+            component_names.extend(pd.components.iter().map(|c| FoodQuery::new(c.name.clone())));
         }
     }
     let mut foods = resolve_many(ctx, &component_names).await?.into_iter();

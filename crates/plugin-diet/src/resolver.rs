@@ -1,7 +1,7 @@
 //! `FoodResolver`: the local food table first, a parser-model estimate on a miss, per
 //! `docs/PHASE1_SPEC.md` §8.2/§8.3.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use lifeagent_core::plugin::{PluginContext, PluginError};
@@ -11,8 +11,9 @@ use serde_json::json;
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 
+use crate::food_matcher::match_pending;
 use crate::foods::{check_nutrition, normalize};
-use crate::model::Macros;
+use crate::model::{Macros, SourceKind};
 use crate::prompts::FOOD_ESTIMATE;
 use crate::sources::{insert_estimate, Food, SourceChain};
 
@@ -22,44 +23,111 @@ const MAX_CONCURRENT_ESTIMATES: usize = 4;
 /// Shown to the user when a food's nutrition can't be estimated even after one re-ask (§8.3).
 pub const ESTIMATE_FAILED: &str = "无法估算该食物营养";
 
+/// A food name to resolve, with up to 2 alternate names the parser gave for the same food.
+/// `alt_names` are only search queries for the match step (`docs/FOOD_MATCHING.md` §3): never
+/// looked up exactly, stored or shown.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct FoodQuery {
+    pub name: String,
+    pub alt_names: Vec<String>,
+}
+
+impl FoodQuery {
+    /// A query by name alone.
+    pub fn new(name: impl Into<String>) -> Self {
+        FoodQuery {
+            name: name.into(),
+            alt_names: Vec::new(),
+        }
+    }
+}
+
 pub async fn resolve(ctx: &PluginContext, name: &str) -> Result<Food, PluginError> {
-    let mut foods = resolve_many(ctx, &[name.to_string()]).await?;
+    let mut foods = resolve_many(ctx, &[FoodQuery::new(name)]).await?;
     foods
         .pop()
         .ok_or_else(|| PluginError::Other("resolve_many returned no food".into()))
 }
 
-/// Resolves every name to a food, in input order, counting one use per name. Misses are
-/// estimated concurrently (at most 4 in flight) and inserted in input order; a name repeated
-/// in `names` is estimated once.
-pub async fn resolve_many(ctx: &PluginContext, names: &[String]) -> Result<Vec<Food>, PluginError> {
+/// Resolves every query to a food, in input order, counting one use per query. Per
+/// `docs/FOOD_MATCHING.md` §6: a name with no exact hit, or whose only hit is a cached estimate,
+/// first goes through one match call against the imported data; what is still missing is
+/// estimated concurrently (at most 4 in flight) and inserted in input order. A name repeated in
+/// `queries` is matched and estimated once.
+pub async fn resolve_many(
+    ctx: &PluginContext,
+    queries: &[FoodQuery],
+) -> Result<Vec<Food>, PluginError> {
     let chain = SourceChain::load(ctx).await?;
 
-    let mut misses = Vec::new();
-    let mut seen_keys = HashSet::new();
-    for name in names {
-        let key = normalize(name);
+    // Steps 1-2: exact hits from `manual` or a dataset are done. Everything else is pending,
+    // once per key, with the alternate names of every occurrence.
+    let mut pending: Vec<FoodQuery> = Vec::new();
+    let mut pending_index: HashMap<String, usize> = HashMap::new();
+    let mut settled: HashSet<String> = HashSet::new();
+    for query in queries {
+        let key = normalize(&query.name);
         if key.is_empty() {
             return Err(PluginError::InvalidArgs(
                 "food name must not be empty".into(),
             ));
         }
-        if chain.lookup(name).await?.is_none() && seen_keys.insert(key) {
-            misses.push(name.trim().to_string());
+        if let Some(&i) = pending_index.get(&key) {
+            for alt in &query.alt_names {
+                if !pending[i].alt_names.contains(alt) {
+                    pending[i].alt_names.push(alt.clone());
+                }
+            }
+            continue;
+        }
+        if settled.contains(&key) {
+            continue;
+        }
+        match chain.lookup(&query.name).await? {
+            Some(food) if food.source_kind != SourceKind::LlmEstimate => {
+                settled.insert(key);
+            }
+            _ => {
+                pending_index.insert(key, pending.len());
+                pending.push(FoodQuery {
+                    name: query.name.trim().to_string(),
+                    alt_names: query.alt_names.clone(),
+                });
+            }
         }
     }
 
+    // Steps 3-5. Runs before any estimate, so a matched name never costs an estimate call.
+    let picked = if pending.is_empty() {
+        HashMap::new()
+    } else {
+        let refs: Vec<&FoodQuery> = pending.iter().collect();
+        match_pending(ctx, &chain, &refs).await?
+    };
+
+    // Step 6: what is still a miss is estimated.
+    let mut misses = Vec::new();
+    for query in &pending {
+        if !picked.contains_key(&normalize(&query.name))
+            && chain.lookup(&query.name).await?.is_none()
+        {
+            misses.push(query.name.clone());
+        }
+    }
     let estimates = estimate_all(ctx, &misses).await?;
     for (name, per_100g) in misses.iter().zip(estimates) {
         insert_estimate(ctx, name, per_100g).await?;
     }
 
-    let mut foods = Vec::with_capacity(names.len());
-    for name in names {
-        let food = chain
-            .lookup(name)
-            .await?
-            .ok_or_else(|| PluginError::Other(format!("food {name:?} missing after insert")))?;
+    // Step 7.
+    let mut foods = Vec::with_capacity(queries.len());
+    for query in queries {
+        let food = match picked.get(&normalize(&query.name)) {
+            Some(food) => food.clone(),
+            None => chain.lookup(&query.name).await?.ok_or_else(|| {
+                PluginError::Other(format!("food {:?} missing after insert", query.name))
+            })?,
+        };
         chain.record_use(&food).await?;
         foods.push(food);
     }
@@ -189,7 +257,7 @@ mod tests {
         let env = env().await;
         env.mock.push_closure(estimate_responder);
         env.mock.push_closure(estimate_responder);
-        let names: Vec<String> = ["熟米饭", "鸡蛋", "熟米饭"].map(String::from).to_vec();
+        let names: Vec<FoodQuery> = ["熟米饭", "鸡蛋", "熟米饭"].map(FoodQuery::new).to_vec();
 
         let foods = resolve_many(&env.ctx, &names).await.unwrap();
 

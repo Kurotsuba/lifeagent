@@ -68,6 +68,27 @@ chosen candidate, copied exactly (or null).
 
 Pending dishes: {pending_dishes}"#;
 
+/// `docs/FOOD_MATCHING.md` §5 — role Parser, JSON. Placeholder: `{pending_foods}`. Runs once per
+/// `resolve_many`, listing every food name that missed the exact lookup and has candidates.
+pub const FOOD_MATCH: &str = r#"For each pending food, choose which of its candidates is the same food in the same state, or
+null if none of them is. Each candidate is {"index": number, "name": string}.
+
+Rules:
+- Choose a candidate only if it is the same food in the same state. Raw/dry vs cooked is a
+  different food: "大米(生)" is not "熟米饭", and raw "牛肉(瘦)" is not "牛肉(熟)", because the
+  per-100 g values differ a lot. A candidate with no stated state counts as the table's usual
+  form, which is raw for meat, grains and vegetables in a food composition table.
+- A more specific variety of the same food is fine: "稻米饭(蒸)" for "熟米饭". A different food
+  that merely shares characters is not: "米粉" for "米饭".
+- When unsure, answer null. An estimate is better than a wrong row.
+- Copy the candidate's "index" value exactly. Never invent an index.
+
+Return JSON: {"matches": [{"food": number, "candidate": number|null}, ...]}, one entry per
+pending food: "food" is the pending food's own "food" value, and "candidate" is the "index"
+value of the chosen candidate, copied exactly (or null).
+
+Pending foods: {pending_foods}"#;
+
 /// §9.3 — role Parser, JSON. Placeholder: `{name}`.
 pub const FOOD_ESTIMATE: &str = r#"Give typical nutrition values per 100 g of the edible portion of this food, as eaten
 (cooked if it is normally eaten cooked). If the name states a state such as 干, 生 or 熟, give

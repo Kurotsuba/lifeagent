@@ -1911,3 +1911,38 @@ cause is `docs/NUTRITION_SOURCES.md` §9's known limit: matching is exact, and t
   meat and grains in raw-ingredient tables, but it's correct.
 - **No settings toggle**, since the cost is bounded. `diet_remove_alias` is added so a wrong
   match can be undone.
+
+## 2026-09-29 — `docs/FOOD_MATCHING.md` stage 1: matching core
+
+Implemented stage 1 of §11: migration 4 (`diet_food_match_checks`, `diet_name_aliases.origin`),
+the similarity move to `foods.rs`, `food_matcher.rs`, the resolver integration and `FoodQuery`
+(callers pass empty `alt_names` for now). Every test in §10 except the `alt_names` ones and
+`diet_remove_alias` (stages 2 and 3) has a matching test.
+
+Decisions not spelled out in the design:
+
+- **An explicit user alias is never overridden by matching.** §6 step 2 only skips names whose
+  hit is `manual` or a dataset, so a user alias pointing at a cached estimate (`卤蛋 → 卤鸡蛋`,
+  where `卤鸡蛋` is an estimate) would otherwise get matched and silently replaced by a `match`
+  alias. Names with an `origin = 'user'` redirect skip steps 3–5 and use the redirect as before.
+  A `match` alias, or a user alias whose target is gone, can still be matched again.
+- **A wrong-shaped answer is a failed call; an array that leaves some names out is not.** `matches`
+  is a required field, so `{}` or unrelated JSON fails to deserialize and records nothing (§6
+  step 5, "Failed call"). A valid array that omits a name, or gives an out-of-range index, counts
+  as `null` for that name only (§5). §5's "a wrong-shaped answer counts as `null` for every name"
+  and §6's "record nothing on a failed call" disagree; §10's Failure test settles it as "records
+  no check", so that is what runs.
+- **A pick is used for the meal even when it can't be stored** (§6.2's "target is itself an alias
+  key"). The matcher returns the picked `Food` and the resolver uses it before doing a lookup,
+  since a lookup would redirect the name again.
+- **A single-character query finds rows by character**, not by bigram (§4 says a short string is
+  its own token, but `梨` would then never find `梨(平均)`, which §10 requires). Scoring for
+  strings under 2 characters is Dice over characters instead of bigrams. `dice_score` itself is
+  unchanged, since the dish pick relies on it.
+- **Freshness compares parsed instants**, not strings, so a fractional-second stamp and a whole-
+  second one order correctly.
+- **`lookup_direct`** on `SourceChain` is `pub(crate)`: a chain walk with no alias redirect.
+- **Shared test helpers** `add_dataset` and `touch_dataset` in `lib.rs`'s `testutil`.
+- **`cargo clippy`/`test --workspace` were run with `--exclude lifeagent-desktop`** in this
+  container, which has no GTK development packages. Nothing in the desktop crate calls the
+  resolver.

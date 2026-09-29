@@ -7,6 +7,7 @@
 //! `docs/PHASE1_SPEC.md` §8.
 
 pub mod dish_resolver;
+pub mod food_matcher;
 pub mod foods;
 pub mod import;
 pub mod intake;
@@ -51,6 +52,10 @@ impl Plugin for DietPlugin {
                 PluginMigration {
                     version: 3,
                     sql: sources::MIGRATION_3,
+                },
+                PluginMigration {
+                    version: 4,
+                    sql: sources::MIGRATION_4,
                 },
             ],
         }
@@ -106,6 +111,7 @@ impl Plugin for DietPlugin {
 #[cfg(test)]
 pub(crate) mod testutil {
     use chrono::{Local, NaiveDate, TimeZone, Utc};
+    use lifeagent_core::clock::Clock;
     use lifeagent_core::events::EventSource;
     use lifeagent_core::goals::{GoalDirection, WeightGoal};
     use lifeagent_core::plugin::{apply_migrations, Plugin, PluginContext};
@@ -173,6 +179,66 @@ pub(crate) mod testutil {
             "kcal": m.kcal, "protein_g": m.protein_g, "carbs_g": m.carbs_g,
             "fat_g": m.fat_g, "fiber_g": m.fiber_g
         })))
+    }
+
+    /// Creates an enabled dataset source at the lowest priority so far, holding `foods`, and
+    /// returns its id. Rows are inserted directly, so a test needs no import file.
+    pub async fn add_dataset(env: &TestEnv, name: &str, foods: &[(&str, Macros)]) -> String {
+        let id = uuid::Uuid::now_v7().to_string();
+        let now = env.clock.now().to_rfc3339();
+        let priority: (i64,) = sqlx::query_as(
+            "SELECT COALESCE(MAX(priority), 0) + 1 FROM diet_food_sources WHERE kind = 'dataset'",
+        )
+        .fetch_one(&env.ctx.db)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO diet_food_sources
+                (id, kind, name, priority, enabled, origin_json, created_at, updated_at)
+             VALUES (?, 'dataset', ?, ?, 1, '{}', ?, ?)",
+        )
+        .bind(&id)
+        .bind(name)
+        .bind(priority.0)
+        .bind(&now)
+        .bind(&now)
+        .execute(&env.ctx.db)
+        .await
+        .unwrap();
+        for (food, m) in foods {
+            sqlx::query(
+                "INSERT INTO diet_foods
+                    (id, source_id, name, name_key, kcal, protein_g, carbs_g, fat_g, fiber_g,
+                     use_count, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
+            )
+            .bind(uuid::Uuid::now_v7().to_string())
+            .bind(&id)
+            .bind(*food)
+            .bind(crate::foods::normalize(food))
+            .bind(m.kcal)
+            .bind(m.protein_g)
+            .bind(m.carbs_g)
+            .bind(m.fat_g)
+            .bind(m.fiber_g)
+            .bind(&now)
+            .bind(&now)
+            .execute(&env.ctx.db)
+            .await
+            .unwrap();
+        }
+        id
+    }
+
+    /// Bumps a dataset's `updated_at` to the clock's "now", as an import, replace, enable or
+    /// reorder does.
+    pub async fn touch_dataset(env: &TestEnv, id: &str) {
+        sqlx::query("UPDATE diet_food_sources SET updated_at = ? WHERE id = ?")
+            .bind(env.clock.now().to_rfc3339())
+            .bind(id)
+            .execute(&env.ctx.db)
+            .await
+            .unwrap();
     }
 
     /// A fixed local date at `hour:minute`, as a UTC instant.

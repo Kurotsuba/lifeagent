@@ -7,7 +7,7 @@ use lifeagent_llm::types::{Message, Role};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::foods::normalize;
+use crate::foods::{dice_score, normalize};
 use crate::model::Dish;
 use crate::parser::ParsedDish;
 use crate::prompts::DISH_PICK;
@@ -185,31 +185,6 @@ fn rank_candidates(candidates: Vec<Dish>, query: &str) -> Vec<Dish> {
         .take(MAX_CANDIDATES)
         .map(|(_, _, d)| d)
         .collect()
-}
-
-fn bigrams(s: &str) -> Vec<(char, char)> {
-    let chars: Vec<char> = s.chars().collect();
-    if chars.len() < 2 {
-        return Vec::new();
-    }
-    chars.windows(2).map(|w| (w[0], w[1])).collect()
-}
-
-/// Dice coefficient over character bigrams: `2 * |A ∩ B| / (|A| + |B|)`, matched as a multiset.
-fn dice_score(a: &str, b: &str) -> f64 {
-    let (ba, bb) = (bigrams(a), bigrams(b));
-    if ba.is_empty() || bb.is_empty() {
-        return if a == b { 1.0 } else { 0.0 };
-    }
-    let mut pool = bb.clone();
-    let mut matches = 0usize;
-    for bg in &ba {
-        if let Some(pos) = pool.iter().position(|x| x == bg) {
-            pool.remove(pos);
-            matches += 1;
-        }
-    }
-    (2 * matches) as f64 / (ba.len() + bb.len()) as f64
 }
 
 #[derive(Deserialize)]
