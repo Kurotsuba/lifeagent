@@ -329,7 +329,10 @@ async fn foods(app: &CoreApp, action: FoodsAction) -> Result<()> {
             let foods = sources::lookup_all(&ctx, &name).await?;
             let dishes =
                 sources::lookup_dish_all(&ctx, brand.as_deref().unwrap_or(""), &name).await?;
-            print_json(&serde_json::json!({ "foods": foods, "dishes": dishes }))
+            let redirect = sources::lookup_redirect(&ctx, &name).await?;
+            print_json(
+                &serde_json::json!({ "foods": foods, "dishes": dishes, "redirect": redirect }),
+            )
         }
         FoodsAction::Sources => print_json(&sources::list_sources(&ctx).await?),
         FoodsAction::Import {

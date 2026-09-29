@@ -1,7 +1,8 @@
 # Design: matching food names against imported datasets
 
-Status: **proposed 2026-09-28**. Written against branch `phase1` with `docs/DISH_NUTRITION.md`
-fully implemented. Replaces mitigation 3 of `docs/NUTRITION_SOURCES.md` §9 (the FTS5 trigram
+Status: **implemented 2026-09-29** (all three stages of §11). Written 2026-09-28 against branch
+`phase1` with `docs/DISH_NUTRITION.md` fully implemented. Deviations made while implementing it
+are recorded in `docs/DECISIONS.md`'s 2026-09-29 entries. Replaces mitigation 3 of `docs/NUTRITION_SOURCES.md` §9 (the FTS5 trigram
 candidate step, never built) and extends that document's §5 (resolution) and §7.3 (user
 aliases). Where they disagree, this document describes the new behavior.
 

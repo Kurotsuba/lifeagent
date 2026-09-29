@@ -1012,6 +1012,56 @@ pub async fn add_user_alias(
     Ok((food, alias_key))
 }
 
+/// A stored name redirect from `diet_name_aliases`, for `foods lookup`
+/// (`docs/FOOD_MATCHING.md` §7).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Redirect {
+    pub alias: String,
+    pub target: String,
+    /// `"user"` (`diet_add_alias`, or a migrated Phase 1 alias) or `"match"` (a picked dataset
+    /// row, `docs/FOOD_MATCHING.md` §6.2).
+    pub origin: String,
+}
+
+/// The redirect stored for `name`, if any.
+pub async fn lookup_redirect(
+    ctx: &PluginContext,
+    name: &str,
+) -> Result<Option<Redirect>, PluginError> {
+    let key = normalize(name);
+    let row: Option<(String, String)> =
+        sqlx::query_as("SELECT target_key, origin FROM diet_name_aliases WHERE alias_key = ?")
+            .bind(&key)
+            .fetch_optional(&ctx.db)
+            .await?;
+    Ok(row.map(|(target, origin)| Redirect {
+        alias: key,
+        target,
+        origin,
+    }))
+}
+
+/// `diet_remove_alias` (`docs/FOOD_MATCHING.md` §7): deletes the redirect for `alias`, whatever
+/// its origin, and records a match check for that key so the next meal doesn't pick the same
+/// row again until a dataset changes. Returns the normalized alias key. `NotFound` when there is
+/// no such redirect.
+pub async fn remove_alias(ctx: &PluginContext, alias: &str) -> Result<String, PluginError> {
+    let key = normalize(alias);
+    if key.is_empty() {
+        return Err(PluginError::InvalidArgs("alias must not be empty".into()));
+    }
+    let deleted = sqlx::query("DELETE FROM diet_name_aliases WHERE alias_key = ?")
+        .bind(&key)
+        .execute(&ctx.db)
+        .await?
+        .rows_affected();
+    if deleted == 0 {
+        return Err(PluginError::NotFound(format!("alias {alias:?}")));
+    }
+    crate::food_matcher::record_check(ctx, &key).await?;
+    Ok(key)
+}
+
 // ---- Source management (§7.1) ------------------------------------------------------------------
 
 async fn fetch_source_info(db: &SqlitePool, id: &str) -> Result<SourceInfo, PluginError> {

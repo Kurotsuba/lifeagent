@@ -106,6 +106,19 @@ pub fn specs() -> Vec<ToolSpec> {
             }),
         },
         ToolSpec {
+            name: "diet_remove_alias".into(),
+            description: "Remove a name redirect, so that name is looked up on its own again \
+                (and estimated if it is not in the food table). Use when the user says a food \
+                was matched to the wrong entry, e.g. '熟米饭不是那个稻米饭(蒸)，按估算算'. The \
+                name is not matched to a table entry again until the imported food data changes."
+                .into(),
+            parameters: json!({
+                "type": "object",
+                "required": ["alias"],
+                "properties": { "alias": {"type": "string"} }
+            }),
+        },
+        ToolSpec {
             name: "diet_add_alias".into(),
             description: "Add another name for a food already in the food table (e.g. \
                 '卤蛋' for '卤鸡蛋'), so meals that use that name match it."
@@ -129,6 +142,7 @@ pub async fn call(ctx: &PluginContext, name: &str, args: Value) -> Result<ToolOu
         "diet_update_food" => update_food(ctx, args).await,
         "diet_update_dish" => update_dish(ctx, args).await,
         "diet_add_alias" => add_alias(ctx, args).await,
+        "diet_remove_alias" => remove_alias(ctx, args).await,
         other => Err(PluginError::NotFound(format!(
             "unknown diet tool {other:?}"
         ))),
@@ -384,6 +398,20 @@ async fn add_alias(ctx: &PluginContext, args: Value) -> Result<ToolOutput, Plugi
     Ok(ToolOutput {
         content: json!({ "food_id": food.id, "name": food.name, "alias": alias }),
         summary: format!("已添加别名：{} → {}", args.alias.trim(), food.name),
+    })
+}
+
+#[derive(Deserialize)]
+struct RemoveAliasArgs {
+    alias: String,
+}
+
+async fn remove_alias(ctx: &PluginContext, args: Value) -> Result<ToolOutput, PluginError> {
+    let args: RemoveAliasArgs = parse_args(args)?;
+    let alias = sources::remove_alias(ctx, &args.alias).await?;
+    Ok(ToolOutput {
+        content: json!({ "alias": alias }),
+        summary: format!("已移除别名：{}", args.alias.trim()),
     })
 }
 
@@ -678,5 +706,73 @@ mod tests {
             .await
             .unwrap()
             .is_some());
+    }
+
+    #[tokio::test]
+    async fn remove_alias_undoes_a_wrong_match_and_stops_it_coming_back() {
+        let env = env().await;
+        crate::testutil::add_dataset(&env, "表", &[("稻米饭(蒸)", RICE)]).await;
+        env.mock.push_response(json_response(
+            json!({"matches": [{"food": 0, "candidate": 0}]}),
+        ));
+        crate::resolver::resolve(&env.ctx, "熟米饭").await.unwrap();
+        assert_eq!(env.mock.received_requests().len(), 1);
+        assert_eq!(
+            sources::lookup_redirect(&env.ctx, "熟米饭")
+                .await
+                .unwrap()
+                .map(|r| (r.target, r.origin)),
+            Some(("稻米饭(蒸)".into(), "match".into()))
+        );
+
+        let out = call(&env.ctx, "diet_remove_alias", json!({"alias": " 熟米饭。"}))
+            .await
+            .unwrap();
+        assert_eq!(out.content["alias"], "熟米饭");
+        assert_eq!(out.summary, "已移除别名：熟米饭。");
+        assert!(sources::lookup_redirect(&env.ctx, "熟米饭")
+            .await
+            .unwrap()
+            .is_none());
+
+        // The name is estimated now, and the same row is not matched again: one estimate
+        // request, no second match request.
+        env.mock.push_closure(estimate_responder);
+        let food = crate::resolver::resolve(&env.ctx, "熟米饭").await.unwrap();
+        assert_eq!(food.source_kind, crate::model::SourceKind::LlmEstimate);
+        assert_eq!(env.mock.received_requests().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn remove_alias_removes_a_user_alias_too_and_rejects_unknown_names() {
+        let env = env().await;
+        upsert_manual_food(&env.ctx, "卤鸡蛋", EGG).await.unwrap();
+        call(
+            &env.ctx,
+            "diet_add_alias",
+            json!({"food_name": "卤鸡蛋", "alias": "卤蛋"}),
+        )
+        .await
+        .unwrap();
+
+        call(&env.ctx, "diet_remove_alias", json!({"alias": "卤蛋"}))
+            .await
+            .unwrap();
+
+        assert!(SourceChain::load(&env.ctx)
+            .await
+            .unwrap()
+            .lookup("卤蛋")
+            .await
+            .unwrap()
+            .is_none());
+        assert!(matches!(
+            call(&env.ctx, "diet_remove_alias", json!({"alias": "卤蛋"})).await,
+            Err(PluginError::NotFound(_))
+        ));
+        assert!(matches!(
+            call(&env.ctx, "diet_remove_alias", json!({"alias": "  "})).await,
+            Err(PluginError::InvalidArgs(_))
+        ));
     }
 }

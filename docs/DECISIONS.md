@@ -1963,3 +1963,31 @@ parse), `validate_dishes` cleans them, `MEAL_PARSER` describes them with §3's w
   two dishes, one with `alt_names`, searches with them for both.
 - **Nothing in the meal record changes.** `alt_names` are not part of `MealItem`, the
   `diet.meal_logged` payload or any tool result.
+
+## 2026-09-29 — `docs/FOOD_MATCHING.md` stage 3: undo and inspection (final stage — feature complete)
+
+Implemented exactly stage 3 of §11: the `diet_remove_alias` tool (`sources::remove_alias`) and the
+redirect in `foods lookup` (`sources::lookup_redirect`, a `redirect` key next to `foods` and
+`dishes`, `null` when there is none).
+
+- **`diet_remove_alias` takes any redirect, whatever its origin**, as §7 says, so it can also
+  remove a `diet_add_alias` alias. `NotFound` for an unknown alias, `InvalidArgs` for a blank one.
+- **Delete and check are two statements, not one transaction.** If the process died between them
+  the alias would be gone with no check recorded, so the next meal could match the same row once
+  more. That is harmless (the user can undo again), and not worth threading a transaction through
+  `record_check`.
+- **The tool result is just `{alias}`.** It doesn't report what the name resolves to afterwards,
+  since that would need a lookup that might estimate.
+- **No `diet_remove_alias` mention in the conversation system prompt.** Tool descriptions are
+  enough, the same as `diet_add_alias`.
+
+### Not verified in this container
+
+- **`lifeagent-desktop` was not built or tested.** The container has no GTK development packages
+  (`gdk-3.0.pc`), so `cargo` can't compile the Tauri crate. Nothing in it calls the resolver,
+  the parser types or `lookup_all`, and no `Food`/`MealItem` shape changed. `fmt`, `clippy -D
+  warnings` and `test` pass for every other crate (182 diet tests).
+- **No real-model check.** Whether the model picks sensible candidates for real 中国食物成分表
+  rows, and how often the state rule sends cooked meat to an estimate, needs a manual run with a
+  real key, as in the 2026-09-28 test that found the problem: import the table, log a meal, and
+  run `foods lookup` on the ingredient names to see the `match` redirects.
