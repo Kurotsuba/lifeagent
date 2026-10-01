@@ -299,6 +299,10 @@ struct StoredToolCall {
     id: String,
     name: String,
     arguments: Value,
+    /// Must be replayed to the provider with the call (Gemini thought signatures). Absent in
+    /// rows written before it existed and for providers that don't use it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    provider_extra: Option<Value>,
 }
 
 impl CoreApp {
@@ -726,6 +730,7 @@ impl CoreApp {
                 id: t.id.clone(),
                 name: t.name.clone(),
                 arguments: t.arguments.clone(),
+                provider_extra: t.provider_extra.clone(),
             })
             .collect();
         Ok(Some(serde_json::to_string(&stored)?))
@@ -753,6 +758,7 @@ impl CoreApp {
                                     id: t.id,
                                     name: t.name,
                                     arguments: t.arguments,
+                                    provider_extra: t.provider_extra,
                                 })
                                 .collect()
                         }
@@ -1113,6 +1119,7 @@ mod tests {
                 id: "call_1".into(),
                 name: "core_remember".into(),
                 arguments: serde_json::json!({"note": "不吃香菜"}),
+                provider_extra: None,
             }],
         ));
         mock.push_response(response(Some("记住啦"), vec![]));
@@ -1122,5 +1129,52 @@ mod tests {
         assert_eq!(turn.reply, "记住啦");
         assert_eq!(turn.activities, vec!["已记住：不吃香菜"]);
         assert_eq!(app.memory().list(10).await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn tool_call_provider_extra_is_persisted_and_replayed() {
+        let (builder, _dir) = builder().await;
+        let mock = Arc::new(MockChatModel::new());
+        let extra = serde_json::json!({"google": {"thought_signature": "c2ln"}});
+        mock.push_response(response(
+            None,
+            vec![ToolCall {
+                id: "call_1".into(),
+                name: "core_remember".into(),
+                arguments: serde_json::json!({"note": "不吃香菜"}),
+                provider_extra: Some(extra.clone()),
+            }],
+        ));
+        mock.push_response(response(Some("记住啦"), vec![]));
+        let app = builder
+            .chat_model_override(mock.clone())
+            .build()
+            .await
+            .unwrap();
+
+        app.send_message("我不吃香菜，记住").await.unwrap();
+
+        // The second request rebuilds history from the `messages` table.
+        let requests = mock.received_requests();
+        let replayed = requests[1]
+            .messages
+            .iter()
+            .find_map(|m| match m {
+                Message::Assistant { tool_calls, .. } if !tool_calls.is_empty() => {
+                    Some(tool_calls[0].provider_extra.clone())
+                }
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(replayed, Some(extra));
+    }
+
+    #[test]
+    fn stored_tool_calls_without_provider_extra_still_deserialize() {
+        let stored: Vec<StoredToolCall> =
+            serde_json::from_str(r#"[{"id":"c","name":"n","arguments":{}}]"#).unwrap();
+        assert_eq!(stored[0].provider_extra, None);
+        let json = serde_json::to_string(&stored).unwrap();
+        assert!(!json.contains("provider_extra"));
     }
 }

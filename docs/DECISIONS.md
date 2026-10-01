@@ -1991,3 +1991,34 @@ redirect in `foods lookup` (`sources::lookup_redirect`, a `redirect` key next to
   rows, and how often the state rule sends cooked meat to an estimate, needs a manual run with a
   real key, as in the 2026-09-28 test that found the problem: import the table, log a meal, and
   run `foods lookup` on the ingredient names to see the `match` redirects.
+
+## 2026-10-01 — Google Gemini through the OpenAI-compatible provider
+
+Gemini is supported without a new `ProviderKind`. Google's OpenAI-compatible endpoint
+(`https://generativelanguage.googleapis.com/v1beta/openai`) is used through
+`OpenAiCompatibleProvider`, so the §6.2 "two providers" scope and the UI's provider list don't
+change. A native `generateContent` provider is left for when something the compat layer can't
+express is needed. Three provider-level adjustments make the tool loop work:
+
+- **`ToolCall.provider_extra` carries Gemini's thought signature.** Gemini thinking models
+  (required for Gemini 3) attach `extra_content.google.thought_signature` to each tool call, and
+  the next request must echo it back on that call or the API returns 400. `parse_tool_call` now
+  keeps `extra_content` as an opaque `Option<Value>`, and `message_to_json` writes it back.
+  Because the orchestrator rebuilds history from the `messages` table on every step,
+  `StoredToolCall` stores it too (`serde(default, skip_serializing_if)`), so old rows still load
+  and providers that don't use it write unchanged JSON. Anthropic always sets `None`.
+- **Temperature is not sent for `gemini-3*` models.** Google recommends keeping Gemini 3 at its
+  default 1.0, warning that lower values can cause looping, and §6.3's defaults go down to 0.0
+  for the parser. Like the Anthropic `effort` denylist (2026-09-26), this is a model fact, so it
+  is handled in the provider: an explicit binding temperature is dropped as well. Gemini 2.5 and
+  other models are unchanged.
+- **A missing or empty tool-call `id` falls back to `call_{index}`** instead of failing the
+  response. The id only pairs a call with its `tool` result.
+
+`Effort` is still not mapped to `reasoning_effort` for OpenAI-compatible endpoints, because
+sending it to a non-reasoning model (DeepSeek, older GPTs) is a 400 and the accepted values
+differ between Gemini versions. Gemini models therefore run at their own default thinking level.
+
+No real-model check yet: the round trip is covered by fixture tests
+(`openai_compat::tests::gemini_*`, `app::tests::tool_call_provider_extra_is_persisted_and_replayed`).
+Run a real chat turn that calls a tool (e.g. log a meal) against a Gemini 3 model to confirm.

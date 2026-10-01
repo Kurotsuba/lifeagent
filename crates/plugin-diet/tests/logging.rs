@@ -105,6 +105,7 @@ async fn meal_logged_via_orchestrator_shows_up_in_today_view() {
             id: "call_1".into(),
             name: "diet_log_meal".into(),
             arguments: json!({"description": "午饭吃了一碗米饭和两个鸡蛋"}),
+            provider_extra: None,
         }],
     ));
     // 2. Meal parser.
@@ -170,6 +171,7 @@ async fn second_meal_with_known_foods_needs_no_estimates() {
                 id: "call".into(),
                 name: "diet_log_meal".into(),
                 arguments: json!({"description": "一碗米饭", "meal_type": "dinner"}),
+                provider_extra: None,
             }],
         )
     };

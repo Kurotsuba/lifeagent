@@ -61,14 +61,19 @@ fn message_to_json(msg: &Message) -> Value {
                     .map(|tc| {
                         let arguments = serde_json::to_string(&tc.arguments)
                             .unwrap_or_else(|_| "{}".to_string());
-                        json!({
+                        let mut call = json!({
                             "id": tc.id,
                             "type": "function",
                             "function": {
                                 "name": tc.name,
                                 "arguments": arguments,
                             }
-                        })
+                        });
+                        if let (Some(extra), Some(obj)) = (&tc.provider_extra, call.as_object_mut())
+                        {
+                            obj.insert("extra_content".into(), extra.clone());
+                        }
+                        call
                     })
                     .collect();
                 obj.insert("tool_calls".into(), json!(calls));
@@ -114,7 +119,9 @@ pub(crate) fn build_request_body(req: &ChatRequest) -> Value {
     }
 
     if let Some(temperature) = req.temperature {
-        body.insert("temperature".into(), json!(temperature));
+        if !ignores_temperature(&req.model) {
+            body.insert("temperature".into(), json!(temperature));
+        }
     }
     if let Some(max_tokens) = req.max_tokens {
         body.insert("max_tokens".into(), json!(max_tokens));
@@ -124,6 +131,18 @@ pub(crate) fn build_request_body(req: &ChatRequest) -> Value {
     }
 
     Value::Object(body)
+}
+
+/// Gemini 3 models are tuned for their default temperature (1.0); Google warns that lower
+/// values can cause looping or degraded reasoning, and the per-role defaults (§6.3) go down to
+/// 0.0. Like the Anthropic provider's `effort` denylist, this is a model fact handled here
+/// rather than in the router. Matches both `gemini-3…` and `models/gemini-3…`.
+fn ignores_temperature(model: &str) -> bool {
+    let model = model.trim().to_ascii_lowercase();
+    model
+        .strip_prefix("models/")
+        .unwrap_or(&model)
+        .starts_with("gemini-3")
 }
 
 /// Pure mapping from an OpenAI Chat Completions response body to `ChatResponse` (§6.2.1).
@@ -144,7 +163,8 @@ pub(crate) fn parse_response_body(body: &Value) -> Result<ChatResponse, LlmError
     let tool_calls = match message.get("tool_calls").and_then(|v| v.as_array()) {
         Some(arr) => arr
             .iter()
-            .map(parse_tool_call)
+            .enumerate()
+            .map(|(i, tc)| parse_tool_call(i, tc))
             .collect::<Result<Vec<_>, LlmError>>()?,
         None => Vec::new(),
     };
@@ -174,12 +194,13 @@ pub(crate) fn parse_response_body(body: &Value) -> Result<ChatResponse, LlmError
     })
 }
 
-fn parse_tool_call(tc: &Value) -> Result<ToolCall, LlmError> {
-    let id = tc
-        .get("id")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| LlmError::InvalidResponse("tool call missing id".into()))?
-        .to_string();
+/// A missing or empty `id` gets a positional fallback (`call_{index}`): some compatible
+/// endpoints omit it, and it only has to pair this call with its `tool` result message.
+fn parse_tool_call(index: usize, tc: &Value) -> Result<ToolCall, LlmError> {
+    let id = match tc.get("id").and_then(|v| v.as_str()) {
+        Some(id) if !id.is_empty() => id.to_string(),
+        _ => format!("call_{index}"),
+    };
     let function = tc
         .get("function")
         .ok_or_else(|| LlmError::InvalidResponse("tool call missing function".into()))?;
@@ -198,6 +219,7 @@ fn parse_tool_call(tc: &Value) -> Result<ToolCall, LlmError> {
         id,
         name,
         arguments,
+        provider_extra: tc.get("extra_content").filter(|v| !v.is_null()).cloned(),
     })
 }
 
@@ -233,6 +255,7 @@ mod tests {
                         id: "call_1".into(),
                         name: "log_meal".into(),
                         arguments: json!({"food": "egg"}),
+                        provider_extra: None,
                     }],
                 },
                 Message::Tool {
@@ -424,5 +447,84 @@ mod tests {
         .unwrap();
         let resp = parse_response_body(&body).unwrap();
         assert_eq!(resp.usage, Usage::default());
+    }
+
+    fn tool_call_request(model: &str, provider_extra: Option<Value>) -> ChatRequest {
+        ChatRequest {
+            model: model.into(),
+            messages: vec![Message::Assistant {
+                content: None,
+                tool_calls: vec![ToolCall {
+                    id: "call_1".into(),
+                    name: "log_meal".into(),
+                    arguments: json!({}),
+                    provider_extra,
+                }],
+            }],
+            tools: vec![],
+            temperature: Some(0.0),
+            max_tokens: None,
+            response_format: ResponseFormat::Text,
+            effort: None,
+        }
+    }
+
+    /// Fixture: Gemini's OpenAI-compatible endpoint attaching a thought signature to a call.
+    const GEMINI_TOOL_CALL_FIXTURE: &str = r#"{
+        "choices": [{
+            "message": {
+                "role": "assistant",
+                "tool_calls": [{
+                    "id": "",
+                    "type": "function",
+                    "function": {"name": "log_meal", "arguments": "{}"},
+                    "extra_content": {"google": {"thought_signature": "c2ln"}}
+                }]
+            },
+            "finish_reason": "tool_calls"
+        }]
+    }"#;
+
+    #[test]
+    fn gemini_thought_signature_round_trips_and_empty_id_gets_fallback() {
+        let body: Value = serde_json::from_str(GEMINI_TOOL_CALL_FIXTURE).unwrap();
+        let resp = parse_response_body(&body).unwrap();
+        let call = &resp.tool_calls[0];
+        assert_eq!(call.id, "call_0");
+        let extra = json!({"google": {"thought_signature": "c2ln"}});
+        assert_eq!(call.provider_extra, Some(extra.clone()));
+
+        let req = tool_call_request("gemini-2.5-flash", call.provider_extra.clone());
+        let sent = build_request_body(&req);
+        assert_eq!(sent["messages"][0]["tool_calls"][0]["extra_content"], extra);
+    }
+
+    #[test]
+    fn tool_calls_without_provider_extra_send_no_extra_content() {
+        let body: Value = serde_json::from_str(TOOL_CALL_RESPONSE_FIXTURE).unwrap();
+        assert_eq!(
+            parse_response_body(&body).unwrap().tool_calls[0].provider_extra,
+            None
+        );
+
+        let sent = build_request_body(&tool_call_request("gpt-test", None));
+        let call = sent["messages"][0]["tool_calls"][0].as_object().unwrap();
+        assert!(!call.contains_key("extra_content"));
+    }
+
+    #[test]
+    fn temperature_is_dropped_for_gemini_3_only() {
+        for model in [
+            "gemini-3-pro-preview",
+            "models/gemini-3-flash",
+            " Gemini-3-pro ",
+        ] {
+            let body = build_request_body(&tool_call_request(model, None));
+            assert!(body.get("temperature").is_none(), "{model}");
+        }
+        for model in ["gemini-2.5-flash", "gpt-test", "deepseek-chat"] {
+            let body = build_request_body(&tool_call_request(model, None));
+            assert_eq!(body["temperature"], json!(0.0), "{model}");
+        }
     }
 }

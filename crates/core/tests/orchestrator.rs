@@ -101,6 +101,7 @@ fn tool_call_response(id: &str, name: &str, arguments: Value) -> ChatResponse {
             id: id.into(),
             name: name.into(),
             arguments,
+            provider_extra: None,
         }],
         usage: Usage::default(),
         finish_reason: "tool_use".into(),

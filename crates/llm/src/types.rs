@@ -40,6 +40,10 @@ pub struct ToolCall {
     pub id: String,
     pub name: String,
     pub arguments: serde_json::Value,
+    /// Opaque provider data that must be echoed back verbatim with this call on later turns.
+    /// Currently Gemini's `extra_content` (carrying its thought signature) via the
+    /// OpenAI-compatible endpoint; `None` everywhere else.
+    pub provider_extra: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

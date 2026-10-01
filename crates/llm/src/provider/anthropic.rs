@@ -238,6 +238,7 @@ pub(crate) fn parse_response_body(body: &Value) -> Result<ChatResponse, LlmError
                     id,
                     name,
                     arguments,
+                    provider_extra: None,
                 });
             }
             _ => {}
@@ -383,6 +384,7 @@ mod tests {
                 id: "toolu_1".into(),
                 name: "resolve_food".into(),
                 arguments: json!({}),
+                provider_extra: None,
             }],
         }]);
         let body = build_request_body(&req);
@@ -399,6 +401,7 @@ mod tests {
                 id: "toolu_1".into(),
                 name: "resolve_food".into(),
                 arguments: json!({"name": "鸡蛋"}),
+                provider_extra: None,
             }],
         }]);
         let body = build_request_body(&req);
@@ -420,11 +423,13 @@ mod tests {
                         id: "toolu_1".into(),
                         name: "a".into(),
                         arguments: json!({}),
+                        provider_extra: None,
                     },
                     ToolCall {
                         id: "toolu_2".into(),
                         name: "b".into(),
                         arguments: json!({}),
+                        provider_extra: None,
                     },
                 ],
             },

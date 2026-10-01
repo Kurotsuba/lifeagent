@@ -89,6 +89,11 @@ Onboarding's model step (or Settings → 模型 later) needs, for whichever prov
   Sonnet for conversation — you can also use one model for all three roles).
 - **An OpenAI-compatible endpoint**: provider kind "OpenAI-compatible", that endpoint's base
   URL and key, and its model name(s).
+- **Google Gemini** (through its OpenAI-compatible endpoint): provider kind "OpenAI-compatible",
+  base URL `https://generativelanguage.googleapis.com/v1beta/openai`, a Google AI Studio API
+  key, and Gemini model names (e.g. `gemini-2.5-flash` for parsing, a Pro or Gemini 3 model for
+  planning and conversation). For Gemini 3 models the per-role temperature is not sent, so they
+  run at Google's recommended default.
 
 From the CLI instead, without onboarding's UI:
 
