@@ -88,7 +88,7 @@ fn setup(core_app: CoreApp) -> (tauri::App<MockRuntime>, WebviewWindow<MockRunti
             // not touch for real (see `docs/DECISIONS.md`'s M7.5 entry).
         ])
         .manage(core_app)
-        .manage(lifeagent_desktop_lib::commands::PendingImportState::default())
+        .manage(lifeagent_api::ops::PendingImportState::default())
         .build(tauri::generate_context!())
         .unwrap();
     let webview = WebviewWindowBuilder::new(&app, "main", Default::default())

@@ -27,15 +27,17 @@ Cargo.toml              # workspace
 crates/llm/             # lifeagent-llm: model abstraction, providers, router (no dependency on core)
 crates/core/            # lifeagent-core: storage, plugin API, orchestrator, planner, scheduler
 crates/plugin-diet/     # lifeagent-plugin-diet: diet tracking + diet plan section
+crates/api/             # lifeagent-api: command surface + error mapping shared by desktop and server
 crates/cli/             # lifeagent-cli: developer harness (chat, plan, inspect data)
+crates/server/          # lifeagent-server: HTTP backend for the web build (accounts, per-user apps)
 apps/desktop/src-tauri/ # Tauri 2 shell (Rust), composition root for the desktop app
 apps/desktop/ui/        # Vite + React + TypeScript, thin view layer
 docs/
 ```
 
-Dependency rule: `llm` <- `core` <- `plugin-*` <- (`cli`, `desktop`).
+Dependency rule: `llm` <- `core` <- `plugin-*` <- `api` <- (`cli`, `desktop`, `server`).
 `core` must never depend on any plugin crate. Plugins are registered in the composition roots
-(`cli` and `desktop`).
+(`cli`, `desktop` and `server`).
 
 ## Commands
 

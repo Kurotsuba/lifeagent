@@ -102,11 +102,18 @@ Cloud Scheduler --> POST /api/internal/tick (replaces the in-process scheduler l
 - **One container for frontend and API:** one URL, no CORS, one deploy.
 - **Scheduler:** `crates/core/src/scheduler.rs` runs a loop inside the process. Cloud Run only
   gives an instance CPU while it handles a request and scales to zero, so the next-day plan
-  and proactive follow-ups would silently stop. Fix: Cloud Scheduler calls an internal
-  endpoint every few minutes (OIDC-authenticated), and the handler runs one tick of the
-  existing logic. This also fits the theme, because every autonomous action becomes an
+  and proactive follow-ups would silently stop. Fix: Cloud Scheduler calls
+  `/api/internal/tick` every few minutes with a shared secret (`X-LifeAgent-Tick-Token`,
+  from `LIFEAGENT_TICK_TOKEN`), and the handler runs one tick of the existing logic for every
+  user (implemented 2026-10-02; a shared secret rather than OIDC, see `docs/DECISIONS.md`). This also fits the theme, because every autonomous action becomes an
   auditable request. Fallback: `--min-instances=1 --no-cpu-throttling` and keep the loop, at
   the cost of an always-on instance.
+- **One instance (`--max-instances=1`) for the demo.** Each instance caches its own
+  `CoreApp` per user, and a user's live event stream (`/api/events`) only sees changes made
+  through the same instance. Login rate limits are per instance too.
+- **Time zone:** core computes logical dates and `plan_time` in the server's local time zone
+  (chrono `Local`), and Cloud Run runs in UTC. Set `TZ=Asia/Tokyo` on the service. Per-user
+  time zones are not supported.
 - **Gemini:** called as the Cloud Run service account (`roles/aiplatform.user`), with tokens
   from the metadata server. No key anywhere. See §2.
 - **DB password:** in Secret Manager, exposed with `--set-secrets DB_PASSWORD=...`. Never in
@@ -220,8 +227,11 @@ $10/month). New GCP accounts get trial credit. Stop or delete the instance after
    local Postgres, one schema per test (see the 2026-10-02 entries in `docs/DECISIONS.md`).
 2. **Per-user schemas in core** (done 2026-10-02): `DbConfig::tenant`, `db::open` provisioning
    the role and schema, `db::destroy`, isolation tests.
-3. **Add `crates/server`** (axum), mirroring the Tauri commands as HTTP endpoints, plus the
-   `auth` schema, register/login/logout, session extractor and per-user `CoreApp` cache.
+3. **Add `crates/server`** (done 2026-10-02): axum, `POST /api/{command}` mirroring the Tauri
+   commands through the shared `lifeagent-api` crate, the `auth` schema,
+   register/login/logout/delete-account, session extractor, per-user `CoreApp` cache, SSE
+   events, the tick endpoint. Run locally with
+   `LIFEAGENT_MOCK_LLM=1 cargo run -p lifeagent-server` (see README).
 4. **Switch the React UI** from Tauri `invoke` to `fetch`, and add register and login pages
    and a logout button.
 5. **Deploy:** multi-stage Dockerfile (Rust build, Vite build, slim runtime image), Cloud SQL,
@@ -252,8 +262,8 @@ Menu names may differ slightly; the console search bar finds each page by name.
    Cloud Run supplies credentials.
    - `lifeagent-run`, the app's runtime identity: **Vertex AI User**
      (`roles/aiplatform.user`), **Cloud SQL Client**, **Secret Manager Secret Accessor**.
-   - `lifeagent-scheduler`, used by Cloud Scheduler: no roles yet. After the first deploy,
-     grant **Cloud Run Invoker** on the service only.
+   - No separate scheduler account: Cloud Scheduler authenticates to `/api/internal/tick`
+     with a shared secret header (step 9), not with a Google identity.
 5. **Artifact Registry:** a Docker repository `lifeagent` in `asia-northeast1`.
 6. **Gemini quota (optional):** **IAM & Admin → Quotas & system limits**, lower the Gemini
    quotas for the models in use. A hard limit on top of the budget alert and the per-user
@@ -270,15 +280,16 @@ Menu names may differ slightly; the console search bar finds each page by name.
      Users created this way are in `cloudsqlsuperuser` and have `CREATEROLE`, which
      registration needs. On Postgres 16+, registration must grant itself the new role
      explicitly: `GRANT u_<id> TO lifeagent_app WITH INHERIT FALSE, SET TRUE`.
-8. **Secret Manager:** secret `db-password` with the `lifeagent_app` password (the only
-   secret).
+8. **Secret Manager:** secret `db-password` with the `lifeagent_app` password, and
+   `tick-token` with a long random string (e.g. `openssl rand -hex 32`) for the scheduler.
 9. **After the first deploy.**
    - **Cloud Run:** confirm the service runs as `lifeagent-run`, has the Cloud SQL connection,
-     maps `db-password` to an env var, allows unauthenticated access (the app has its own
-     login), and has max instances 2.
+     maps the secrets to env vars (`LIFEAGENT_DATABASE_URL` built with `db-password`,
+     `LIFEAGENT_TICK_TOKEN` from `tick-token`), sets `TZ=Asia/Tokyo`, allows unauthenticated
+     access (the app has its own login), and has max instances 1.
    - **Cloud Scheduler:** POST to `<service URL>/api/internal/tick` every 5 minutes, auth
-     header **OIDC token** as `lifeagent-scheduler`. The server also verifies that token,
-     since the service itself is public.
+     **None**, with header `X-LifeAgent-Tick-Token: <tick-token value>`. The server checks
+     it, since the service itself is public.
 
 ### 2. Make Gemini real
 

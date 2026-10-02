@@ -86,6 +86,23 @@ role `lifeagent`, databases `lifeagent_dev` and `lifeagent_test`) is described i
 `--mock` swaps in a `MockChatModel` that just echoes input, for smoke-testing plumbing without
 an API key or network access — it will not produce a real reply, meal parse or plan.
 
+**Web server** (the hackathon's Cloud Run build, `docs/HACKATHON.md` §1): accounts with
+per-user Postgres schemas, and the same commands as the desktop as `POST /api/{command}`
+(JSON arguments, snake_case). Locally, with the echo model and no UI:
+
+```
+LIFEAGENT_MOCK_LLM=1 cargo run -p lifeagent-server        # http://localhost:8080
+curl -c jar -H 'content-type: application/json' \
+  -d '{"username":"me","password":"password123"}' localhost:8080/api/auth/register
+curl -b jar -H 'content-type: application/json' -d '{"text":"你好"}' localhost:8080/api/send_message
+```
+
+Configuration is all environment variables (`crates/server/src/config.rs`):
+`LIFEAGENT_DATABASE_URL` (its role needs `CREATEROLE`), `LIFEAGENT_MODELS` (models config JSON,
+keys in `LIFEAGENT_KEY_<PROVIDER_ID>`) or `LIFEAGENT_MOCK_LLM=1`, `LIFEAGENT_STATIC_DIR` (built
+UI to serve), `LIFEAGENT_TICK_TOKEN` (enables `/api/internal/tick`),
+`LIFEAGENT_INPROCESS_SCHEDULER=1`, `LIFEAGENT_INVITE_CODE`, `PORT`.
+
 ### Configuring a model provider
 
 Onboarding's model step (or Settings → 模型 later) needs, for whichever provider you use:
@@ -149,14 +166,16 @@ Cargo.toml              # workspace
 crates/llm/              lifeagent-llm: model abstraction, providers, router
 crates/core/             lifeagent-core: storage, plugin API, orchestrator, planner, scheduler
 crates/plugin-diet/      lifeagent-plugin-diet: diet tracking + diet plan section
+crates/api/              lifeagent-api: command surface + error mapping shared by desktop and server
 crates/cli/              lifeagent-cli: developer harness (chat, plan, inspect data)
+crates/server/           lifeagent-server: HTTP backend for the web build (accounts, per-user apps)
 apps/desktop/src-tauri/  Tauri 2 shell (Rust), composition root for the desktop app
 apps/desktop/ui/         Vite + React + TypeScript, thin view layer
 docs/                    ARCHITECTURE.md, PHASE1_SPEC.md, DECISIONS.md, ...
 ```
 
-Dependency rule: `llm` <- `core` <- `plugin-*` <- (`cli`, `desktop`). `core` never depends on
-any plugin crate.
+Dependency rule: `llm` <- `core` <- `plugin-*` <- `api` <- (`cli`, `desktop`, `server`).
+`core` never depends on any plugin crate.
 
 ## Troubleshooting
 

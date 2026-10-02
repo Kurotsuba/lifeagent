@@ -7,7 +7,6 @@ use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 
-use crate::commands;
 use crate::error::CommandError;
 use crate::notify;
 
@@ -111,13 +110,13 @@ fn open_quick_entry(app: &AppHandle) {
 }
 
 /// Runs `CoreApp::generate_plan` directly (not via the command/IPC layer, since this click
-/// didn't come from the webview) for tomorrow's date, reusing `commands::resolve_plan_date`'s
+/// didn't come from the webview) for tomorrow's date, reusing `ops::resolve_plan_date`'s
 /// same "no date given -> tomorrow" default so this matches what Today's own 立即生成 button
 /// does. The outcome is reported as a toast (`notify::show_tray_plan_result`), since the main
 /// window is typically hidden when the tray menu is used.
 fn generate_tomorrow_plan(app: AppHandle, core_app: CoreApp) {
     tauri::async_runtime::spawn(async move {
-        let result = match commands::resolve_plan_date(&core_app, None).await {
+        let result = match lifeagent_api::ops::resolve_plan_date(&core_app, None).await {
             Ok(date) => core_app
                 .generate_plan(date, PlanTrigger::Manual)
                 .await

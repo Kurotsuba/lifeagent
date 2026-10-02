@@ -1,10 +1,11 @@
-//! `CommandError`: the error type every Tauri command returns, per
-//! `docs/PHASE1_SPEC.md` §10.2 (`CommandError { code, message }`, message already in zh-CN).
+//! `CommandError`: the error type every command returns, per `docs/PHASE1_SPEC.md` §10.2
+//! (`CommandError { code, message }`, message already in zh-CN). Tauri commands return it as
+//! is; the web server sends it as the JSON body of an error response.
 //!
 //! `code` always comes from `CoreError::code()`/`LlmError::code()` (`crates/core`,
 //! `crates/llm`), the same classification the scheduler attaches to a scheduled
-//! `AppEvent::PlanFailed` (`notify.rs`), so the two surfaces can't drift on what counts as, say,
-//! an auth failure. `CoreError::Validation`'s free-form English detail (db/format-invariant
+//! `AppEvent::PlanFailed` (the desktop's `notify.rs`), so the two surfaces can't drift on what
+//! counts as, say, an auth failure. `CoreError::Validation`'s free-form English detail (db/format-invariant
 //! failures, not something a user's own input caused) still gets one generic zh-CN message;
 //! `CoreError::InvalidInput`'s named `ValidationRule`s each get their own, precise wording
 //! (`invalid_input_message`), per `docs/PHASE1_SPEC.md` §14 M8: "Error messages in zh-CN for
@@ -24,7 +25,7 @@ pub struct CommandError {
 }
 
 impl CommandError {
-    fn new(code: &str, message: impl Into<String>) -> Self {
+    pub fn new(code: &str, message: impl Into<String>) -> Self {
         Self {
             code: code.to_string(),
             message: message.into(),

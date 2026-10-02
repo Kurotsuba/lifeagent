@@ -4,7 +4,9 @@ members = [
     "crates/llm",
     "crates/core",
     "crates/plugin-diet",
+    "crates/api",
     "crates/cli",
+    "crates/server",
     "apps/desktop/src-tauri",
 ]
 
@@ -36,3 +38,4 @@ rpassword = "7"
 lifeagent-llm = { path = "crates/llm" }
 lifeagent-core = { path = "crates/core" }
 lifeagent-plugin-diet = { path = "crates/plugin-diet" }
+lifeagent-api = { path = "crates/api" }

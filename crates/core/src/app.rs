@@ -5,7 +5,7 @@
 //! and is added incrementally rather than stubbed out here.
 
 use std::collections::{BTreeMap, HashMap};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, OnceLock, RwLock};
 
 use chrono::{DateTime, Datelike, Local, NaiveDate, NaiveDateTime, NaiveTime, Utc};
 use lifeagent_llm::router::{
@@ -86,6 +86,7 @@ pub struct CoreAppBuilder {
     secrets: Arc<dyn SecretStore>,
     plugins: Vec<Arc<dyn Plugin>>,
     chat_model_override: Option<Arc<dyn ChatModel>>,
+    fixed_models: Option<ModelsConfig>,
 }
 
 impl CoreAppBuilder {
@@ -96,6 +97,7 @@ impl CoreAppBuilder {
             secrets: Arc::new(KeyringSecretStore),
             plugins: Vec::new(),
             chat_model_override: None,
+            fixed_models: None,
         }
     }
 
@@ -112,6 +114,14 @@ impl CoreAppBuilder {
 
     pub fn plugin(mut self, p: Arc<dyn Plugin>) -> Self {
         self.plugins.push(p);
+        self
+    }
+
+    /// Uses `config` instead of the `models` setting, for this build and every
+    /// `reload_models`: the web server's models are set by the operator for all users, who
+    /// never configure their own (`docs/HACKATHON.md` §2). Keys still come from `secrets`.
+    pub fn models(mut self, config: ModelsConfig) -> Self {
+        self.fixed_models = Some(config);
         self
     }
 
@@ -147,6 +157,7 @@ impl CoreAppBuilder {
             clock: self.clock,
             settings,
             secrets: self.secrets,
+            fixed_models: self.fixed_models,
             router_state: RwLock::new(Arc::new(RouterState {
                 router,
                 models_configured,
@@ -161,6 +172,7 @@ impl CoreAppBuilder {
             plugins: self.plugins,
             registry,
             send_lock: Mutex::new(()),
+            dispatcher: OnceLock::new(),
         }));
         app.spawn_dispatcher();
         Ok(app)
@@ -201,7 +213,13 @@ impl CoreAppBuilder {
             return Ok((Arc::new(router), true));
         }
 
-        build_router_state(settings, &self.secrets, usage_sink).await
+        build_router_state(
+            settings,
+            self.fixed_models.as_ref(),
+            &self.secrets,
+            usage_sink,
+        )
+        .await
     }
 }
 
@@ -211,10 +229,15 @@ impl CoreAppBuilder {
 /// only ever exists at startup) or its test/CLI-only `chat_model_override`.
 async fn build_router_state(
     settings: &Settings,
+    fixed_models: Option<&ModelsConfig>,
     secrets: &Arc<dyn SecretStore>,
     usage_sink: Arc<DbUsageSink>,
 ) -> Result<(Arc<LlmRouter>, bool), CoreError> {
-    match settings.models().await? {
+    let config = match fixed_models {
+        Some(config) => Some(config.clone()),
+        None => settings.models().await?,
+    };
+    match config {
         Some(config) => {
             let key_provider = SecretKeyProvider(secrets.clone());
             match LlmRouter::new(config, &key_provider, usage_sink.clone()) {
@@ -266,6 +289,8 @@ struct CoreAppInner {
     clock: Arc<dyn Clock>,
     settings: Settings,
     secrets: Arc<dyn SecretStore>,
+    /// `CoreAppBuilder::models`, which wins over the `models` setting.
+    fixed_models: Option<ModelsConfig>,
     /// `std::sync::RwLock`, not `tokio`'s: every hold is a plain `Arc` clone with no `.await`
     /// inside it, so a blocking lock is simpler and correct — see `router_state()`.
     router_state: RwLock<Arc<RouterState>>,
@@ -282,6 +307,18 @@ struct CoreAppInner {
     registry: ToolRegistry,
     /// Serializes `send_message` calls (§7.11: "one turn at a time").
     send_lock: Mutex<()>,
+    /// Set once by `spawn_dispatcher`. The task holds its own `PluginContext` (and so the event
+    /// bus's sender), so it never ends by itself; it is aborted when the last `CoreApp` handle
+    /// drops, which lets a server evict an idle user's app without leaking its task and pool.
+    dispatcher: OnceLock<tokio::task::AbortHandle>,
+}
+
+impl Drop for CoreAppInner {
+    fn drop(&mut self) {
+        if let Some(dispatcher) = self.dispatcher.get() {
+            dispatcher.abort();
+        }
+    }
 }
 
 /// Cheaply `Clone`-able handle (inner `Arc`) so shells can share one instance across threads.
@@ -357,7 +394,8 @@ impl CoreApp {
         }
     }
 
-    /// Rebuilds the LLM router from whatever `settings.models()` holds right now and swaps it
+    /// Rebuilds the LLM router from the fixed models config if one was given, else from
+    /// whatever `settings.models()` holds right now and swaps it
     /// in, so a `save_models`/`set_api_key` command takes effect for this already-running
     /// `CoreApp` immediately — previously an open item (see `docs/DECISIONS.md`: M4's
     /// "today_view works before models are configured" entry flagged this as "Open for M7").
@@ -365,8 +403,13 @@ impl CoreApp {
     /// same reason: a shell needs `CoreApp` to keep working so the user can fix Settings.
     pub async fn reload_models(&self) -> Result<(), CoreError> {
         let usage_sink = Arc::new(DbUsageSink::new(self.0.db.clone(), self.0.clock.clone()));
-        let (router, models_configured) =
-            build_router_state(&self.0.settings, &self.0.secrets, usage_sink).await?;
+        let (router, models_configured) = build_router_state(
+            &self.0.settings,
+            self.0.fixed_models.as_ref(),
+            &self.0.secrets,
+            usage_sink,
+        )
+        .await?;
         *self
             .0
             .router_state
@@ -519,12 +562,12 @@ impl CoreApp {
     /// The dispatcher (§7.5): delivers each appended event to every plugin's `on_event`
     /// (errors are logged, not propagated), then emits `AppEvent::DataChanged` for appends and
     /// deletes alike. Deletions are not passed to `on_event`, since `Event` carries no marker a
-    /// plugin could tell them apart by. Runs for the life of the runtime.
+    /// plugin could tell them apart by. Runs until the last `CoreApp` handle drops (see `CoreAppInner::dispatcher`).
     fn spawn_dispatcher(&self) {
         let mut changes = self.0.events.subscribe_changes();
         let ctx = self.plugin_context();
         let plugins = self.0.plugins.clone();
-        tokio::spawn(async move {
+        let task = tokio::spawn(async move {
             loop {
                 let change = match changes.recv().await {
                     Ok(change) => change,
@@ -548,6 +591,7 @@ impl CoreApp {
                 });
             }
         });
+        let _ = self.0.dispatcher.set(task.abort_handle());
     }
 
     /// The current logical date (§4), using the `day_boundary` setting.
@@ -1096,6 +1140,42 @@ mod tests {
         app.reload_models().await.unwrap();
 
         assert!(!app.models_configured());
+    }
+
+    #[tokio::test]
+    async fn fixed_models_win_over_the_setting_and_survive_reload() {
+        let (builder, _dir) = builder().await;
+        let app = builder.models(anthropic_config()).build().await.unwrap();
+        // Configured from the fixed config alone: nothing in settings, key in the secret store.
+        app.secrets().set("anthropic", "sk-test-key").unwrap();
+        app.reload_models().await.unwrap();
+        assert!(app.models_configured());
+        assert_eq!(app.settings().models().await.unwrap(), None);
+
+        // A reload keeps using the fixed config rather than the (still empty) setting.
+        app.reload_models().await.unwrap();
+        assert!(app.models_configured());
+    }
+
+    #[tokio::test]
+    async fn dropping_the_last_handle_stops_the_dispatcher() {
+        let (builder, _dir) = builder().await;
+        let app = builder.build().await.unwrap();
+        let dispatcher = app.0.dispatcher.get().unwrap().clone();
+        let second = app.clone();
+
+        drop(app);
+        tokio::task::yield_now().await;
+        assert!(!dispatcher.is_finished(), "a clone still holds the app");
+
+        drop(second);
+        for _ in 0..100 {
+            if dispatcher.is_finished() {
+                return;
+            }
+            tokio::task::yield_now().await;
+        }
+        panic!("dispatcher still running after the last CoreApp handle dropped");
     }
 
     #[tokio::test]

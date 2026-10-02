@@ -2136,3 +2136,59 @@ separation.
   `postgres://lifeagent_test_admin:lifeagent_test_admin@localhost/lifeagent_test`. The whole
   suite passes with 2-connection tenant pools, and leaves no `test_%` schemas or roles behind.
 
+## 2026-10-02 — Web server (hackathon, `docs/HACKATHON.md` §1 step 3)
+
+`crates/server` (`lifeagent-server`, axum) is a third composition root next to the CLI and the
+desktop shell.
+
+- **Shared command surface.** The desktop's command bodies moved to a new crate,
+  `crates/api` (`lifeagent-api`): `ops` (one async fn per command, taking `&CoreApp`), `error`
+  (`CommandError` and its zh-CN mappings, moved verbatim from the desktop with its tests) and
+  `events` (event names/payloads). The Tauri commands are now one-line wrappers with unchanged
+  names and arguments, so the IPC contract and its 22 round-trip tests are untouched. The
+  server calls the same functions, so both shells behave and fail identically.
+- **API shape: RPC, not REST.** `POST /api/{command}` with the command's arguments as a JSON
+  object (snake_case), answering with its JSON result or `{code, message}` with an HTTP status
+  derived from `code` (`invalid_input` 400, `unauthorized`/`invalid_credentials` 401,
+  `not_found` 404, `username_taken` 409, `rate_limited` 429, model failures 502,
+  `not_configured` 503). This keeps the UI change to swapping `invoke` for `fetch`.
+  `preview_food_import` takes the file as the raw body with `x-file-name`, as on the desktop.
+  `/api/events` streams the same `data-changed`/`plan-ready`/`plan-failed` events as SSE.
+- **Models are the operator's.** `get_models`, `save_models`, `set_api_key`, `has_api_key` and
+  `test_model` are not exposed. `CoreAppBuilder::models(config)` (new) gives every user's app
+  the server's `LIFEAGENT_MODELS`, taking precedence over the `models` setting also on
+  `reload_models`; keys come from `LIFEAGENT_KEY_<PROVIDER_ID>` (`EnvSecretStore`, read-only).
+  `LIFEAGENT_MOCK_LLM=1` binds an echo model for development. Agent Platform tokens (§2) will
+  replace the env keys.
+- **Accounts** in an `auth` schema owned by the login role (`users`, `sessions`; own sqlx
+  migrations). Argon2id password hashes (off the runtime, `spawn_blocking`); a 256-bit random
+  session token in an `HttpOnly; SameSite=Lax; Secure` cookie, stored only as SHA-256; 30-day
+  sessions. Unknown usernames verify against a dummy hash so they cost the same as a wrong
+  password, and both get the same answer. Login and registration share a per-IP fixed-window
+  limit (20 per 10 min, in memory); the IP is the *last* `X-Forwarded-For` entry, the one
+  Cloud Run's front end appends. Optional `LIFEAGENT_INVITE_CODE`. Usernames are 3–32 of
+  `[a-z0-9_.-]`, case-insensitive; passwords 8–128 characters. Account deletion re-checks the
+  password, then `db::destroy`s the tenant and deletes the user (sessions cascade).
+- **Tenant cache.** One `CoreApp` per user per instance, opened on first use through a
+  per-user `OnceCell` (concurrent first requests share one open), evicted after 15 idle minutes
+  only if nothing else holds it, since an open event stream must keep seeing that app's
+  in-memory event bus. For eviction to free anything, `CoreApp` now aborts its dispatcher task
+  when its last handle drops (the task held its own context, so it never ended). Because of
+  the in-memory bus and cache, the demo runs with `--max-instances=1`.
+- **Scheduler tick.** `POST /api/internal/tick` runs one `Scheduler::tick` per user (4 at a
+  time), each tenant keeping its own `Scheduler` (in-memory retry state, §7.13), without
+  counting as user activity. It is protected by a shared secret (`LIFEAGENT_TICK_TOKEN`, sent as
+  `X-LifeAgent-Tick-Token` or `Authorization: Bearer`, compared in constant time), not by
+  verifying Cloud Scheduler's OIDC token as `docs/HACKATHON.md` first planned: that needs
+  Google's signing keys and JWT validation, too much code and risk for the hackathon. Unset
+  token: the endpoint answers 404. `LIFEAGENT_INPROCESS_SCHEDULER=1` ticks from inside the
+  server instead (development, always-on instances).
+- **Time zone.** Core uses the process's local time zone for logical dates and `plan_time`;
+  Cloud Run runs in UTC, so the service sets `TZ=Asia/Tokyo`. All users share it.
+- **CSRF.** No tokens: the session cookie is `SameSite=Lax`, so cross-site POSTs carry no
+  cookie, and every state-changing endpoint is a POST (JSON or raw bytes, which a cross-site
+  form can't send without a CORS preflight the server never answers).
+- **Tests** (`crates/server/tests/api.rs`) run a real server on a random port against the
+  local Postgres, as the non-superuser test login role, each with its own `test_auth_<uuid>`
+  schema; the guard destroys every registered user's tenant and the auth schema afterwards.
+

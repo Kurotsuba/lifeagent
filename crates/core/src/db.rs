@@ -81,7 +81,7 @@ impl DbConfig {
 
 /// Rejects anything that isn't a plain lowercase identifier, so schema and role names can be
 /// spliced into DDL (identifiers can't be bind parameters) without any quoting concerns.
-fn validate_identifier(kind: &str, name: &str) -> Result<(), CoreError> {
+pub fn validate_identifier(kind: &str, name: &str) -> Result<(), CoreError> {
     let mut chars = name.chars();
     let valid = name.len() <= 63
         && chars
@@ -296,6 +296,14 @@ async fn ensure_test_admin() {
             tx.commit().await.expect("commit");
         })
         .await;
+}
+
+/// The test login role's URL, creating the role on first use: for tests that need to connect
+/// the way a server does (e.g. `lifeagent-server`'s), rather than through a [`TestDb`].
+#[cfg(any(test, feature = "test-support"))]
+pub async fn test_login_url() -> String {
+    ensure_test_admin().await;
+    test_admin_url()
 }
 
 #[cfg(any(test, feature = "test-support"))]

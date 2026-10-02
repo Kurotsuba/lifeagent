@@ -9,7 +9,8 @@
 // functions and `CommandError`, exactly as external code never does in production (Tauri calls
 // them by name string through `invoke_handler`) — testing only.
 pub mod commands;
-pub mod error;
+/// `CommandError` and its mappings live in `lifeagent-api`, shared with the web server.
+pub use lifeagent_api::error;
 mod events;
 mod logging;
 mod notify;
@@ -76,7 +77,7 @@ pub fn run() {
 
             tray::build(app.handle(), core_app.clone())?;
             app.manage(core_app);
-            app.manage(commands::PendingImportState::default());
+            app.manage(lifeagent_api::ops::PendingImportState::default());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
