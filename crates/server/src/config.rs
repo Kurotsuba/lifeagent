@@ -11,7 +11,12 @@ use lifeagent_llm::router::ModelsConfig;
 #[derive(Debug, Clone)]
 pub struct ServerConfig {
     /// `LIFEAGENT_DATABASE_URL`. The login role needs `CREATEROLE` and `CREATE` on the database
-    /// (Cloud SQL's built-in users have both), to provision each user's tenant.
+    /// (Cloud SQL's built-in users have both), to provision each user's tenant. With
+    /// `LIFEAGENT_DB_PASSWORD` set, the URL carries no password and gets this one spliced in:
+    /// Cloud Run maps a Secret Manager secret to one variable, so the password can't be part of
+    /// a URL assembled in the service config. On Cloud Run the URL uses the Cloud SQL socket:
+    /// `postgres://lifeagent_app@localhost/lifeagent?host=/cloudsql/<connection name>` (sqlx
+    /// needs some host in the URL; a `host=` starting with `/` replaces it with the socket).
     pub database_url: String,
     /// `LIFEAGENT_AUTH_SCHEMA`, default `auth`: the schema holding accounts and sessions.
     pub auth_schema: String,
@@ -63,9 +68,14 @@ impl ServerConfig {
             .map(|json| serde_json::from_str(&json))
             .transpose()
             .context("LIFEAGENT_MODELS is not a valid models config")?;
+        let database_url =
+            optional("LIFEAGENT_DATABASE_URL").unwrap_or_else(|| DEFAULT_DATABASE_URL.into());
+        let database_url = match optional("LIFEAGENT_DB_PASSWORD") {
+            Some(password) => with_password(&database_url, &password)?,
+            None => database_url,
+        };
         Ok(Self {
-            database_url: optional("LIFEAGENT_DATABASE_URL")
-                .unwrap_or_else(|| DEFAULT_DATABASE_URL.into()),
+            database_url,
             auth_schema: optional("LIFEAGENT_AUTH_SCHEMA").unwrap_or_else(|| "auth".into()),
             bind,
             static_dir: optional("LIFEAGENT_STATIC_DIR").map(PathBuf::from),
@@ -76,5 +86,68 @@ impl ServerConfig {
             invite_code: optional("LIFEAGENT_INVITE_CODE"),
             secure_cookies: !flag("LIFEAGENT_INSECURE_COOKIES"),
         })
+    }
+}
+
+/// Puts `password` into `url`'s user info (`postgres://user@...` → `postgres://user:pw@...`),
+/// percent-encoded so any character is safe.
+pub fn with_password(url: &str, password: &str) -> Result<String> {
+    let (scheme, rest) = url
+        .split_once("://")
+        .context("LIFEAGENT_DATABASE_URL is not a URL")?;
+    let (user_info, host_and_rest) = rest
+        .split_once('@')
+        .context("LIFEAGENT_DATABASE_URL has no user (expected postgres://user@...)")?;
+    anyhow::ensure!(
+        !user_info.contains(':'),
+        "LIFEAGENT_DATABASE_URL already has a password; drop it or LIFEAGENT_DB_PASSWORD"
+    );
+    let encoded: String = password
+        .bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                (b as char).to_string()
+            }
+            _ => format!("%{b:02X}"),
+        })
+        .collect();
+    Ok(format!("{scheme}://{user_info}:{encoded}@{host_and_rest}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::str::FromStr;
+
+    use sqlx::postgres::PgConnectOptions;
+
+    use super::*;
+
+    const SOCKET_URL: &str =
+        "postgres://lifeagent_app@localhost/lifeagent?host=/cloudsql/proj:asia-northeast1:lifeagent";
+
+    #[test]
+    fn the_password_is_spliced_in_and_encoded() {
+        let url = with_password(SOCKET_URL, "p@ss:w/rd+").unwrap();
+        assert_eq!(
+            url,
+            "postgres://lifeagent_app:p%40ss%3Aw%2Frd%2B@localhost/lifeagent?host=/cloudsql/proj:asia-northeast1:lifeagent"
+        );
+        assert!(with_password("postgres://u:already@h/db", "x").is_err());
+        assert!(with_password("postgres://h/db", "x").is_err());
+    }
+
+    #[test]
+    fn sqlx_reads_the_cloud_sql_socket_url() {
+        let options =
+            PgConnectOptions::from_str(&with_password(SOCKET_URL, "p@ss:w/rd+").unwrap()).unwrap();
+        assert_eq!(options.get_username(), "lifeagent_app");
+        assert_eq!(options.get_database(), Some("lifeagent"));
+        assert_eq!(
+            options
+                .get_socket()
+                .map(|p| p.display().to_string())
+                .as_deref(),
+            Some("/cloudsql/proj:asia-northeast1:lifeagent")
+        );
     }
 }

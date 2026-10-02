@@ -1,0 +1,5 @@
+# What `gcloud builds submit` uploads: everything git tracks, nothing it ignores (target/,
+# node_modules/, dist/ ...). Same intent as .dockerignore.
+.git
+.gitignore
+#!include:.gitignore
