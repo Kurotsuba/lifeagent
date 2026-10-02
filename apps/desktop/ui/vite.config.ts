@@ -2,7 +2,8 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 
-// LifeAgent desktop UI: thin view layer over Tauri commands, no business logic.
+// LifeAgent UI: thin view layer, no business logic. The same build runs in the Tauri desktop
+// app and, served by `lifeagent-server`, in a browser (`src/api/transport.ts`).
 // See docs/PHASE1_SPEC.md §10.3.
 export default defineConfig({
   plugins: [react(), tailwindcss()],
@@ -12,6 +13,11 @@ export default defineConfig({
   server: {
     port: 1420,
     strictPort: true,
+    // Web build in development: open http://localhost:1420 in a browser with
+    // `cargo run -p lifeagent-server` running. The desktop never sends HTTP to `/api`.
+    proxy: {
+      "/api": "http://localhost:8080",
+    },
   },
   envPrefix: ["VITE_", "TAURI_ENV_*"],
   build: {

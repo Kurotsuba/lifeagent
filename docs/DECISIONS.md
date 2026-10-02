@@ -2192,3 +2192,36 @@ desktop shell.
   local Postgres, as the non-superuser test login role, each with its own `test_auth_<uuid>`
   schema; the guard destroys every registered user's tenant and the auth schema afterwards.
 
+## 2026-10-02 — One UI for desktop and web (hackathon, `docs/HACKATHON.md` §1 step 4)
+
+The React UI in `apps/desktop/ui` now runs both inside Tauri and in a browser served by
+`lifeagent-server`, rather than being forked into a web copy.
+
+- **Detection:** `src/api/platform.ts` checks for `window.__TAURI_INTERNALS__`, which Tauri
+  injects before any script runs.
+- **Transport:** `src/api/transport.ts` `call(command, args)` is `invoke` on the desktop and
+  `POST /api/{command}` in a browser. Arguments stay written the Tauri way (camelCase keys);
+  the web path converts top-level keys to snake_case, which is what Tauri itself does, and
+  leaves nested values alone (they are already snake_case). Both reject with the same
+  `CommandError`, so no component changed its error handling. `commands.ts` keeps every
+  function signature; only `invoke(` became `call(`.
+- **Events:** `EventSource("/api/events")` in a browser, same event names as the Tauri events.
+- **Sessions in the UI:** the cookie is `HttpOnly`, so the UI never sees it; it asks
+  `/api/auth/me` at startup. A 401 from a *command* fires a window event and the app returns
+  to the login screen with "登录已失效"; a 401 from the account endpoints is an ordinary answer
+  (first visit, wrong password) and doesn't.
+- **Hidden on the web:** the onboarding 模型 step (2 steps instead of 3), the 模型 settings
+  section, the notification and autostart switches (saved unchanged), and Chat's "前往设置"
+  link on model errors. In the web build those belong to the operator or the OS.
+- **Added on the web:** login/register screen (the only client-side check is that the two
+  passwords match; every rule is the server's), username and 退出登录 in the sidebar, and a
+  账号 settings section that deletes the account after re-entering the password.
+- **Development:** Vite proxies `/api` to `localhost:8080`, so `npm run dev` works against a
+  local server in a browser; the desktop never sends HTTP there.
+- **Verification:** no frontend test runner (thin view layer, as before). The flows were
+  driven in headless Chromium (Playwright, run from outside the repo) against the real server
+  with the echo model: register, 2-step onboarding, chat, live refresh of Today through SSE,
+  logout/login, wrong password, an expired session, account deletion. Desktop behavior is
+  covered by the type check and the unchanged IPC tests; it was not run in Tauri here (no
+  Windows desktop in this environment).
+

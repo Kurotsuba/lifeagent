@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { getSettings, saveSettings } from "../api/commands";
+import { isDesktop } from "../api/platform";
 import { commandErrorMessage, type SettingsDto } from "../api/types";
 import { Field, inputClass } from "../components/Field";
 import { primaryButtonClass } from "../components/buttonStyles";
@@ -71,33 +72,39 @@ export function GeneralSection() {
         </Field>
       </div>
 
-      <label className="flex items-center gap-2 text-sm">
-        <input
-          type="checkbox"
-          checked={draft.notifications_enabled}
-          onChange={(e) => update({ notifications_enabled: e.target.checked })}
-        />
-        <span>
-          {t.general.notifications}
-          <span className="ml-1 text-xs text-neutral-500 dark:text-neutral-400">
-            {t.general.notificationsHint}
-          </span>
-        </span>
-      </label>
+      {/* Desktop only: OS notifications and autostart have no meaning in a browser. The web
+          build still saves whatever values it loaded, unchanged. */}
+      {isDesktop ? (
+        <>
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={draft.notifications_enabled}
+              onChange={(e) => update({ notifications_enabled: e.target.checked })}
+            />
+            <span>
+              {t.general.notifications}
+              <span className="ml-1 text-xs text-neutral-500 dark:text-neutral-400">
+                {t.general.notificationsHint}
+              </span>
+            </span>
+          </label>
 
-      <label className="flex items-center gap-2 text-sm">
-        <input
-          type="checkbox"
-          checked={draft.autostart}
-          onChange={(e) => update({ autostart: e.target.checked })}
-        />
-        <span>
-          {t.general.autostart}
-          <span className="ml-1 text-xs text-neutral-500 dark:text-neutral-400">
-            {t.general.autostartHint}
-          </span>
-        </span>
-      </label>
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={draft.autostart}
+              onChange={(e) => update({ autostart: e.target.checked })}
+            />
+            <span>
+              {t.general.autostart}
+              <span className="ml-1 text-xs text-neutral-500 dark:text-neutral-400">
+                {t.general.autostartHint}
+              </span>
+            </span>
+          </label>
+        </>
+      ) : null}
 
       <div className="flex items-center gap-3">
         <button

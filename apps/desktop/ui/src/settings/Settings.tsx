@@ -1,5 +1,7 @@
 import type { ReactNode } from "react";
+import { isDesktop, isWeb } from "../api/platform";
 import { zhCN } from "../i18n/zh-CN";
+import { AccountSection } from "./AccountSection";
 import { FoodDataSection } from "./FoodDataSection";
 import { GeneralSection } from "./GeneralSection";
 import { MemorySection } from "./MemorySection";
@@ -35,17 +37,28 @@ export function Settings() {
           <FoodDataSection />
         </SectionCard>
 
-        <SectionCard title={t.sections.model}>
-          <ModelSection />
-        </SectionCard>
+        {/* In the web build the server's operator sets the models for everyone. */}
+        {isDesktop ? (
+          <SectionCard title={t.sections.model}>
+            <ModelSection />
+          </SectionCard>
+        ) : null}
 
-        <SectionCard title={`${t.sections.plan} · ${t.sections.general}`}>
+        <SectionCard
+          title={isDesktop ? `${t.sections.plan} · ${t.sections.general}` : t.sections.plan}
+        >
           <GeneralSection />
         </SectionCard>
 
         <SectionCard title={t.sections.memory}>
           <MemorySection />
         </SectionCard>
+
+        {isWeb ? (
+          <SectionCard title={t.sections.account}>
+            <AccountSection />
+          </SectionCard>
+        ) : null}
       </div>
     </div>
   );

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import { getHistory, sendMessage } from "../api/commands";
 import { onAppDataEvent } from "../api/events";
+import { isWeb } from "../api/platform";
 import {
   commandErrorMessage,
   isCommandError,
@@ -186,7 +187,8 @@ export function Chat({ draftText, onDraftConsumed, onGoToSettings }: ChatProps) 
           <button type="button" className="underline" onClick={() => void handleSend()}>
             {zhCN.common.retry}
           </button>
-          {error.code === "auth" || error.code === "not_configured" ? (
+          {/* The web build has no model settings to go to: the operator owns them. */}
+          {!isWeb && (error.code === "auth" || error.code === "not_configured") ? (
             <button type="button" className="underline" onClick={onGoToSettings}>
               {zhCN.common.goToSettings}
             </button>

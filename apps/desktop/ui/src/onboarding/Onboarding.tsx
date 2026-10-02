@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { completeOnboarding, logWeight, saveProfile, saveWeightGoal, saveModels, setApiKey, testModel } from "../api/commands";
+import { isWeb } from "../api/platform";
 import { commandErrorMessage, type Role } from "../api/types";
 import { primaryButtonClass, secondaryButtonClass } from "../components/buttonStyles";
 import { zhCN } from "../i18n/zh-CN";
@@ -18,6 +19,10 @@ import { isStepModelFillable, StepModel } from "./StepModel";
 const t = zhCN.onboarding;
 
 const ROLES: Role[] = ["parser", "planner", "conversation"];
+
+/** The web build has no 模型 step: the server's operator configures models for everyone. */
+const STEPS: readonly string[] = isWeb ? t.steps.slice(0, 2) : t.steps;
+const LAST_STEP = STEPS.length - 1;
 
 interface OnboardingProps {
   onComplete: () => void;
@@ -92,12 +97,12 @@ export function Onboarding({ onComplete }: OnboardingProps) {
       <div className="flex-1 overflow-y-auto px-6 py-8">
         <div className="mx-auto max-w-2xl">
           <p className="mb-4 text-xs font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
-            {t.stepLabel(step + 1, t.steps.length)} · {t.steps[step]}
+            {t.stepLabel(step + 1, STEPS.length)} · {STEPS[step]}
           </p>
 
           {step === 0 ? <StepProfile draft={draft} update={update} /> : null}
           {step === 1 ? <StepGoal draft={draft} update={update} /> : null}
-          {step === 2 ? (
+          {step === 2 && !isWeb ? (
             <StepModel
               draft={draft}
               update={update}
@@ -125,12 +130,12 @@ export function Onboarding({ onComplete }: OnboardingProps) {
           >
             {zhCN.common.back}
           </button>
-          {step < 2 ? (
+          {step < LAST_STEP ? (
             <button
               type="button"
               className={primaryButtonClass}
               disabled={!canGoNext}
-              onClick={() => setStep((s) => Math.min(2, s + 1))}
+              onClick={() => setStep((s) => Math.min(LAST_STEP, s + 1))}
             >
               {zhCN.common.next}
             </button>
@@ -138,7 +143,9 @@ export function Onboarding({ onComplete }: OnboardingProps) {
             <button
               type="button"
               className={primaryButtonClass}
-              disabled={!testSucceeded || !isStepModelFillable(draft) || finishing}
+              disabled={
+                finishing || (!isWeb && (!testSucceeded || !isStepModelFillable(draft)))
+              }
               onClick={handleFinish}
             >
               {finishing ? zhCN.common.finishing : zhCN.common.finish}

@@ -232,8 +232,12 @@ $10/month). New GCP accounts get trial credit. Stop or delete the instance after
    register/login/logout/delete-account, session extractor, per-user `CoreApp` cache, SSE
    events, the tick endpoint. Run locally with
    `LIFEAGENT_MOCK_LLM=1 cargo run -p lifeagent-server` (see README).
-4. **Switch the React UI** from Tauri `invoke` to `fetch`, and add register and login pages
-   and a logout button.
+4. **Switch the React UI** (done 2026-10-02): one UI for both shells. `src/api/transport.ts`
+   uses Tauri `invoke` on the desktop and `fetch` to `/api/{command}` in a browser;
+   `/api/events` (SSE) replaces Tauri events. Web only: login/register screen, username and
+   logout in the sidebar, 账号 settings section (account deletion); the model step,
+   model settings and the notification/autostart switches are hidden. Verified end to end in
+   headless Chromium against the real server.
 5. **Deploy:** multi-stage Dockerfile (Rust build, Vite build, slim runtime image), Cloud SQL,
    Secret Manager, Cloud Run, Cloud Scheduler.
 

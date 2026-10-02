@@ -97,6 +97,11 @@ curl -c jar -H 'content-type: application/json' \
 curl -b jar -H 'content-type: application/json' -d '{"text":"你好"}' localhost:8080/api/send_message
 ```
 
+The UI is the same React app as the desktop's. To work on the web version, run the server as
+above and `cd apps/desktop/ui && npm run dev`, then open http://localhost:1420 (Vite proxies
+`/api` to the server). For a single-process setup, `npm run build` and point
+`LIFEAGENT_STATIC_DIR` at `apps/desktop/ui/dist`.
+
 Configuration is all environment variables (`crates/server/src/config.rs`):
 `LIFEAGENT_DATABASE_URL` (its role needs `CREATEROLE`), `LIFEAGENT_MODELS` (models config JSON,
 keys in `LIFEAGENT_KEY_<PROVIDER_ID>`) or `LIFEAGENT_MOCK_LLM=1`, `LIFEAGENT_STATIC_DIR` (built

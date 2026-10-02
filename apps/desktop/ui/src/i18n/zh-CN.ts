@@ -23,6 +23,26 @@ export const zhCN = {
     confirmDelete: "确认删除",
     retry: "重试",
     goToSettings: "前往设置",
+    networkError: "无法连接服务器，请检查网络后重试。",
+    logout: "退出登录",
+  },
+  // Web build only: accounts (`crates/server`).
+  auth: {
+    loginTitle: "登录",
+    registerTitle: "注册",
+    username: "用户名",
+    usernameHint: "3–32 位英文字母、数字或 _ - .，不区分大小写",
+    password: "密码",
+    passwordHint: "至少 8 位",
+    confirmPassword: "确认密码",
+    passwordMismatch: "两次输入的密码不一致。",
+    inviteCode: "邀请码",
+    login: "登录",
+    register: "注册",
+    submitting: "请稍候…",
+    toRegister: "还没有账号？注册",
+    toLogin: "已有账号？登录",
+    sessionExpired: "登录已失效，请重新登录。",
   },
   nav: {
     today: "今日",
@@ -183,6 +203,16 @@ export const zhCN = {
       plan: "计划",
       general: "通用",
       memory: "记忆",
+      account: "账号",
+    },
+    // Web build only.
+    account: {
+      loggedInAs: (username: string) => `当前登录：${username}`,
+      deleteTitle: "删除账号",
+      deleteHint: "将永久删除此账号及其全部数据（饮食记录、计划、对话、记忆），无法恢复。",
+      passwordToConfirm: "输入密码以确认",
+      deleteButton: "永久删除账号",
+      deleting: "删除中…",
     },
     role: {
       parser: "解析",

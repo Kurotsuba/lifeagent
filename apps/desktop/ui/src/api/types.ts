@@ -351,15 +351,22 @@ export type CommandErrorCode =
   | "llm"
   | "invalid_input"
   | "not_found"
-  | "internal";
+  | "internal"
+  // Web build only (`crates/server`): accounts and sessions.
+  | "unauthorized"
+  | "invalid_credentials"
+  | "username_taken"
+  | "forbidden"
+  | "rate_limited";
 
 export interface CommandError {
   code: CommandErrorCode;
   message: string;
 }
 
-/** A rejected `invoke()` call surfaces the Rust `CommandError` value directly as the rejection
- * reason (not wrapped in a JS `Error`) — this narrows `unknown` down to it. */
+/** A rejected command surfaces the Rust `CommandError` value directly as the rejection reason
+ * (not wrapped in a JS `Error`), from `invoke()` and the web transport alike — this narrows
+ * `unknown` down to it. */
 export function isCommandError(value: unknown): value is CommandError {
   return (
     typeof value === "object" &&
