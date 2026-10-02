@@ -159,6 +159,7 @@ mod tests {
                 id: "p1".into(),
                 kind: ProviderKind::OpenAiCompatible,
                 base_url: "http://example.invalid".into(),
+                auth: Default::default(),
             }],
             parser: binding.clone(),
             planner: binding.clone(),

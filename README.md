@@ -102,6 +102,10 @@ above and `cd apps/desktop/ui && npm run dev`, then open http://localhost:1420 (
 `/api` to the server). For a single-process setup, `npm run build` and point
 `LIFEAGENT_STATIC_DIR` at `apps/desktop/ui/dist`.
 
+With a real model, Gemini on Google Cloud's Agent Platform needs no API key: run
+`gcloud auth application-default login` once, then set `LIFEAGENT_MODELS` to the
+`"auth": "google_cloud"` config in `docs/HACKATHON.md` §2 instead of `LIFEAGENT_MOCK_LLM=1`.
+
 Configuration is all environment variables (`crates/server/src/config.rs`):
 `LIFEAGENT_DATABASE_URL` (its role needs `CREATEROLE`), `LIFEAGENT_MODELS` (models config JSON,
 keys in `LIFEAGENT_KEY_<PROVIDER_ID>`) or `LIFEAGENT_MOCK_LLM=1`, `LIFEAGENT_STATIC_DIR` (built

@@ -406,6 +406,7 @@ mod tests {
                 id: "openai".into(),
                 kind: ProviderKind::OpenAiCompatible,
                 base_url: "https://api.openai.com/v1".into(),
+                auth: Default::default(),
             }],
             parser: binding.clone(),
             planner: binding.clone(),

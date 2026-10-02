@@ -33,7 +33,7 @@ Judging criteria:
 | Requirement | Status |
 |---|---|
 | **Runs on a Google Cloud service** (App Engine, Compute Engine, GKE, Cloud Run, Cloud Run functions or Cloud TPU/GPU) | ❌ Missing. It's a local Windows Tauri app with no cloud component. |
-| **Uses a Google AI service** (Gemini API, ADK, Vertex AI / Gemini Enterprise Agent Platform, …) | ⚠️ Nearly there. Gemini goes through an OpenAI-compatible endpoint, but the 2026-10-01 DECISIONS entry says it has never been tested against a real Gemini model. The plan is Gemini on Agent Platform with service-account auth (see §2). |
+| **Uses a Google AI service** (Gemini API, ADK, Vertex AI / Gemini Enterprise Agent Platform, …) | ✅ Gemini on Agent Platform, authenticated with Google Cloud access tokens (§2). A real chat turn through the web build worked on 2026-10-02. |
 | **No project already well along before the event started** | ✅ The first commit is 2026-09-23, after registration opened on 2026-08-20. Building on the project during the hackathon is explicitly allowed. |
 | **Deployed URL, plus a test account if login is required** | ❌ Missing. |
 | **Architecture diagram, 3-minute YouTube demo, project description** | ❌ Not made yet. The Zenn article (category "Idea") is optional. |
@@ -326,7 +326,7 @@ library in Gemini Enterprise Agent Platform").
 | Provider kind | OpenAI-compatible |
 | Base URL (服务地址) | `https://aiplatform.googleapis.com/v1/projects/<PROJECT_ID>/locations/global/endpoints/openapi` |
 | Model names | `google/` prefix, e.g. `google/gemini-3.5-flash`; pin exact versions for judging |
-| Auth | `Authorization: Bearer <access token>`; tokens last 1 hour |
+| Auth | `"auth": "google_cloud"` on the provider: `Authorization: Bearer <access token>`, fetched and refreshed by the server (tokens last 1 hour) |
 | IAM | Runtime service account gets `roles/aiplatform.user`; enable `aiplatform.googleapis.com` |
 
 Use the `global` location: it routes around regional capacity shortages.
@@ -342,18 +342,34 @@ curl -s "https://aiplatform.googleapis.com/v1/projects/$PROJECT/locations/global
   -d '{"model":"google/gemini-3.5-flash","messages":[{"role":"user","content":"Say hi"}]}'
 ```
 
-#### Code change: refreshing token source
+#### Code change: refreshing token source (done 2026-10-02)
 
-`OpenAiCompatibleProvider` (`crates/llm/src/provider/openai_compat.rs`) takes its key once at
-construction and never refreshes it, so a pasted access token stops working after an hour.
+A provider with `"auth": "google_cloud"` sends a Google Cloud access token instead of a key
+(`crates/llm/src/google_auth.rs`), cached and refreshed 5 minutes before it expires. Where the
+token comes from, the standard Application Default Credentials order:
 
-- Add a token source to the provider that returns a cached token and fetches a new one shortly
-  before expiry.
-- On Cloud Run: `GET http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token`
-  with header `Metadata-Flavor: Google`. One HTTP call, no new crate.
-- Locally: `gcloud auth application-default print-access-token`.
-- A static key stays supported for other providers and for tests (`MockChatModel` is unchanged;
-  tests stay offline).
+- `GOOGLE_APPLICATION_CREDENTIALS`, else gcloud's ADC file (`gcloud auth
+  application-default login`): the developer's own login, refreshed at Google's OAuth endpoint.
+- Otherwise the metadata server: on Cloud Run, the service account's token. No key anywhere.
+
+`LIFEAGENT_MODELS` for the server:
+
+```json
+{
+  "providers": [{
+    "id": "vertex", "kind": "open_ai_compatible", "auth": "google_cloud",
+    "base_url": "https://aiplatform.googleapis.com/v1/projects/<PROJECT_ID>/locations/global/endpoints/openapi"
+  }],
+  "parser":       { "provider_id": "vertex", "model": "google/gemini-2.5-flash" },
+  "planner":      { "provider_id": "vertex", "model": "google/gemini-2.5-pro" },
+  "conversation": { "provider_id": "vertex", "model": "google/gemini-2.5-flash" }
+}
+```
+
+Use pinned model versions for judging. Gemini 3 models (`google/gemini-3…`) get no temperature,
+as with AI Studio names. Token fetching was checked against Google's real endpoint with this
+machine's ADC (`cargo test -p lifeagent-llm -- --ignored live_`); the regular tests run
+offline against a local fake server.
 
 #### Serving users safely
 
@@ -375,10 +391,13 @@ construction and never refreshes it, so a pasted access token stops working afte
 - **Observability.** Tokens, latency, errors and cost per user and role, from `llm_usage` and
   structured logs in Cloud Logging.
 
-#### Still to do
+#### Status
 
-- Run a real chat turn that logs a meal against a Gemini 3 model, as the 2026-10-01 entry says.
-- Make Gemini on Agent Platform the default provider for this build.
+- Done 2026-10-02: a real chat turn through the web build (local server, browser UI) against
+  Gemini on Agent Platform, authenticated with this machine's ADC, worked (manual test).
+- Gemini on Agent Platform is the web build's provider through `LIFEAGENT_MODELS` (the desktop
+  keeps its own model settings).
+- Still to check: the same with a Gemini 3 model, and on Cloud Run with the service account.
 
 ### 3. Lean into the theme
 

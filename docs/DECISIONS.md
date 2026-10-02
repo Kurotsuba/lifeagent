@@ -2225,3 +2225,37 @@ The React UI in `apps/desktop/ui` now runs both inside Tauri and in a browser se
   covered by the type check and the unchanged IPC tests; it was not run in Tauri here (no
   Windows desktop in this environment).
 
+## 2026-10-02 — Google Cloud access tokens for Gemini on Agent Platform (`docs/HACKATHON.md` §2)
+
+Agent Platform's OpenAI-compatible endpoint accepts only short-lived Google Cloud access tokens,
+so an OpenAI-compatible provider can now authenticate with one instead of an API key.
+
+- **Config:** `ProviderConfig.auth`, `"api_key"` (default, omitted when serialized, so stored
+  configs and the desktop's model settings are unchanged) or `"google_cloud"`. With
+  `google_cloud` the router looks up no key. `anthropic` + `google_cloud` is a config error.
+  The desktop UI doesn't know the field: saving models from its settings writes `api_key`
+  providers, as before. The web build takes its models from `LIFEAGENT_MODELS`.
+- **Token source** (`lifeagent_llm::google_auth`): Application Default Credentials in the
+  standard order, limited to what this project needs. A credentials file
+  (`GOOGLE_APPLICATION_CREDENTIALS`, else gcloud's ADC file) of type `authorized_user` is
+  refreshed at `oauth2.googleapis.com/token`; without a file, the metadata server (Cloud Run's
+  service account). Service-account key files are refused rather than supported: they need RS256
+  JWT signing (a new crypto dependency), and the deployment has no keys by design. No Google
+  auth crate was added; it's two HTTP calls with the existing `reqwest`, the form body encoded by
+  hand (reqwest's `form` feature isn't enabled).
+- **Caching:** one source per process (`google_auth::shared()`), so every user's router shares
+  one token. Refreshed 5 minutes before expiry; a `tokio` mutex makes concurrent callers wait
+  for a single fetch. Expiry uses `Instant`, not the injected `Clock`: it's about the token's
+  lifetime on this machine, never stored or shown.
+- **Errors:** no credentials (no file and no metadata server) is `LlmError::Config` naming
+  `gcloud auth application-default login`; a refused refresh is `LlmError::Auth`. Token values
+  and token-endpoint bodies are never logged.
+- **Gemini 3 temperature:** `ignores_temperature` (2026-10-01) now also strips `google/`, the
+  Agent Platform model-name prefix. Before this, `google/gemini-3…` would have been sent the
+  per-role temperatures down to 0.0 that Google warns against.
+- **Tests:** offline, against a small fake HTTP server in the test module (metadata flavor
+  header, caching, refresh near expiry, the OAuth form, a refused refresh, the provider sending
+  the token as `Bearer`). One `#[ignore]`d live test fetches a real token with the machine's
+  ADC; it passed here. A real chat turn against Agent Platform through the web build was then
+  run by hand and worked.
+

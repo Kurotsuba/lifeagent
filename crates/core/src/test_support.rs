@@ -49,6 +49,7 @@ pub async fn env() -> TestEnv {
             id: "mock".into(),
             kind: ProviderKind::OpenAiCompatible,
             base_url: String::new(),
+            auth: Default::default(),
         }],
         parser: binding.clone(),
         planner: binding.clone(),

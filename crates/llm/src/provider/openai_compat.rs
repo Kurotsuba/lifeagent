@@ -2,28 +2,51 @@
 //!
 //! Filled in during M2 per `docs/PHASE1_SPEC.md` §6.2.1.
 
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use serde_json::{json, Value};
 
 use super::send_with_retries;
 use crate::error::LlmError;
+use crate::google_auth::GoogleTokenSource;
 use crate::types::{
     ChatModel, ChatRequest, ChatResponse, Message, ResponseFormat, ToolCall, Usage,
 };
 
+/// What goes in the `Authorization: Bearer` header.
+pub enum Credential {
+    /// A fixed API key (OpenAI, DeepSeek, Gemini via AI Studio, ...).
+    ApiKey(String),
+    /// A Google Cloud access token, fetched and refreshed as needed (Gemini on Agent
+    /// Platform, `ProviderAuth::GoogleCloud`).
+    Google(Arc<GoogleTokenSource>),
+}
+
 pub struct OpenAiCompatibleProvider {
     base_url: String,
-    api_key: String,
+    credential: Credential,
     client: reqwest::Client,
 }
 
 impl OpenAiCompatibleProvider {
     pub fn new(base_url: String, api_key: String) -> Self {
+        Self::with_credential(base_url, Credential::ApiKey(api_key))
+    }
+
+    pub fn with_credential(base_url: String, credential: Credential) -> Self {
         Self {
             // `complete` appends `/chat/completions`; a pasted trailing slash would double it.
             base_url: base_url.trim().trim_end_matches('/').to_string(),
-            api_key,
+            credential,
             client: reqwest::Client::new(),
+        }
+    }
+
+    async fn bearer(&self) -> Result<String, LlmError> {
+        match &self.credential {
+            Credential::ApiKey(key) => Ok(key.clone()),
+            Credential::Google(source) => source.token().await,
         }
     }
 }
@@ -33,7 +56,8 @@ impl ChatModel for OpenAiCompatibleProvider {
     async fn complete(&self, req: ChatRequest) -> Result<ChatResponse, LlmError> {
         let body = build_request_body(&req);
         let url = format!("{}/chat/completions", self.base_url);
-        let api_key = &self.api_key;
+        // Fetched once per call: a cached Google token stays valid well past the retries.
+        let api_key = &self.bearer().await?;
         let client = &self.client;
         let response =
             send_with_retries(|| client.post(&url).bearer_auth(api_key).json(&body)).await?;
@@ -136,11 +160,13 @@ pub(crate) fn build_request_body(req: &ChatRequest) -> Value {
 /// Gemini 3 models are tuned for their default temperature (1.0); Google warns that lower
 /// values can cause looping or degraded reasoning, and the per-role defaults (§6.3) go down to
 /// 0.0. Like the Anthropic provider's `effort` denylist, this is a model fact handled here
-/// rather than in the router. Matches both `gemini-3…` and `models/gemini-3…`.
+/// rather than in the router. Matches `gemini-3…`, `models/gemini-3…` (AI Studio) and
+/// `google/gemini-3…` (Agent Platform).
 fn ignores_temperature(model: &str) -> bool {
     let model = model.trim().to_ascii_lowercase();
-    model
-        .strip_prefix("models/")
+    ["models/", "google/"]
+        .iter()
+        .find_map(|prefix| model.strip_prefix(prefix))
         .unwrap_or(&model)
         .starts_with("gemini-3")
 }
@@ -353,6 +379,45 @@ mod tests {
         "usage": {"prompt_tokens": 120, "completion_tokens": 30}
     }"#;
 
+    #[tokio::test]
+    async fn google_credentials_send_the_fetched_token_as_bearer() {
+        use crate::google_auth::testing::{fake_server, metadata_source};
+        let (token_url, _) = fake_server(
+            200,
+            r#"{"access_token":"ya29.from-metadata","expires_in":3599}"#,
+        )
+        .await;
+        let (chat_url, seen) = fake_server(200, TEXT_RESPONSE_FIXTURE).await;
+        let provider = OpenAiCompatibleProvider::with_credential(
+            format!("{chat_url}/v1/projects/p/locations/global/endpoints/openapi"),
+            Credential::Google(Arc::new(metadata_source(&token_url))),
+        );
+
+        let resp = provider
+            .complete(ChatRequest {
+                model: "google/gemini-3.5-flash".into(),
+                messages: vec![Message::User {
+                    content: "hi".into(),
+                }],
+                tools: vec![],
+                temperature: None,
+                max_tokens: None,
+                response_format: ResponseFormat::Text,
+                effort: None,
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(resp.content.as_deref(), Some("总共摄入 500 千卡"));
+        let seen = seen.lock().unwrap();
+        assert!(seen[0].starts_with(
+            "POST /v1/projects/p/locations/global/endpoints/openapi/chat/completions "
+        ));
+        assert!(seen[0]
+            .to_lowercase()
+            .contains("authorization: bearer ya29.from-metadata"));
+    }
+
     #[test]
     fn parse_response_body_maps_text_response_fixture() {
         let body: Value = serde_json::from_str(TEXT_RESPONSE_FIXTURE).unwrap();
@@ -517,12 +582,18 @@ mod tests {
         for model in [
             "gemini-3-pro-preview",
             "models/gemini-3-flash",
+            "google/gemini-3.5-flash",
             " Gemini-3-pro ",
         ] {
             let body = build_request_body(&tool_call_request(model, None));
             assert!(body.get("temperature").is_none(), "{model}");
         }
-        for model in ["gemini-2.5-flash", "gpt-test", "deepseek-chat"] {
+        for model in [
+            "gemini-2.5-flash",
+            "google/gemini-2.5-pro",
+            "gpt-test",
+            "deepseek-chat",
+        ] {
             let body = build_request_body(&tool_call_request(model, None));
             assert_eq!(body["temperature"], json!(0.0), "{model}");
         }

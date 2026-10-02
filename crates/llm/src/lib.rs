@@ -6,6 +6,7 @@
 //! `MockChatModel` landed in M2.
 
 pub mod error;
+pub mod google_auth;
 pub mod json;
 pub mod mock;
 pub mod provider;

@@ -10,8 +10,9 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 use crate::error::LlmError;
+use crate::google_auth;
 use crate::provider::anthropic::AnthropicProvider;
-use crate::provider::openai_compat::OpenAiCompatibleProvider;
+use crate::provider::openai_compat::{Credential, OpenAiCompatibleProvider};
 use crate::types::{
     ChatModel, ChatRequest, ChatResponse, Effort, Message, ResponseFormat, Role, ToolSpec,
 };
@@ -21,6 +22,27 @@ pub struct ProviderConfig {
     pub id: String,
     pub kind: ProviderKind,
     pub base_url: String,
+    /// How requests authenticate. Omitted (and not written) for the default, an API key, so
+    /// configs saved before this field existed load unchanged.
+    #[serde(default, skip_serializing_if = "ProviderAuth::is_api_key")]
+    pub auth: ProviderAuth,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderAuth {
+    /// The key from the `KeyProvider` under the provider's id.
+    #[default]
+    ApiKey,
+    /// A Google Cloud access token from Application Default Credentials: Gemini on Agent
+    /// Platform (`google_auth`). No key is stored or looked up. `open_ai_compatible` only.
+    GoogleCloud,
+}
+
+impl ProviderAuth {
+    pub fn is_api_key(&self) -> bool {
+        *self == ProviderAuth::ApiKey
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -126,13 +148,27 @@ impl LlmRouter {
             .iter()
             .filter(|pc| bound.contains(&pc.id.as_str()))
         {
-            let key = key_provider.get_key(&pc.id)?;
-            let model: Arc<dyn ChatModel> = match pc.kind {
-                ProviderKind::OpenAiCompatible => {
-                    Arc::new(OpenAiCompatibleProvider::new(pc.base_url.clone(), key))
+            let model: Arc<dyn ChatModel> = match (pc.kind, pc.auth) {
+                (ProviderKind::OpenAiCompatible, ProviderAuth::ApiKey) => {
+                    Arc::new(OpenAiCompatibleProvider::new(
+                        pc.base_url.clone(),
+                        key_provider.get_key(&pc.id)?,
+                    ))
                 }
-                ProviderKind::Anthropic => {
-                    Arc::new(AnthropicProvider::new(pc.base_url.clone(), key))
+                (ProviderKind::OpenAiCompatible, ProviderAuth::GoogleCloud) => {
+                    Arc::new(OpenAiCompatibleProvider::with_credential(
+                        pc.base_url.clone(),
+                        Credential::Google(google_auth::shared()),
+                    ))
+                }
+                (ProviderKind::Anthropic, ProviderAuth::ApiKey) => Arc::new(
+                    AnthropicProvider::new(pc.base_url.clone(), key_provider.get_key(&pc.id)?),
+                ),
+                (ProviderKind::Anthropic, ProviderAuth::GoogleCloud) => {
+                    return Err(LlmError::Config(format!(
+                        "provider {:?}: google_cloud auth needs kind open_ai_compatible",
+                        pc.id
+                    )))
                 }
             };
             providers.insert(pc.id.clone(), model);
@@ -281,6 +317,7 @@ mod tests {
                 id: "p1".into(),
                 kind,
                 base_url: "http://example.invalid".into(),
+                auth: Default::default(),
             }],
             parser: binding(None, None),
             planner: binding(None, None),
@@ -457,9 +494,41 @@ mod tests {
             id: "unused".into(),
             kind: ProviderKind::Anthropic,
             base_url: "http://example.invalid".into(),
+            auth: Default::default(),
         });
         let sink = Arc::new(RecordingUsageSink::default());
         assert!(LlmRouter::new(cfg, &KeysFor(&["p1"]), sink).is_ok());
+    }
+
+    #[test]
+    fn google_cloud_auth_needs_no_key_and_is_omitted_when_default() {
+        let mut cfg = config(ProviderKind::OpenAiCompatible);
+        cfg.providers[0].auth = ProviderAuth::GoogleCloud;
+        let sink = Arc::new(RecordingUsageSink::default());
+        // No key for p1: building must not look one up.
+        assert!(LlmRouter::new(cfg.clone(), &KeysFor(&[]), sink).is_ok());
+
+        let json = serde_json::to_value(&cfg.providers[0]).unwrap();
+        assert_eq!(json["auth"], "google_cloud");
+        cfg.providers[0].auth = ProviderAuth::ApiKey;
+        let json = serde_json::to_value(&cfg.providers[0]).unwrap();
+        assert!(json.get("auth").is_none(), "{json}");
+        // Configs saved before the field existed still load, as API-key providers.
+        let old: ProviderConfig =
+            serde_json::from_str(r#"{"id":"p","kind":"open_ai_compatible","base_url":"http://x"}"#)
+                .unwrap();
+        assert_eq!(old.auth, ProviderAuth::ApiKey);
+    }
+
+    #[test]
+    fn google_cloud_auth_is_refused_for_anthropic() {
+        let mut cfg = config(ProviderKind::Anthropic);
+        cfg.providers[0].auth = ProviderAuth::GoogleCloud;
+        let sink = Arc::new(RecordingUsageSink::default());
+        assert!(matches!(
+            LlmRouter::new(cfg, &KeysFor(&["p1"]), sink),
+            Err(LlmError::Config(_))
+        ));
     }
 
     #[test]
