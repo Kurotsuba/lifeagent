@@ -33,7 +33,7 @@ async fn core_app_with_mock(mock: Arc<MockChatModel>) -> (CoreApp, lifeagent_cor
 }
 
 async fn build_core_app(mock: Option<Arc<MockChatModel>>) -> (CoreApp, lifeagent_core::db::TestDb) {
-    let dir = lifeagent_core::db::TestDb::new();
+    let dir = lifeagent_core::db::TestDb::new().await;
     let mut builder = CoreAppBuilder::new(dir.config.clone())
         .secrets(Arc::new(MemorySecretStore::new()))
         .plugin(Arc::new(DietPlugin));

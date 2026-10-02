@@ -136,8 +136,10 @@ Run `fmt`, `clippy` and `cargo test --workspace` after finishing each milestone'
 `lifeagent-llm` stands in) and never touch a real OS keyring (`MemorySecretStore` stands in).
 
 Database tests need a local Postgres: `LIFEAGENT_TEST_DATABASE_URL`, default
-`postgres://lifeagent:lifeagent@localhost/lifeagent_test`. Each test creates its own schema
-(`test_<uuid>`) and drops it afterwards, so tests run in parallel and leave nothing behind. If
+`postgres://lifeagent:lifeagent@localhost/lifeagent_test`, a superuser. On first use it creates
+the non-superuser role the tests actually run as (`lifeagent_test_admin`, override with
+`LIFEAGENT_TEST_ADMIN_URL`). Each test is its own tenant, a `test_<uuid>` schema and role
+dropped afterwards, so tests run in parallel and leave nothing behind. If
 the server is down, start it with `sudo service postgresql start`.
 
 ## Repository layout

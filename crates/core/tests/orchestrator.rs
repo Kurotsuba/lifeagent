@@ -109,7 +109,7 @@ fn tool_call_response(id: &str, name: &str, arguments: Value) -> ChatResponse {
 }
 
 async fn builder() -> (CoreAppBuilder, lifeagent_core::db::TestDb) {
-    let dir = lifeagent_core::db::TestDb::new();
+    let dir = lifeagent_core::db::TestDb::new().await;
     let builder = CoreAppBuilder::new(dir.config.clone())
         .clock(Arc::new(FixedClock::new(Utc::now())))
         .secrets(Arc::new(MemorySecretStore::new()))

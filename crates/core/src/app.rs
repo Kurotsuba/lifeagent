@@ -810,7 +810,7 @@ mod tests {
     }
 
     async fn builder() -> (CoreAppBuilder, crate::db::TestDb) {
-        let dir = crate::db::TestDb::new();
+        let dir = crate::db::TestDb::new().await;
         let builder = CoreAppBuilder::new(dir.config.clone())
             .clock(Arc::new(FixedClock::new(Utc::now())))
             .secrets(Arc::new(MemorySecretStore::new()));
@@ -1035,7 +1035,7 @@ mod tests {
     /// configured," so the shell can route to Settings instead of failing to launch at all.
     #[tokio::test]
     async fn stored_models_config_with_an_unreachable_key_falls_back_to_unconfigured() {
-        let dir = crate::db::TestDb::new();
+        let dir = crate::db::TestDb::new().await;
         let clock = Arc::new(FixedClock::new(Utc::now()));
         let secrets = Arc::new(MemorySecretStore::new());
 
@@ -1143,7 +1143,7 @@ mod tests {
 
     #[tokio::test]
     async fn send_message_tags_user_messages_with_their_own_send_time() {
-        let dir = crate::db::TestDb::new();
+        let dir = crate::db::TestDb::new().await;
         let clock = Arc::new(FixedClock::new(Utc::now()));
         let mock = Arc::new(MockChatModel::new());
         mock.push_response(response(Some("好的"), vec![]));

@@ -116,7 +116,7 @@ struct Env {
 }
 
 async fn env_at(now: DateTime<Utc>) -> Env {
-    let dir = lifeagent_core::db::TestDb::new();
+    let dir = lifeagent_core::db::TestDb::new().await;
     let clock = Arc::new(FixedClock::new(now));
     let mock = Arc::new(MockChatModel::new());
     let app = CoreAppBuilder::new(dir.config.clone())

@@ -40,6 +40,23 @@ async fn seeds_the_manual_and_llm_estimate_sources_with_rfc3339_timestamps() {
 }
 
 #[tokio::test]
+async fn diet_tables_are_owned_by_the_tenant_role() {
+    let env = lifeagent_core::test_support::env().await;
+    apply_migrations(&env.ctx.db, env.clock.as_ref(), &DietPlugin.manifest())
+        .await
+        .unwrap();
+
+    let owners: Vec<(String,)> = sqlx::query_as(
+        "SELECT DISTINCT tableowner::TEXT FROM pg_tables
+         WHERE schemaname = current_schema() AND tablename LIKE 'diet\\_%'",
+    )
+    .fetch_all(&env.ctx.db)
+    .await
+    .unwrap();
+    assert_eq!(owners, vec![(env.db.config.schema.clone(),)]);
+}
+
+#[tokio::test]
 async fn deleting_a_dataset_cascades_into_dishes_and_dish_source_aliases() {
     let env = lifeagent_core::test_support::env().await;
     apply_migrations(&env.ctx.db, env.clock.as_ref(), &DietPlugin.manifest())

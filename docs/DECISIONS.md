@@ -2085,9 +2085,10 @@ first step toward Cloud Run + Cloud SQL. Runtime queries (`sqlx::query`/`query_a
 - **Daily backup removed.** `backup_if_due` used SQLite's `VACUUM INTO`; Cloud SQL's automated
   backups replace it. The scheduler tick now only does plan generation.
 - **Tests** need a local Postgres (`LIFEAGENT_TEST_DATABASE_URL`, default
-  `postgres://lifeagent:lifeagent@localhost/lifeagent_test`). `db::TestDb` creates a
-  `test_<uuid v7>` schema per test and drops it on `Drop` (from a helper thread with its own
-  runtime, since `Drop` can't be async), replacing the temp-directory SQLite files. This is
+  `postgres://lifeagent:lifeagent@localhost/lifeagent_test`). `db::TestDb` gives each test its
+  own `test_<uuid v7>` schema and drops it on `Drop` (from a helper thread with its own
+  runtime, since `Drop` can't be async), replacing the temp-directory SQLite files. Since the
+  per-user schema entry below, each test is a full tenant (schema and role). This is
   still offline in the `CLAUDE.md` sense: no network service beyond localhost.
 - **Desktop IPC tests run on a multi-thread runtime.** `tauri::test::get_ipc_response` blocks
   the test thread until the command returns, and the command's Postgres connections are driven
@@ -2098,4 +2099,40 @@ first step toward Cloud Run + Cloud SQL. Runtime queries (`sqlx::query`/`query_a
   `lifeagent` (password `lifeagent`, `SUPERUSER`, local development only) owning databases
   `lifeagent_dev` and `lifeagent_test`. Under WSL, start it with
   `sudo service postgresql start`.
+
+## 2026-10-02 — Per-user schemas and roles (hackathon, `docs/HACKATHON.md` §1 step 2)
+
+Each user's data lives in its own schema, owned by its own role, and Postgres enforces the
+separation.
+
+- **`DbConfig` gains `role` and `max_connections`.** `DbConfig::tenant(url, name)` is the
+  multi-user form: schema and role both `name`, at most 2 connections, 60 s idle timeout.
+  `DbConfig::from_env()` (CLI, desktop) keeps `role: None` and acts as the login role.
+- **`db::open` provisions** the tenant if missing, in one transaction under
+  `pg_advisory_xact_lock(hashtext('lifeagent.provision'))` so concurrent first opens are safe:
+  `CREATE ROLE <name> NOLOGIN`, `GRANT <name> TO CURRENT_USER WITH INHERIT FALSE, SET TRUE`,
+  `CREATE SCHEMA <name> AUTHORIZATION <name>`. Migrations then run as the tenant, so it owns
+  every table. Since Postgres 16 the creator of a role gets `ADMIN` on it but not `SET` (with
+  the default empty `createrole_self_grant`), so the explicit grant is required; this was
+  checked against PostgreSQL 17 before writing the code.
+- **Startup parameters, not `SET ROLE`.** Each pooled connection starts with `role=<name>` and
+  `search_path="<name>"` in its startup options. The startup role is what `RESET ROLE` returns
+  to, so a stray `RESET` stays in the tenant. Note `role` takes a plain name: quoting it the way
+  `search_path` is quoted makes the quotes part of the name, so validated names go in unquoted.
+- **What it guarantees:** acting as one tenant, a query that names another tenant's schema gets
+  `42501 permission denied`, and the login role acting as itself can read no tenant's data
+  (both tested). **What it doesn't:** a connection that can run arbitrary SQL can
+  `SET ROLE NONE` and then `SET ROLE` into another tenant. The app never executes model-written
+  SQL, so this protects against application bugs (wrong schema, forged IDs in tool calls), not
+  SQL injection. A `LOGIN` role per tenant, with a password derived from a server secret, would
+  close it; not done for the hackathon.
+- **`db::destroy`** removes a tenant (account deletion, test cleanup): as the tenant
+  (`SET LOCAL ROLE`, because the login role doesn't inherit ownership) it drops the schema with
+  `CASCADE`, then drops the role using the `ADMIN` option from creation. Idempotent.
+- **Tests run as production does.** `TestDb::new()` (now async) makes each test a tenant opened
+  by a non-superuser login role, `lifeagent_test_admin` (`LOGIN CREATEROLE`, `CREATE` on the
+  test database, like Cloud SQL's built-in users), created on first use by the superuser from
+  `LIFEAGENT_TEST_DATABASE_URL`. Its URL is `LIFEAGENT_TEST_ADMIN_URL`, default
+  `postgres://lifeagent_test_admin:lifeagent_test_admin@localhost/lifeagent_test`. The whole
+  suite passes with 2-connection tenant pools, and leaves no `test_%` schemas or roles behind.
 

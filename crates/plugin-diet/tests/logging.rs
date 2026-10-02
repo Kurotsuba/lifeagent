@@ -50,7 +50,7 @@ fn estimate(req: &ChatRequest) -> Result<ChatResponse, LlmError> {
 }
 
 async fn app(mock: Arc<MockChatModel>) -> (CoreApp, lifeagent_core::db::TestDb) {
-    let dir = lifeagent_core::db::TestDb::new();
+    let dir = lifeagent_core::db::TestDb::new().await;
     let app = CoreAppBuilder::new(dir.config.clone())
         .clock(Arc::new(FixedClock::new(Utc::now())))
         .secrets(Arc::new(MemorySecretStore::new()))

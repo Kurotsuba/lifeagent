@@ -136,41 +136,50 @@ schema u_<user id hex>      one per user, created at registration
 The per-user schema holds exactly today's single-user tables, so core and plugin queries stay
 single-user. They never mention a user id and find their tables through `search_path`.
 
-**Isolation**
+**Isolation** (implemented in `crates/core/src/db.rs`, 2026-10-02)
 
 A schema alone only separates names: one DB role can still read every schema. To make the
 separation real:
 
 - Each user schema is owned by its own `NOLOGIN` role `u_<user id hex>`, with no grants to
   anyone else.
-- The app logs in as one role that is a member of all user roles with `NOINHERIT`, so it has
-  no access to user data until it runs `SET ROLE`.
-- Every connection used for a request is bound to one user: `SET ROLE u_<id>` and
-  `SET search_path = u_<id>`. A query bug or a prompt-injected tool call then cannot read
-  another user's data, because Postgres refuses it. This is worth showing for the security
-  theme.
-- Schema and role names come only from the generated user id, never from user input.
-  Identifiers can't be bind parameters in DDL, so this is what keeps the `format!` safe.
+- The app logs in as one role that is a member of every user role with
+  `INHERIT FALSE, SET TRUE`, so it has no access to user data while acting as itself.
+- Every connection in a user's pool starts up acting as that user: `role` and `search_path` are
+  set as connection startup parameters (`DbConfig::tenant`). A startup role is also what
+  `RESET ROLE` returns to, so a stray `RESET` can't fall back to the app's role. A query bug or
+  a forged ID in a tool call then cannot read another user's data, because Postgres refuses it
+  ("permission denied"). This is worth showing for the security theme.
+- **Limit:** a connection that can run arbitrary SQL can `SET ROLE NONE` and switch into
+  another user. The app never runs model-written SQL, so this guards against application bugs,
+  not SQL injection. Closing that gap needs a separate `LOGIN` role (and password) per user.
+- Schema and role names come only from the generated user id, never from user input, and
+  `db::open` rejects anything but `[a-z_][a-z0-9_]*`. Identifiers can't be bind parameters in
+  DDL, so this is what keeps the `format!` safe.
+- Tests run the same way: every test is its own tenant, opened by a non-superuser
+  `CREATEROLE` login role like Cloud SQL's built-in users.
 
 **Connections**
 
-Core holds one pool today (`CoreApp::db`). Recommended for the hackathon: one `CoreApp` per
-logged-in user, built from a small per-user pool (max 2 connections, idle timeout) whose
-`after_connect` runs the `SET ROLE` / `SET search_path` above, cached in the server and evicted
-when idle. This keeps core almost unchanged: `CoreAppBuilder` takes connection options
-instead of `data_dir`. Cloud SQL's smallest tier allows only about 25 connections, so this
-fits a demo but not many concurrent users. The scaling path is one shared pool with
-`SET LOCAL ROLE` / `SET LOCAL search_path` at the start of each transaction, which means
-passing a user-scoped transaction through core instead of a pool.
+One `CoreApp` per logged-in user, built from `DbConfig::tenant(url, "u_<id>")`: a small pool
+(max 2 connections, 60 s idle timeout), cached in the server and evicted when idle. Cloud SQL's
+smallest tier allows only about 25 connections, so this fits a demo but not many concurrent
+users. The scaling path is one shared pool with `SET LOCAL ROLE` / `SET LOCAL search_path` at
+the start of each transaction, which means passing a user-scoped transaction through core
+instead of a pool.
 
 **Registration, in one transaction** (Postgres DDL is transactional, so a failure leaves
 nothing half-created):
 
 1. Validate the username and password (minimum length), insert into `auth.users`.
-2. `CREATE ROLE u_<id> NOLOGIN`, `GRANT u_<id> TO <app role>`,
-   `CREATE SCHEMA u_<id> AUTHORIZATION u_<id>`.
-3. Run core and plugin migrations with the connection bound to the new schema.
-4. Create a session and log the user in.
+2. Build the user's `CoreApp` from `DbConfig::tenant(url, "u_<id>")`. `db::open` creates the
+   role (`NOLOGIN`), grants the app role `SET` on it, creates the schema owned by it, and runs
+   core and plugin migrations as it. Idempotent, and serialized with an advisory lock.
+3. Create a session and log the user in.
+
+`db::open` commits the role and schema in its own transaction, so a registration that fails
+after step 2 leaves an empty tenant behind. Clean it up with `db::destroy`, which also serves
+account deletion (drops the schema with everything in it, then the role).
 
 Migrations also run for every existing user schema at server start, so a deploy with a new
 migration upgrades everyone.
@@ -206,12 +215,11 @@ $10/month). New GCP accounts get trial credit. Stop or delete the instance after
 
 #### Steps
 
-1. **Port sqlx from SQLite to Postgres.** The largest step: `?` placeholders to `$1`,
-   SQLite-only SQL (`VACUUM INTO`, `INSERT OR ...`, etc.), migrations. Test against a local
-   Postgres in Docker. `CLAUDE.md` requires offline tests, and DB tests use temporary SQLite
-   files today, so they need a Postgres instance (e.g. `testcontainers` or a CI service).
-2. **Per-user schemas in core:** `CoreAppBuilder` takes connection options instead of
-   `data_dir`; migrations run against a given schema.
+1. **Port sqlx from SQLite to Postgres** (done 2026-10-02). `?` placeholders to `$1`,
+   SQLite-only SQL (`VACUUM INTO`, `json_each`, `strftime`), migrations. Tests run against a
+   local Postgres, one schema per test (see the 2026-10-02 entries in `docs/DECISIONS.md`).
+2. **Per-user schemas in core** (done 2026-10-02): `DbConfig::tenant`, `db::open` provisioning
+   the role and schema, `db::destroy`, isolation tests.
 3. **Add `crates/server`** (axum), mirroring the Tauri commands as HTTP endpoints, plus the
    `auth` schema, register/login/logout, session extractor and per-user `CoreApp` cache.
 4. **Switch the React UI** from Tauri `invoke` to `fetch`, and add register and login pages
