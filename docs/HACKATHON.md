@@ -33,7 +33,7 @@ Judging criteria:
 | Requirement | Status |
 |---|---|
 | **Runs on a Google Cloud service** (App Engine, Compute Engine, GKE, Cloud Run, Cloud Run functions or Cloud TPU/GPU) | ❌ Missing. It's a local Windows Tauri app with no cloud component. |
-| **Uses a Google AI service** (Gemini API, ADK, Vertex AI / Gemini Enterprise Agent Platform, …) | ⚠️ Nearly there. Gemini goes through Google's OpenAI-compatible endpoint, and the FAQ says using an AI Studio key directly counts. But the 2026-10-01 DECISIONS entry says it has never been tested against a real Gemini model. |
+| **Uses a Google AI service** (Gemini API, ADK, Vertex AI / Gemini Enterprise Agent Platform, …) | ⚠️ Nearly there. Gemini goes through an OpenAI-compatible endpoint, but the 2026-10-01 DECISIONS entry says it has never been tested against a real Gemini model. The plan is Gemini on Agent Platform with service-account auth (see §2). |
 | **No project already well along before the event started** | ✅ The first commit is 2026-09-23, after registration opened on 2026-08-20. Building on the project during the hackathon is explicitly allowed. |
 | **Deployed URL, plus a test account if login is required** | ❌ Missing. |
 | **Architecture diagram, 3-minute YouTube demo, project description** | ❌ Not made yet. The Zenn article (category "Idea") is optional. |
@@ -56,8 +56,8 @@ video. The desktop app can stay as the main product, with the web build as the j
   frontend is already a thin view layer, so this is mostly the transport.
 - All SQLite storage moves to Postgres.
 - Everything else stored locally also moves to Postgres, except logs.
-- The hackathon build uses a fixed Gemini API key, so the keyring-backed API key storage does
-  not need converting.
+- The hackathon build calls Gemini on Agent Platform as the Cloud Run service account, with no
+  API key (see §2). So the keyring-backed API key storage does not need converting.
 
 #### What is stored locally today
 
@@ -65,7 +65,7 @@ Besides SQLite and logs, only two things:
 
 | What | Where | Plan |
 |---|---|---|
-| API keys | OS credential store via `KeyringSecretStore` (`crates/core/src/secrets.rs`), service `LifeAgent`, account `provider:{id}` | Not converted. The fixed Gemini key comes from Secret Manager as an env var. |
+| API keys | OS credential store via `KeyringSecretStore` (`crates/core/src/secrets.rs`), service `LifeAgent`, account `provider:{id}` | Not converted. Gemini uses the service account's access token (§2); there is no key. |
 | Daily DB backups | `data_dir/backups/lifeagent-YYYY-MM-DD.db`, written by `backup_if_due` (`crates/core/src/scheduler.rs`) with SQLite's `VACUUM INTO` | Removed. Cloud SQL automated backups replace it. |
 
 Already in SQLite, so they move with the rest: settings (including the model/provider config
@@ -86,7 +86,7 @@ own (no `localStorage`, IndexedDB or Tauri store).
 | DynamoDB | Firestore | Not used: it would mean rewriting all the SQL. |
 | RDS Postgres | **Cloud SQL for PostgreSQL** | **Use.** The code already uses SQL through sqlx. |
 | EventBridge Scheduler | **Cloud Scheduler** | **Use**, to drive the scheduler (see below). |
-| Secrets Manager | **Secret Manager** | **Use**, for the fixed Gemini key. |
+| Secrets Manager | **Secret Manager** | **Use**, for the DB password. |
 
 #### Architecture
 
@@ -94,7 +94,7 @@ own (no `localStorage`, IndexedDB or Tauri store).
 Browser --HTTPS--> Cloud Run service (one container)
                      |- axum: /api/* JSON endpoints
                      |- axum: serves the built React files (static)
-                     |- Gemini API (key from Secret Manager, as an env var)
+                     |- Gemini on Agent Platform (service account token, no key)
                      '- Cloud SQL Postgres (built-in Cloud Run <-> Cloud SQL connection)
 Cloud Scheduler --> POST /api/internal/tick (replaces the in-process scheduler loop)
 ```
@@ -107,7 +107,9 @@ Cloud Scheduler --> POST /api/internal/tick (replaces the in-process scheduler l
   existing logic. This also fits the theme, because every autonomous action becomes an
   auditable request. Fallback: `--min-instances=1 --no-cpu-throttling` and keep the loop, at
   the cost of an always-on instance.
-- **Gemini key:** in Secret Manager, exposed with `--set-secrets GEMINI_API_KEY=...`. Never in
+- **Gemini:** called as the Cloud Run service account (`roles/aiplatform.user`), with tokens
+  from the metadata server. No key anywhere. See §2.
+- **DB password:** in Secret Manager, exposed with `--set-secrets DB_PASSWORD=...`. Never in
   the image or the repo.
 - **Logs:** to stdout, ideally JSON (`tracing-subscriber` json feature). Cloud Logging picks it
   up; the rolling log file is not used on the server.
@@ -192,8 +194,8 @@ each with a connection bound to that user's schema.
 
 **Cost control**
 
-All users share the fixed Gemini key, so add a per-user daily token budget built on
-`llm_usage`. Open registration with a shared key could otherwise run up the bill. Consider
+All users share one Gemini bill, so add a per-user daily token budget built on `llm_usage`
+(see §2). Open registration could otherwise run up the bill. Consider
 closing registration (or requiring an invite code) after judging.
 
 #### Cost
@@ -217,13 +219,143 @@ $10/month). New GCP accounts get trial credit. Stop or delete the instance after
 5. **Deploy:** multi-stage Dockerfile (Rust build, Vite build, slim runtime image), Cloud SQL,
    Secret Manager, Cloud Run, Cloud Scheduler.
 
+#### Google Cloud console checklist
+
+Menu names may differ slightly; the console search bar finds each page by name.
+
+**Do now**
+
+1. **Project and billing.**
+   - Create a project (e.g. `lifeagent-hackathon`) and note its **Project ID**, which goes
+     into the Gemini base URL.
+   - Link a billing account (Agent Platform, Cloud Run and Cloud SQL all need it).
+   - **Billing → Budgets & alerts:** a budget for this project (e.g. ¥3,000) with alerts at
+     50%, 90% and 100%.
+2. **Enable APIs** (**APIs & Services → Library**): Vertex AI API (`aiplatform.googleapis.com`,
+   still the API name for Agent Platform), Cloud Run Admin, Cloud SQL Admin, Secret Manager,
+   Cloud Scheduler, Artifact Registry, and Cloud Build if images are built in the cloud.
+3. **Check Gemini.**
+   - Send a test prompt to a Gemini model in the Agent Platform console.
+   - Then run the `gcloud auth application-default login` + curl test from §2, which is the
+     call the app makes.
+   - No API key is needed. An `AQ.` key, if created, can be deleted under
+     **APIs & Services → Credentials**.
+4. **Service accounts** (**IAM & Admin → Service Accounts**). Create no JSON keys for either;
+   Cloud Run supplies credentials.
+   - `lifeagent-run`, the app's runtime identity: **Vertex AI User**
+     (`roles/aiplatform.user`), **Cloud SQL Client**, **Secret Manager Secret Accessor**.
+   - `lifeagent-scheduler`, used by Cloud Scheduler: no roles yet. After the first deploy,
+     grant **Cloud Run Invoker** on the service only.
+5. **Artifact Registry:** a Docker repository `lifeagent` in `asia-northeast1`.
+6. **Gemini quota (optional):** **IAM & Admin → Quotas & system limits**, lower the Gemini
+   quotas for the models in use. A hard limit on top of the budget alert and the per-user
+   limits.
+
+**Do later, once the Postgres port passes locally** (Cloud SQL costs money just by existing)
+
+7. **Cloud SQL** (**SQL → Create instance → PostgreSQL**).
+   - Settings: Enterprise edition, smallest shared-core machine (`db-f1-micro`) or the Sandbox
+     preset, PostgreSQL 17, `asia-northeast1`, single zone, automated backups on.
+   - No authorized networks: Cloud Run uses its built-in Cloud SQL connection; local access
+     goes through the Cloud SQL Auth Proxy.
+   - Then create database `lifeagent` and user `lifeagent_app` with a strong password.
+     Users created this way are in `cloudsqlsuperuser` and have `CREATEROLE`, which
+     registration needs. On Postgres 16+, registration must grant itself the new role
+     explicitly: `GRANT u_<id> TO lifeagent_app WITH INHERIT FALSE, SET TRUE`.
+8. **Secret Manager:** secret `db-password` with the `lifeagent_app` password (the only
+   secret).
+9. **After the first deploy.**
+   - **Cloud Run:** confirm the service runs as `lifeagent-run`, has the Cloud SQL connection,
+     maps `db-password` to an env var, allows unauthenticated access (the app has its own
+     login), and has max instances 2.
+   - **Cloud Scheduler:** POST to `<service URL>/api/internal/tick` every 5 minutes, auth
+     header **OIDC token** as `lifeagent-scheduler`. The server also verifies that token,
+     since the service itself is public.
+
 ### 2. Make Gemini real
 
-- Run a real chat turn that logs a meal against a Gemini 3 model, as the 2026-10-01 entry says
-  is still to do.
-- Make Gemini the default provider for this build.
-- Optionally call it through Vertex AI, which the event recommends (Gemini Enterprise Agent
-  Platform). That uses Cloud Run's service account, so there's no API key to manage.
+#### Decision (2026-10-02): Gemini on Agent Platform, service-account auth
+
+Only the backend calls Gemini, through Gemini Enterprise Agent Platform (formerly Vertex AI),
+authenticated as the Cloud Run service account. This replaces the earlier "fixed Gemini key in
+Secret Manager" plan.
+
+Why:
+
+- **No key to leak or rotate.** Access is one IAM role, revocable in one place, and Cloud Audit
+  Logs record which identity called the model. Google recommends API keys for testing and
+  application default credentials for production.
+- **Data terms.** Users' meals and health goals are personal data. Agent Platform runs under
+  Google Cloud's data terms (no training on customer data, data-residency controls). The AI
+  Studio free tier may use prompts to improve Google's products.
+- **Operations.** Cloud Monitoring metrics, per-project quotas, IAM and billing all sit with the
+  rest of the stack.
+- **The event** recommends Agent Platform.
+
+An express-mode `AQ.` API key does not work here: Agent Platform's OpenAI-compatible endpoint
+accepts only Google Cloud access tokens ("Only Google Cloud Auth is supported using the OpenAI
+library in Gemini Enterprise Agent Platform").
+
+#### Connection settings
+
+| Setting | Value |
+|---|---|
+| Provider kind | OpenAI-compatible |
+| Base URL (服务地址) | `https://aiplatform.googleapis.com/v1/projects/<PROJECT_ID>/locations/global/endpoints/openapi` |
+| Model names | `google/` prefix, e.g. `google/gemini-3.5-flash`; pin exact versions for judging |
+| Auth | `Authorization: Bearer <access token>`; tokens last 1 hour |
+| IAM | Runtime service account gets `roles/aiplatform.user`; enable `aiplatform.googleapis.com` |
+
+Use the `global` location: it routes around regional capacity shortages.
+
+Local test, before any code change:
+
+```bash
+gcloud services enable aiplatform.googleapis.com
+gcloud auth application-default login
+curl -s "https://aiplatform.googleapis.com/v1/projects/$PROJECT/locations/global/endpoints/openapi/chat/completions" \
+  -H "Authorization: Bearer $(gcloud auth application-default print-access-token)" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"google/gemini-3.5-flash","messages":[{"role":"user","content":"Say hi"}]}'
+```
+
+#### Code change: refreshing token source
+
+`OpenAiCompatibleProvider` (`crates/llm/src/provider/openai_compat.rs`) takes its key once at
+construction and never refreshes it, so a pasted access token stops working after an hour.
+
+- Add a token source to the provider that returns a cached token and fetches a new one shortly
+  before expiry.
+- On Cloud Run: `GET http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token`
+  with header `Metadata-Flavor: Google`. One HTTP call, no new crate.
+- Locally: `gcloud auth application-default print-access-token`.
+- A static key stays supported for other providers and for tests (`MockChatModel` is unchanged;
+  tests stay offline).
+
+#### Serving users safely
+
+- **Backend only.** The browser talks to our API, never to Gemini.
+- **Per-user limits.** Daily token budget from `llm_usage` plus per-user request rate limits.
+  Lower the project's Gemini quota and set a billing budget alert so a runaway bug can't burn
+  money.
+- **Cap output.** `max_tokens` on every call.
+- **Cheapest model per role.** Flash for parsing and conversation, Pro only for planning (the
+  role-based router already supports this).
+- **Failures.** Retry `429`/`5xx` with backoff and jitter (`send_with_retries`), then show a
+  friendly "busy, try again".
+- **Model output is untrusted.** Tool arguments are validated, numbers come from Rust, imported
+  and user text is data not instructions, destructive actions need approval, and per-user DB
+  roles stop a prompt-injected tool call from reaching other users' data.
+- **Privacy.** No prompts or responses in logs at INFO; log metadata (user, model, tokens,
+  latency, tool calls). Send the model only what the turn needs. Say in the UI that responses
+  come from Gemini, and offer account deletion (`DROP SCHEMA ... CASCADE`).
+- **Observability.** Tokens, latency, errors and cost per user and role, from `llm_usage` and
+  structured logs in Cloud Logging.
+
+#### Still to do
+
+- Run a real chat turn that logs a meal against a Gemini 3 model, as the 2026-10-01 entry says.
+- Make Gemini on Agent Platform the default provider for this build.
 
 ### 3. Lean into the theme
 
@@ -265,6 +397,6 @@ To make that visible:
 
 1. Postgres port, server crate, web frontend and Cloud Run deployment (see §1 steps;
    everything else depends on having a URL).
-2. Real Gemini verification, Gemini as the default provider.
+2. Gemini on Agent Platform: refreshing token source, real verification, default provider.
 3. Governance features: audit trail, approval flow, injection defense.
 4. Japanese UI strings, architecture diagram, demo video, description.
