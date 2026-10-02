@@ -400,7 +400,8 @@ offline against a local fake server.
   Gemini on Agent Platform, authenticated with this machine's ADC, worked (manual test).
 - Gemini on Agent Platform is the web build's provider through `LIFEAGENT_MODELS` (the desktop
   keeps its own model settings).
-- Still to check: the same with a Gemini 3 model, and on Cloud Run with the service account.
+- Done 2026-10-02 on Cloud Run with the service account: Gemini 3.8 Flash (conversation),
+  3.5 Flash-Lite (parser) and 3.1 Pro preview (planner), each exercised on production.
 
 ### 3. Lean into the theme
 

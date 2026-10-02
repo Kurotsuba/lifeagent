@@ -16,9 +16,13 @@ SQL_INSTANCE="$PROJECT:$REGION:lifeagent"
 RUN_SA="lifeagent-run@$PROJECT.iam.gserviceaccount.com"
 
 cd "$(dirname "$0")/.."
-TAG="$(git rev-parse --short HEAD)"
-if [ -n "$(git status --porcelain)" ]; then
-  TAG="$TAG-dirty"
+# TAG=<existing tag> reuses an image already built, e.g. to change only deploy/env.yaml:
+#   TAG=12b98fe deploy/deploy.sh deploy
+if [ -z "${TAG:-}" ]; then
+  TAG="$(git rev-parse --short HEAD)"
+  if [ -n "$(git status --porcelain)" ]; then
+    TAG="$TAG-dirty"
+  fi
 fi
 IMAGE="$REGION-docker.pkg.dev/$PROJECT/lifeagent/server:$TAG"
 
