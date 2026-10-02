@@ -161,7 +161,9 @@ pub fn router(state: Arc<AppState>) -> Router {
 
     let app = Router::new()
         .nest("/api", api)
-        .route("/healthz", get(routes::healthz));
+        // Not `/healthz`: Cloud Run's front end reserves some paths ending in `z` and answers
+        // them itself with a 404.
+        .route("/health", get(routes::health));
     let app = match &state.config.static_dir {
         // Unknown paths fall back to index.html so the UI's own routes survive a reload.
         Some(dir) => app

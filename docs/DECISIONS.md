@@ -2259,3 +2259,41 @@ so an OpenAI-compatible provider can now authenticate with one instead of an API
   ADC; it passed here. A real chat turn against Agent Platform through the web build was then
   run by hand and worked.
 
+## 2026-10-02 — Cloud Run deployment (hackathon, `docs/HACKATHON.md` §1 step 5)
+
+- **One image** (`Dockerfile`): the Vite build (`npm ci` from the workspace lockfile in
+  `apps/desktop`), a release build of `lifeagent-server` only (the whole workspace is copied so
+  Cargo can resolve it; Tauri is never compiled), and a Debian slim runtime with CA roots
+  (HTTPS to Google) and `tzdata` (`TZ=Asia/Tokyo`), running as a non-root user and serving the
+  UI from `LIFEAGENT_STATIC_DIR=/app/ui`.
+- **Built by Cloud Build**, not locally (no Docker here): `deploy/deploy.sh build` uploads what
+  git tracks (`.gcloudignore` includes `.gitignore`), on `e2-highcpu-8` with a one-hour
+  timeout, and pushes to Artifact Registry tagged with the commit (`-dirty` if uncommitted).
+  Cloud Build runs as the project's default compute service account, which has Editor.
+- **Database URL:** Cloud Run maps a secret to one environment variable, so the URL in
+  `deploy/env.yaml` has no password and the server splices in `LIFEAGENT_DB_PASSWORD`
+  (percent-encoded). It connects through the Cloud SQL socket:
+  `postgres://lifeagent_app@localhost/lifeagent?host=/cloudsql/<connection>`. The `localhost` is
+  required: sqlx rejects an empty host, and a `host=` value starting with `/` replaces it with
+  the socket directory (checked in a test against sqlx's own parser).
+- **Cloud Run settings:** runs as `lifeagent-run`; secrets `db-password` and `tick-token`;
+  `--allow-unauthenticated` (the app does its own login); `--max-instances 1` (per-instance
+  user cache and event streams); `--timeout 3600` so an SSE connection lasts up to an hour
+  before `EventSource` reconnects; 1 vCPU, 512 MiB; scale to zero.
+- **Scheduler:** job `lifeagent-tick`, every 5 minutes (Asia/Tokyo), POST
+  `/api/internal/tick` with the `X-LifeAgent-Tick-Token` header, read from the secret when the
+  job is created. The header value is visible to anyone who can view the job's configuration in
+  this project, an accepted trade-off of the shared-secret design.
+- **Models:** `deploy/env.yaml` uses Gemini 2.5 Flash (parser, conversation) and 2.5 Pro
+  (planner) on Agent Platform, the combination that worked in the manual test.
+- **Logs:** plain text to stdout without ANSI colors (only on a terminal), which Cloud Logging
+  stores per line.
+- **First deploy, checked end to end** against https://lifeagent-519106969791.asia-northeast1.run.app:
+  the UI and its client-side routes are served; registering provisions a tenant on Cloud SQL
+  (so `lifeagent_app` can create roles and schemas there); the session cookie is `Secure` and
+  `HttpOnly`; a chat turn got a Gemini reply through the service account in 1.6 s; deleting the
+  account removed it; a Cloud Scheduler run of `lifeagent-tick` got a 200. The image built in
+  3 minutes on Cloud Build.
+- **`/healthz` became `/health`.** Cloud Run's front end reserves some paths ending in `z` and
+  answers `/healthz` with its own 404 before the request reaches the container.
+

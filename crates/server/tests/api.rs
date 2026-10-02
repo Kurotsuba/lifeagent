@@ -219,6 +219,19 @@ async fn usernames_are_unique_and_inputs_are_validated() {
 }
 
 #[tokio::test]
+async fn health_answers_without_a_session() {
+    let server = start().await;
+    let resp = server
+        .http
+        .get(format!("{}/health", server.base))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(resp.text().await.unwrap(), "ok");
+}
+
+#[tokio::test]
 async fn commands_need_a_session() {
     let server = start().await;
     let none = Session { cookie: None };

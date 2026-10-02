@@ -362,7 +362,7 @@ pub async fn unknown_api() -> ApiError {
     ApiError::new("not_found", "未找到对应的接口。")
 }
 
-pub async fn healthz() -> &'static str {
+pub async fn health() -> &'static str {
     "ok"
 }
 

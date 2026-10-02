@@ -32,10 +32,10 @@ Judging criteria:
 
 | Requirement | Status |
 |---|---|
-| **Runs on a Google Cloud service** (App Engine, Compute Engine, GKE, Cloud Run, Cloud Run functions or Cloud TPU/GPU) | ❌ Missing. It's a local Windows Tauri app with no cloud component. |
+| **Runs on a Google Cloud service** (App Engine, Compute Engine, GKE, Cloud Run, Cloud Run functions or Cloud TPU/GPU) | ✅ Cloud Run (`lifeagent`, asia-northeast1) with Cloud SQL for PostgreSQL, Secret Manager and Cloud Scheduler, deployed 2026-10-02. |
 | **Uses a Google AI service** (Gemini API, ADK, Vertex AI / Gemini Enterprise Agent Platform, …) | ✅ Gemini on Agent Platform, authenticated with Google Cloud access tokens (§2). A real chat turn through the web build worked on 2026-10-02. |
 | **No project already well along before the event started** | ✅ The first commit is 2026-09-23, after registration opened on 2026-08-20. Building on the project during the hackathon is explicitly allowed. |
-| **Deployed URL, plus a test account if login is required** | ❌ Missing. |
+| **Deployed URL, plus a test account if login is required** | ⚠️ URL: https://lifeagent-519106969791.asia-northeast1.run.app. A demo account for the judges still has to be created and listed in the submission. |
 | **Architecture diagram, 3-minute YouTube demo, project description** | ❌ Not made yet. The Zenn article (category "Idea") is optional. |
 | **Eligibility: lives in Japan, aged 18+** | The participant has to confirm this. |
 
@@ -238,8 +238,11 @@ $10/month). New GCP accounts get trial credit. Stop or delete the instance after
    logout in the sidebar, 账号 settings section (account deletion); the model step,
    model settings and the notification/autostart switches are hidden. Verified end to end in
    headless Chromium against the real server.
-5. **Deploy:** multi-stage Dockerfile (Rust build, Vite build, slim runtime image), Cloud SQL,
-   Secret Manager, Cloud Run, Cloud Scheduler.
+5. **Deploy** (2026-10-02): `Dockerfile` (Vite build, Rust release build, Debian slim runtime
+   serving both) and `deploy/deploy.sh` (`build`: Cloud Build on `e2-highcpu-8`; `deploy`:
+   Cloud Run with `lifeagent-run`, the Cloud SQL socket, `db-password`/`tick-token` secrets,
+   `deploy/env.yaml`, one instance; `schedule`: the Cloud Scheduler job every 5 minutes).
+   Redeploy after a change with `deploy/deploy.sh` from a clean checkout.
 
 #### Google Cloud console checklist
 
