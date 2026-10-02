@@ -1,7 +1,7 @@
 import { dietPlanSection, type MealType, type StoredPlan } from "../api/types";
-import { zhCN } from "../i18n/zh-CN";
+import { strings } from "../i18n";
 
-const t = zhCN.today.todayPlan;
+const t = strings.today.todayPlan;
 
 interface TodayPlanListProps {
   plan: StoredPlan;
@@ -35,7 +35,7 @@ export function TodayPlanList({ plan, loggedMealTypes }: TodayPlanListProps) {
                 {done ? "✓" : "○"}
               </span>
               <span className="text-neutral-500 dark:text-neutral-400">
-                {zhCN.mealType[meal.meal_type]}
+                {strings.mealType[meal.meal_type]}
               </span>
               <span
                 className={

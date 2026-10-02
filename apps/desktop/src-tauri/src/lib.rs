@@ -12,6 +12,7 @@ pub mod commands;
 /// `CommandError` and its mappings live in `lifeagent-api`, shared with the web server.
 pub use lifeagent_api::error;
 mod events;
+mod locale;
 mod logging;
 mod notify;
 mod paths;
@@ -115,6 +116,7 @@ pub fn run() {
             commands::preview_food_import,
             commands::commit_food_import,
             commands::cancel_food_import,
+            commands::set_locale,
         ])
         .run(tauri::generate_context!())
         .expect("error while running lifeagent-desktop");

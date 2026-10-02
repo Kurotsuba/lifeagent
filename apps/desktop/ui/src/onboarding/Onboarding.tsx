@@ -3,7 +3,8 @@ import { completeOnboarding, logWeight, saveProfile, saveWeightGoal, saveModels,
 import { isWeb } from "../api/platform";
 import { commandErrorMessage, type Role } from "../api/types";
 import { primaryButtonClass, secondaryButtonClass } from "../components/buttonStyles";
-import { zhCN } from "../i18n/zh-CN";
+import { LanguageSelect } from "../components/LanguageSelect";
+import { describeError, strings } from "../i18n";
 import {
   buildGoal,
   buildModelsConfig,
@@ -16,7 +17,7 @@ import { isStepProfileValid, StepProfile } from "./StepProfile";
 import { StepGoal } from "./StepGoal";
 import { isStepModelFillable, StepModel } from "./StepModel";
 
-const t = zhCN.onboarding;
+const t = strings.onboarding;
 
 const ROLES: Role[] = ["parser", "planner", "conversation"];
 
@@ -57,7 +58,10 @@ export function Onboarding({ onComplete }: OnboardingProps) {
         const result = await testModel(role);
         if (!result.ok) {
           // A string, not an `Error`: `commandErrorMessage` would render it as "Error: …".
-          throw `${zhCN.settings.role[role]}：${result.error ?? t.model.testFailed}`;
+          throw strings.common.labelled(
+            strings.settings.role[role],
+            result.error ? describeError(result.error) : t.model.testFailed,
+          );
         }
         latencies[role] = result.latency_ms;
       }
@@ -96,9 +100,13 @@ export function Onboarding({ onComplete }: OnboardingProps) {
     <div className="flex h-full flex-col">
       <div className="flex-1 overflow-y-auto px-6 py-8">
         <div className="mx-auto max-w-2xl">
-          <p className="mb-4 text-xs font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
-            {t.stepLabel(step + 1, STEPS.length)} · {STEPS[step]}
-          </p>
+          <div className="mb-4 flex items-center justify-between">
+            <p className="text-xs font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
+              {t.stepLabel(step + 1, STEPS.length)} · {STEPS[step]}
+            </p>
+            {/* First step only: switching reloads the page, which drops the draft. */}
+            {step === 0 ? <LanguageSelect /> : null}
+          </div>
 
           {step === 0 ? <StepProfile draft={draft} update={update} /> : null}
           {step === 1 ? <StepGoal draft={draft} update={update} /> : null}
@@ -128,7 +136,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
             disabled={step === 0}
             onClick={() => setStep((s) => Math.max(0, s - 1))}
           >
-            {zhCN.common.back}
+            {strings.common.back}
           </button>
           {step < LAST_STEP ? (
             <button
@@ -137,7 +145,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
               disabled={!canGoNext}
               onClick={() => setStep((s) => Math.min(LAST_STEP, s + 1))}
             >
-              {zhCN.common.next}
+              {strings.common.next}
             </button>
           ) : (
             <button
@@ -148,7 +156,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
               }
               onClick={handleFinish}
             >
-              {finishing ? zhCN.common.finishing : zhCN.common.finish}
+              {finishing ? strings.common.finishing : strings.common.finish}
             </button>
           )}
         </div>

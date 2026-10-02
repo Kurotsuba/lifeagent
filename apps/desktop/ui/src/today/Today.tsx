@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { getSettings, getToday } from "../api/commands";
 import { onAppDataEvent } from "../api/events";
 import { commandErrorMessage, dietCard, type MealType, type TodayView } from "../api/types";
-import { zhCN } from "../i18n/zh-CN";
+import { strings } from "../i18n";
 import { KcalRing } from "./KcalRing";
 import { MacroBars } from "./MacroBars";
 import { MealList } from "./MealList";
@@ -49,7 +49,7 @@ export function Today({ onAdjustPlan }: TodayProps) {
   if (!view) {
     return (
       <div className="p-6">
-        <p className="text-sm text-neutral-500 dark:text-neutral-400">{zhCN.common.loading}</p>
+        <p className="text-sm text-neutral-500 dark:text-neutral-400">{strings.common.loading}</p>
       </div>
     );
   }
@@ -71,9 +71,9 @@ export function Today({ onAdjustPlan }: TodayProps) {
               onClick={() => setShowWeightDialog((v) => !v)}
             >
               {view.latest_weight
-                ? zhCN.today.latestWeight(view.latest_weight.kg)
-                : zhCN.today.noWeightYet}{" "}
-              · {zhCN.today.logWeight}
+                ? strings.today.latestWeight(view.latest_weight.kg)
+                : strings.today.noWeightYet}{" "}
+              · {strings.today.logWeight}
             </button>
             {showWeightDialog ? (
               <WeightLogDialog
@@ -86,7 +86,7 @@ export function Today({ onAdjustPlan }: TodayProps) {
 
         <section className="rounded-lg border border-neutral-200 p-4 dark:border-neutral-700">
           <h2 className="mb-3 text-sm font-semibold text-neutral-900 dark:text-neutral-50">
-            {zhCN.today.diet.title}
+            {strings.today.diet.title}
           </h2>
           <div className="flex items-center gap-6">
             <KcalRing

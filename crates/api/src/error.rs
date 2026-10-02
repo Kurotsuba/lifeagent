@@ -1,34 +1,157 @@
 //! `CommandError`: the error type every command returns, per `docs/PHASE1_SPEC.md` §10.2
-//! (`CommandError { code, message }`, message already in zh-CN). Tauri commands return it as
-//! is; the web server sends it as the JSON body of an error response.
+//! (`CommandError { code, message }`). Tauri commands return it as is; the web server sends it
+//! as the JSON body of an error response.
 //!
 //! `code` always comes from `CoreError::code()`/`LlmError::code()` (`crates/core`,
 //! `crates/llm`), the same classification the scheduler attaches to a scheduled
 //! `AppEvent::PlanFailed` (the desktop's `notify.rs`), so the two surfaces can't drift on what
-//! counts as, say, an auth failure. `CoreError::Validation`'s free-form English detail (db/format-invariant
-//! failures, not something a user's own input caused) still gets one generic zh-CN message;
-//! `CoreError::InvalidInput`'s named `ValidationRule`s each get their own, precise wording
-//! (`invalid_input_message`), per `docs/PHASE1_SPEC.md` §14 M8: "Error messages in zh-CN for
-//! every `CommandError`".
+//! counts as, say, an auth failure. `detail` says precisely what went wrong, as data: the UI
+//! words it in the user's language (`apps/desktop/ui/src/i18n`, `errors`). `message` is the
+//! same thing in zh-CN, for the CLI and for any client that doesn't know a `detail` kind.
+//! `CoreError::Validation`'s free-form English detail (db/format-invariant failures, not
+//! something a user's own input caused) still gets one generic message; `CoreError::InvalidInput`'s
+//! named `ValidationRule`s each get their own, quoting the value and the bound it broke.
 
 use lifeagent_core::error::{CoreError, ValidationRule};
 use lifeagent_core::plugin::PluginError;
 use lifeagent_core::time::format_hhmm;
 use lifeagent_llm::error::LlmError;
-use lifeagent_plugin_diet::import::FoodDataError;
+use lifeagent_plugin_diet::import::{FoodDataError, ImportMessage};
 use serde::Serialize;
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct CommandError {
     pub code: String,
     pub message: String,
+    pub detail: ErrorDetail,
 }
 
 impl CommandError {
-    pub fn new(code: &str, message: impl Into<String>) -> Self {
+    pub fn new(code: &str, detail: ErrorDetail) -> Self {
         Self {
             code: code.to_string(),
-            message: message.into(),
+            message: detail.to_string(),
+            detail,
+        }
+    }
+}
+
+/// What went wrong, one variant per message the user can see. Serialized as
+/// `{ "kind": "<snake_case variant>", ...fields }`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ErrorDetail {
+    NotConfigured,
+    InvalidInput,
+    NotFound,
+    NothingToPlan,
+    Internal,
+    // ---- Model provider (`LlmError`) ----
+    LlmAuth,
+    LlmRateLimited,
+    LlmTimeout,
+    LlmUnavailable,
+    // ---- `ValidationRule` ----
+    HeightOutOfRange {
+        got: f64,
+    },
+    AgeOutOfRange {
+        got: i32,
+    },
+    MealsPerDayOutOfRange {
+        got: u8,
+    },
+    GoalRateOutOfRange {
+        got: f64,
+    },
+    GoalTargetOutOfRange {
+        got: f64,
+    },
+    WeightOutOfRange {
+        got: f64,
+    },
+    NoteEmpty,
+    NoteTooLong {
+        got: usize,
+        max: usize,
+    },
+    /// Both as `HH:MM`.
+    PlanTimeBeforeDayBoundary {
+        plan_time: String,
+        day_boundary: String,
+    },
+    InstructionEmpty,
+    // ---- Food data import (`FoodDataError`) ----
+    FoodData {
+        detail: ImportMessage,
+    },
+    // ---- Web server (`crates/server`): accounts and routing ----
+    Unauthorized,
+    InvalidUsername,
+    InvalidPassword,
+    TooManyAttempts,
+    InvalidCredentials,
+    WrongInviteCode,
+    UsernameTaken,
+    BadRequest,
+    UnknownEndpoint,
+}
+
+impl std::fmt::Display for ErrorDetail {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use ErrorDetail::*;
+        match self {
+            NotConfigured => write!(f, "尚未完成模型配置，请先在设置中完成配置。"),
+            InvalidInput => write!(f, "输入内容有误，请检查后重试。"),
+            NotFound => write!(f, "未找到对应的数据。"),
+            NothingToPlan => write!(f, "请先完善个人档案并记录一次体重，再生成计划。"),
+            Internal => write!(f, "发生内部错误，请重试。"),
+            LlmAuth => write!(f, "模型鉴权失败，请检查 API Key 是否正确。"),
+            LlmRateLimited => write!(f, "请求过于频繁，请稍后再试。"),
+            LlmTimeout => write!(f, "请求超时，请重试。"),
+            LlmUnavailable => write!(f, "模型服务出现问题，请重试。"),
+            HeightOutOfRange { got } => {
+                write!(f, "身高需在 120–230 厘米之间，当前填写的是 {got:.1} 厘米。")
+            }
+            AgeOutOfRange { got } => {
+                write!(f, "年龄需在 16–100 岁之间，当前的出生日期对应 {got} 岁。")
+            }
+            MealsPerDayOutOfRange { got } => {
+                write!(f, "每日餐数需在 3–5 之间，当前填写的是 {got}。")
+            }
+            GoalRateOutOfRange { got } => write!(
+                f,
+                "目标速度需在 0–1.0 千克/周之间，当前填写的是 {got:.2} 千克/周。"
+            ),
+            GoalTargetOutOfRange { got } => {
+                write!(
+                    f,
+                    "目标体重需在 30–300 千克之间，当前填写的是 {got:.1} 千克。"
+                )
+            }
+            WeightOutOfRange { got } => {
+                write!(f, "体重需在 30–300 千克之间，当前填写的是 {got:.1} 千克。")
+            }
+            NoteEmpty => write!(f, "备忘内容不能为空。"),
+            NoteTooLong { got, max } => write!(f, "备忘内容最多 {max} 字，当前是 {got} 字。"),
+            PlanTimeBeforeDayBoundary {
+                plan_time,
+                day_boundary,
+            } => write!(
+                f,
+                "生成时间（{plan_time}）不能早于日界时间（{day_boundary}），请调整其中一项。"
+            ),
+            InstructionEmpty => write!(f, "调整要求不能为空，请描述需要怎么调整。"),
+            FoodData { detail } => write!(f, "{detail}"),
+            Unauthorized => write!(f, "请先登录。"),
+            InvalidUsername => write!(f, "用户名需为 3–32 位英文字母、数字或 _ - . 组成。"),
+            InvalidPassword => write!(f, "密码需为 8–128 位。"),
+            TooManyAttempts => write!(f, "尝试次数过多，请稍后再试。"),
+            InvalidCredentials => write!(f, "用户名或密码错误。"),
+            WrongInviteCode => write!(f, "邀请码不正确。"),
+            UsernameTaken => write!(f, "该用户名已被使用。"),
+            BadRequest => write!(f, "请求参数有误。"),
+            UnknownEndpoint => write!(f, "未找到对应的接口。"),
         }
     }
 }
@@ -40,107 +163,90 @@ impl From<CoreError> for CommandError {
     fn from(err: CoreError) -> Self {
         let code = err.code();
         match err {
-            CoreError::NotConfigured => {
-                CommandError::new(code, "尚未完成模型配置，请先在设置中完成配置。")
-            }
+            CoreError::NotConfigured => CommandError::new(code, ErrorDetail::NotConfigured),
             CoreError::Validation(msg) => {
                 tracing::debug!(error = %msg, "command validation error");
-                CommandError::new(code, "输入内容有误，请检查后重试。")
+                CommandError::new(code, ErrorDetail::InvalidInput)
             }
             CoreError::InvalidInput(rule) => {
                 tracing::debug!(error = %rule, "command validation error");
-                CommandError::new(code, invalid_input_message(rule))
+                CommandError::new(code, invalid_input_detail(rule))
             }
             CoreError::NotFound(msg) => {
                 tracing::debug!(error = %msg, "command not-found error");
-                CommandError::new(code, "未找到对应的数据。")
+                CommandError::new(code, ErrorDetail::NotFound)
             }
-            CoreError::NothingToPlan => {
-                CommandError::new(code, "请先完善个人档案并记录一次体重，再生成计划。")
-            }
+            CoreError::NothingToPlan => CommandError::new(code, ErrorDetail::NothingToPlan),
             CoreError::Llm(e) => e.into(),
             other => {
                 tracing::error!(error = %other, "internal command error");
-                CommandError::new(code, "发生内部错误，请重试。")
+                CommandError::new(code, ErrorDetail::Internal)
             }
         }
     }
 }
 
-/// One zh-CN sentence per `ValidationRule`, quoting the value the user actually entered and the
-/// bound it broke — the "which field, which bound" detail `docs/DECISIONS.md`'s M7.1-step-1
-/// entry deferred to M8, once the UI forms existed to make it actionable.
-fn invalid_input_message(rule: ValidationRule) -> String {
+/// One detail per `ValidationRule`, carrying the value the user actually entered.
+fn invalid_input_detail(rule: ValidationRule) -> ErrorDetail {
     match rule {
-        ValidationRule::HeightOutOfRange { got } => {
-            format!("身高需在 120–230 厘米之间，当前填写的是 {got:.1} 厘米。")
-        }
-        ValidationRule::AgeOutOfRange { got, .. } => {
-            format!("年龄需在 16–100 岁之间，当前的出生日期对应 {got} 岁。")
-        }
-        ValidationRule::MealsPerDayOutOfRange { got } => {
-            format!("每日餐数需在 3–5 之间，当前填写的是 {got}。")
-        }
-        ValidationRule::GoalRateOutOfRange { got } => {
-            format!("目标速度需在 0–1.0 千克/周之间，当前填写的是 {got:.2} 千克/周。")
-        }
-        ValidationRule::GoalTargetOutOfRange { got } => {
-            format!("目标体重需在 30–300 千克之间，当前填写的是 {got:.1} 千克。")
-        }
-        ValidationRule::WeightOutOfRange { got } => {
-            format!("体重需在 30–300 千克之间，当前填写的是 {got:.1} 千克。")
-        }
-        ValidationRule::NoteEmpty => "备忘内容不能为空。".to_string(),
-        ValidationRule::NoteTooLong { got, max } => {
-            format!("备忘内容最多 {max} 字，当前是 {got} 字。")
-        }
+        ValidationRule::HeightOutOfRange { got } => ErrorDetail::HeightOutOfRange { got },
+        ValidationRule::AgeOutOfRange { got, .. } => ErrorDetail::AgeOutOfRange { got },
+        ValidationRule::MealsPerDayOutOfRange { got } => ErrorDetail::MealsPerDayOutOfRange { got },
+        ValidationRule::GoalRateOutOfRange { got } => ErrorDetail::GoalRateOutOfRange { got },
+        ValidationRule::GoalTargetOutOfRange { got } => ErrorDetail::GoalTargetOutOfRange { got },
+        ValidationRule::WeightOutOfRange { got } => ErrorDetail::WeightOutOfRange { got },
+        ValidationRule::NoteEmpty => ErrorDetail::NoteEmpty,
+        ValidationRule::NoteTooLong { got, max } => ErrorDetail::NoteTooLong { got, max },
         ValidationRule::PlanTimeBeforeDayBoundary {
             plan_time,
             day_boundary,
-        } => format!(
-            "生成时间（{}）不能早于日界时间（{}），请调整其中一项。",
-            format_hhmm(plan_time),
-            format_hhmm(day_boundary)
-        ),
-        ValidationRule::InstructionEmpty => "调整要求不能为空，请描述需要怎么调整。".to_string(),
+        } => ErrorDetail::PlanTimeBeforeDayBoundary {
+            plan_time: format_hhmm(plan_time),
+            day_boundary: format_hhmm(day_boundary),
+        },
+        ValidationRule::InstructionEmpty => ErrorDetail::InstructionEmpty,
     }
 }
 
 /// Source-management commands (`docs/NUTRITION_SOURCES.md` §7.1, §8.2) call into
 /// `lifeagent_plugin_diet::sources`, which returns `PluginError` — the same type diet tool calls
 /// return to the conversation model. Its messages are meant for that audience (English, not
-/// user-facing), so — like `CoreError::Validation` above — only the generic zh-CN text crosses
-/// the command boundary; the detail is logged instead.
+/// user-facing), so — like `CoreError::Validation` above — only a generic detail crosses the
+/// command boundary; the specifics are logged instead.
 impl From<PluginError> for CommandError {
     fn from(err: PluginError) -> Self {
         match err {
             PluginError::InvalidArgs(msg) => {
                 tracing::debug!(error = %msg, "command validation error");
-                CommandError::new("invalid_input", "输入内容有误，请检查后重试。")
+                CommandError::new("invalid_input", ErrorDetail::InvalidInput)
             }
             PluginError::NotFound(msg) => {
                 tracing::debug!(error = %msg, "command not-found error");
-                CommandError::new("not_found", "未找到对应的数据。")
+                CommandError::new("not_found", ErrorDetail::NotFound)
             }
             other => {
                 tracing::error!(error = %other, "internal command error");
-                CommandError::new("internal", "发生内部错误，请重试。")
+                CommandError::new("internal", ErrorDetail::Internal)
             }
         }
     }
 }
 
 /// Batch-import commands (`docs/NUTRITION_SOURCES.md` §6, §8.2). Unlike `PluginError` above,
-/// `FoodDataError::Invalid`/`NotFound` messages are already zh-CN, built for exactly this
-/// audience (§6.2), so they pass through unchanged rather than being replaced with fixed text.
+/// `FoodDataError::Invalid`/`NotFound` carry an `ImportMessage` built for the user (§6.2), so it
+/// is passed through rather than replaced with a generic detail.
 impl From<FoodDataError> for CommandError {
     fn from(err: FoodDataError) -> Self {
         match err {
-            FoodDataError::Invalid(msg) => CommandError::new("invalid_input", msg),
-            FoodDataError::NotFound(msg) => CommandError::new("not_found", msg),
+            FoodDataError::Invalid(detail) => {
+                CommandError::new("invalid_input", ErrorDetail::FoodData { detail })
+            }
+            FoodDataError::NotFound(detail) => {
+                CommandError::new("not_found", ErrorDetail::FoodData { detail })
+            }
             FoodDataError::Plugin(e) => {
                 tracing::error!(error = %e, "internal food data error");
-                CommandError::new("internal", "发生内部错误，请重试。")
+                CommandError::new("internal", ErrorDetail::Internal)
             }
         }
     }
@@ -150,13 +256,13 @@ impl From<LlmError> for CommandError {
     fn from(err: LlmError) -> Self {
         let code = err.code();
         match err {
-            LlmError::Auth => CommandError::new(code, "模型鉴权失败，请检查 API Key 是否正确。"),
+            LlmError::Auth => CommandError::new(code, ErrorDetail::LlmAuth),
             LlmError::Config(msg) => {
                 tracing::debug!(error = %msg, "llm config error");
-                CommandError::new(code, "模型尚未配置，请先在设置中完成配置。")
+                CommandError::new(code, ErrorDetail::NotConfigured)
             }
-            LlmError::RateLimited => CommandError::new(code, "请求过于频繁，请稍后再试。"),
-            LlmError::Timeout => CommandError::new(code, "请求超时，请重试。"),
+            LlmError::RateLimited => CommandError::new(code, ErrorDetail::LlmRateLimited),
+            LlmError::Timeout => CommandError::new(code, ErrorDetail::LlmTimeout),
             // These three can carry a provider's raw response text (`Status.body_excerpt`) or a
             // `reqwest`/`serde_json` error message, which may itself quote a fragment of the
             // request that triggered it (e.g. a provider echoing back an offending value from a
@@ -167,7 +273,7 @@ impl From<LlmError> for CommandError {
             LlmError::Http(msg) => {
                 tracing::debug!(error = %msg, "llm http error");
                 tracing::error!("llm request failed to reach the provider");
-                CommandError::new(code, "模型服务出现问题，请重试。")
+                CommandError::new(code, ErrorDetail::LlmUnavailable)
             }
             LlmError::Status {
                 code: status,
@@ -175,12 +281,12 @@ impl From<LlmError> for CommandError {
             } => {
                 tracing::debug!(status, body_excerpt = %body_excerpt, "llm status error");
                 tracing::error!(status, "llm request returned an error status");
-                CommandError::new(code, "模型服务出现问题，请重试。")
+                CommandError::new(code, ErrorDetail::LlmUnavailable)
             }
             LlmError::InvalidResponse(msg) => {
                 tracing::debug!(error = %msg, "llm invalid response");
                 tracing::error!("llm returned an unparsable response");
-                CommandError::new(code, "模型服务出现问题，请重试。")
+                CommandError::new(code, ErrorDetail::LlmUnavailable)
             }
         }
     }
@@ -197,18 +303,20 @@ mod tests {
     }
 
     #[test]
-    fn validation_maps_to_invalid_input_with_a_generic_zh_cn_message() {
+    fn validation_maps_to_invalid_input_with_a_generic_message() {
         let err: CommandError =
             CoreError::Validation("height_cm must be within 120..=230".into()).into();
         assert_eq!(err.code, "invalid_input");
+        assert_eq!(err.detail, ErrorDetail::InvalidInput);
         assert_eq!(err.message, "输入内容有误，请检查后重试。");
     }
 
     #[test]
-    fn invalid_input_maps_to_invalid_input_with_a_rule_specific_zh_cn_message() {
+    fn invalid_input_maps_to_invalid_input_with_a_rule_specific_detail() {
         let err: CommandError =
             CoreError::InvalidInput(ValidationRule::HeightOutOfRange { got: 119.9 }).into();
         assert_eq!(err.code, "invalid_input");
+        assert_eq!(err.detail, ErrorDetail::HeightOutOfRange { got: 119.9 });
         assert_eq!(
             err.message,
             "身高需在 120–230 厘米之间，当前填写的是 119.9 厘米。"
@@ -248,6 +356,25 @@ mod tests {
 
         let unique: std::collections::HashSet<&String> = messages.iter().collect();
         assert_eq!(unique.len(), messages.len(), "messages: {messages:?}");
+    }
+
+    #[test]
+    fn detail_serializes_with_a_kind_tag() {
+        let err: CommandError =
+            CoreError::InvalidInput(ValidationRule::NoteTooLong { got: 350, max: 300 }).into();
+        let json = serde_json::to_value(&err).unwrap();
+        assert_eq!(json["detail"]["kind"], "note_too_long");
+        assert_eq!(json["detail"]["got"], 350);
+        assert_eq!(json["detail"]["max"], 300);
+    }
+
+    #[test]
+    fn food_data_errors_carry_the_import_message() {
+        let err: CommandError = FoodDataError::NotFound(ImportMessage::ImportExpired).into();
+        assert_eq!(err.code, "not_found");
+        let json = serde_json::to_value(&err).unwrap();
+        assert_eq!(json["detail"]["kind"], "food_data");
+        assert_eq!(json["detail"]["detail"]["kind"], "import_expired");
     }
 
     #[test]

@@ -1,10 +1,10 @@
 import { Field, inputClass } from "../components/Field";
 import { secondaryButtonClass } from "../components/buttonStyles";
-import { zhCN } from "../i18n/zh-CN";
+import { strings } from "../i18n";
 import type { ProviderKind, Role } from "../api/types";
 import type { OnboardingDraft } from "./draft";
 
-const t = zhCN.onboarding.model;
+const t = strings.onboarding.model;
 
 const providerKinds: ProviderKind[] = ["anthropic", "open_ai_compatible"];
 
@@ -167,7 +167,7 @@ export function StepModel({
         ) : null}
         {!testing && !testSucceeded && testError ? (
           <span className="text-sm text-red-600 dark:text-red-400">
-            {t.testFailed}：{testError}
+            {strings.common.labelled(t.testFailed, testError)}
           </span>
         ) : null}
       </div>
@@ -202,7 +202,7 @@ const LATENCY_ROLES: Role[] = ["parser", "planner", "conversation"];
 function formatLatencies(latencies: Partial<Record<Role, number>>): string {
   const parts = LATENCY_ROLES.flatMap((role) => {
     const ms = latencies[role];
-    return ms === undefined ? [] : [`${zhCN.settings.role[role]} ${ms}ms`];
+    return ms === undefined ? [] : [`${strings.settings.role[role]} ${ms}ms`];
   });
-  return parts.length === 0 ? "" : `（${parts.join(" · ")}）`;
+  return parts.length === 0 ? "" : strings.common.parenthesized(parts.join(" · "));
 }

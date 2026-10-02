@@ -28,6 +28,7 @@
     "allow-save-models",
     "allow-set-api-key",
     "allow-has-api-key",
+    "allow-set-locale",
     "allow-test-model",
     "allow-get-memory",
     "allow-delete-memory",

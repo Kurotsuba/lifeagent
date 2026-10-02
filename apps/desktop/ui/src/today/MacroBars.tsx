@@ -1,7 +1,7 @@
 import type { DietMacros } from "../api/types";
-import { zhCN } from "../i18n/zh-CN";
+import { strings } from "../i18n";
 
-const t = zhCN.today.diet;
+const t = strings.today.diet;
 
 /** Fixed hue order, never cycled: protein/carbs/fat always map to the same color so a repeat
  * viewer builds a stable association instead of re-reading the legend every time. */

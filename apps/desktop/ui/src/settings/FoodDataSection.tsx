@@ -17,10 +17,10 @@ import {
 import { ConfirmDeleteButton } from "../components/ConfirmDeleteButton";
 import { inputClass } from "../components/Field";
 import { primaryButtonClass, secondaryButtonClass } from "../components/buttonStyles";
-import { zhCN } from "../i18n/zh-CN";
+import { describeImportMessage, strings } from "../i18n";
 import { LoadState } from "./LoadState";
 
-const t = zhCN.settings.foodData;
+const t = strings.settings.foodData;
 
 /** "2026-09-26T10:15:00+00:00" -> "2026-09-26". */
 function formatDate(iso: string): string {
@@ -393,7 +393,7 @@ function ImportDialog({
 
             {preview.brands.length > 0 ? (
               <p className="text-xs text-neutral-500 dark:text-neutral-400">
-                {t.brandsLabel(preview.brands.join("、"))}
+                {t.brandsLabel(preview.brands.join(strings.common.listSeparator))}
               </p>
             ) : null}
             {preview.replaces_estimates > 0 ? (
@@ -436,7 +436,7 @@ function ImportDialog({
                           <tr key={i} className="border-t border-neutral-100 dark:border-neutral-800">
                             <td className="px-2 py-1">{issue.line || "—"}</td>
                             <td className="px-2 py-1">{issue.name ?? "—"}</td>
-                            <td className="px-2 py-1">{issue.message}</td>
+                            <td className="px-2 py-1">{describeImportMessage(issue.message)}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -492,7 +492,7 @@ function ImportDialog({
             disabled={busy}
             onClick={() => void handleCancel()}
           >
-            {zhCN.common.cancel}
+            {strings.common.cancel}
           </button>
           <button
             type="button"

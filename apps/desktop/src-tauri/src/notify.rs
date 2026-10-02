@@ -12,25 +12,20 @@ use lifeagent_core::events::AppEvent;
 use lifeagent_core::plan::PlanTrigger;
 use tauri::AppHandle;
 use tauri_plugin_notification::NotificationExt;
+
+use crate::locale;
 use tokio::sync::broadcast::error::RecvError;
 
-const PLAN_READY_TITLE: &str = "明日计划已生成";
-const PLAN_FAILED_TITLE: &str = "明日计划生成失败";
-
-/// The notification body for a scheduled `PlanFailed`, chosen from its `code`
+/// Which notification an `AppEvent` raises. Its title and body are worded in the UI's language
+/// (`locale.rs`) when it is shown. A `PlanFailed` body is chosen from the event's `code`
 /// (`CoreError::code()`) rather than the underlying `CoreError`'s own (English, developer-facing)
 /// `Display` text — not something to put in a user's toast. That detail is already logged by the
 /// scheduler (`scheduler.rs`'s `tracing::warn!`), so nothing is lost, just not duplicated here in
-/// a form a user would see. Mirrors `error.rs`'s `CommandError` mapping, using the same codes, so
-/// the two surfaces agree on what each cause means (`docs/DECISIONS.md`'s M7.1-step-1 entry).
-fn plan_failed_body(code: &str) -> &'static str {
-    match code {
-        "not_configured" => "尚未完成模型配置，请先在设置中完成配置后重试。",
-        "auth" => "模型鉴权失败，请在设置中检查 API Key 是否正确。",
-        "invalid_input" => "请先完善个人档案并记录一次体重，再生成计划。",
-        "llm" => "模型服务暂时不可用，请稍后在\"今日\"页重试。",
-        _ => "生成明日计划失败，请稍后在\"今日\"页重试。",
-    }
+/// a form a user would see.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Notification {
+    PlanReady,
+    PlanFailed,
 }
 
 /// Spawns the notification task. `core_app` is a clone the task owns for the rest of the
@@ -55,7 +50,7 @@ pub fn spawn(app: AppHandle, core_app: CoreApp) {
 }
 
 async fn handle(app: &AppHandle, core_app: &CoreApp, event: AppEvent) {
-    let Some((title, date)) = notification_target(&event) else {
+    let Some((kind, date)) = notification_target(&event) else {
         return;
     };
     let enabled = core_app
@@ -79,10 +74,14 @@ async fn handle(app: &AppHandle, core_app: &CoreApp, event: AppEvent) {
                 return;
             }
         },
-        AppEvent::PlanFailed { code, .. } => plan_failed_body(code).to_string(),
+        AppEvent::PlanFailed { code, .. } => texts().plan_failed_body(code).to_string(),
         AppEvent::DataChanged { .. } => return,
     };
 
+    let title = match kind {
+        Notification::PlanReady => texts().plan_ready_title,
+        Notification::PlanFailed => texts().plan_failed_title,
+    };
     show(app, title, &body);
 }
 
@@ -92,14 +91,14 @@ async fn handle(app: &AppHandle, core_app: &CoreApp, event: AppEvent) {
 /// result of, without needing a toast to tell them. `PlanFailed` needs no such filter: only the
 /// scheduler publishes it (a manual generation's failure is returned to its caller instead), so
 /// every `PlanFailed` is already a scheduled one.
-fn notification_target(event: &AppEvent) -> Option<(&'static str, NaiveDate)> {
+fn notification_target(event: &AppEvent) -> Option<(Notification, NaiveDate)> {
     match event {
         AppEvent::PlanReady {
             date,
             trigger: PlanTrigger::Schedule,
             ..
-        } => Some((PLAN_READY_TITLE, *date)),
-        AppEvent::PlanFailed { date, .. } => Some((PLAN_FAILED_TITLE, *date)),
+        } => Some((Notification::PlanReady, *date)),
+        AppEvent::PlanFailed { date, .. } => Some((Notification::PlanFailed, *date)),
         _ => None,
     }
 }
@@ -122,13 +121,18 @@ fn first_sentence(text: &str) -> String {
 /// `PlanFailed` at all (only the scheduler does) — but the main window is usually hidden in the
 /// tray when this is clicked, so without this the click would have no visible outcome.
 /// Shown regardless of `notifications_enabled`: it's the direct response to the user's own click,
-/// not an unsolicited notification. `failure` is a user-facing zh-CN message (a
-/// `CommandError`'s), so it's specific (e.g. "not configured") rather than the generic body.
+/// not an unsolicited notification. `result` is the plan's summary, or the failure's
+/// `CommandError::code`, worded the same way as a scheduled failure.
 pub fn show_tray_plan_result(app: &AppHandle, result: Result<&str, &str>) {
+    let t = texts();
     match result {
-        Ok(summary) => show(app, PLAN_READY_TITLE, &first_sentence(summary)),
-        Err(message) => show(app, PLAN_FAILED_TITLE, message),
+        Ok(summary) => show(app, t.plan_ready_title, &first_sentence(summary)),
+        Err(code) => show(app, t.plan_failed_title, t.plan_failed_body(code)),
     }
+}
+
+fn texts() -> &'static locale::Texts {
+    locale::texts(locale::current())
 }
 
 fn show(app: &AppHandle, title: &str, body: &str) {
@@ -155,7 +159,7 @@ mod tests {
 
         assert_eq!(
             notification_target(&event),
-            Some((PLAN_READY_TITLE, date("2026-09-26")))
+            Some((Notification::PlanReady, date("2026-09-26")))
         );
     }
 
@@ -181,31 +185,7 @@ mod tests {
 
         assert_eq!(
             notification_target(&event),
-            Some((PLAN_FAILED_TITLE, date("2026-09-26")))
-        );
-    }
-
-    #[test]
-    fn plan_failed_body_is_specific_per_code() {
-        assert_eq!(
-            plan_failed_body("not_configured"),
-            "尚未完成模型配置，请先在设置中完成配置后重试。"
-        );
-        assert_eq!(
-            plan_failed_body("auth"),
-            "模型鉴权失败，请在设置中检查 API Key 是否正确。"
-        );
-        assert_eq!(
-            plan_failed_body("invalid_input"),
-            "请先完善个人档案并记录一次体重，再生成计划。"
-        );
-        assert_eq!(
-            plan_failed_body("llm"),
-            "模型服务暂时不可用，请稍后在\"今日\"页重试。"
-        );
-        assert_eq!(
-            plan_failed_body("internal"),
-            "生成明日计划失败，请稍后在\"今日\"页重试。"
+            Some((Notification::PlanFailed, date("2026-09-26")))
         );
     }
 

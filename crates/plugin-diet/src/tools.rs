@@ -316,7 +316,7 @@ async fn update_food(ctx: &PluginContext, args: Value) -> Result<ToolOutput, Plu
         fiber_g,
     };
     // User values always win (§16), so no kcal correction — but reject impossible ones.
-    validate_per_100g(&per_100g).map_err(PluginError::InvalidArgs)?;
+    validate_per_100g(&per_100g).map_err(|e| PluginError::InvalidArgs(e.to_string()))?;
 
     let food = sources::upsert_manual_food(ctx, &args.food_name, per_100g).await?;
     Ok(ToolOutput {
@@ -363,7 +363,7 @@ async fn update_dish(ctx: &PluginContext, args: Value) -> Result<ToolOutput, Plu
         fiber_g,
     };
     sources::validate_dish_macros(&per_serving, args.serving_g)
-        .map_err(PluginError::InvalidArgs)?;
+        .map_err(|e| PluginError::InvalidArgs(e.to_string()))?;
 
     let dish = sources::upsert_manual_dish(
         ctx,

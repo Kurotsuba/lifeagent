@@ -1,12 +1,12 @@
 import { useState } from "react";
 import { logout, SIGNED_OUT_EVENT } from "../api/auth";
-import { zhCN } from "../i18n/zh-CN";
+import { strings } from "../i18n";
 import type { Tab } from "../App";
 
 const TABS: { id: Tab; label: string }[] = [
-  { id: "today", label: zhCN.nav.today },
-  { id: "chat", label: zhCN.nav.chat },
-  { id: "settings", label: zhCN.nav.settings },
+  { id: "today", label: strings.nav.today },
+  { id: "chat", label: strings.nav.chat },
+  { id: "settings", label: strings.nav.settings },
 ];
 
 interface SidebarProps {
@@ -32,7 +32,7 @@ export function Sidebar({ tab, onChange, username }: SidebarProps) {
   return (
     <nav className="flex w-40 shrink-0 flex-col gap-1 border-r border-neutral-200 bg-neutral-50 p-3 dark:border-neutral-800 dark:bg-neutral-900">
       <p className="mb-2 px-2 text-sm font-semibold text-neutral-900 dark:text-neutral-50">
-        {zhCN.app.name}
+        {strings.app.name}
       </p>
       {TABS.map((item) => (
         <button
@@ -60,7 +60,7 @@ export function Sidebar({ tab, onChange, username }: SidebarProps) {
             disabled={loggingOut}
             onClick={() => void handleLogout()}
           >
-            {zhCN.common.logout}
+            {strings.common.logout}
           </button>
         </div>
       ) : null}

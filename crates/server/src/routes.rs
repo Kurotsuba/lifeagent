@@ -20,6 +20,7 @@ use axum::Json;
 use futures_util::stream::{self, Stream};
 use lifeagent_api::events::payload_for;
 use lifeagent_api::ops::{self, ListFoods, SettingsDto};
+use lifeagent_api::ErrorDetail;
 use lifeagent_core::goals::WeightGoal;
 use lifeagent_core::profile::Profile;
 use serde::de::DeserializeOwned;
@@ -36,7 +37,7 @@ fn args<T: DeserializeOwned>(body: &Bytes) -> Result<T, ApiError> {
     let json: &[u8] = if body.is_empty() { b"{}" } else { body };
     serde_json::from_slice(json).map_err(|e| {
         tracing::debug!(error = %e, "invalid command arguments");
-        ApiError::invalid("请求参数有误。")
+        ApiError::invalid(ErrorDetail::BadRequest)
     })
 }
 
@@ -224,7 +225,7 @@ pub async fn command(
             ops::cancel_food_import(&tenant.imports, &a.token);
             reply(Ok(()))
         }
-        _ => Err(ApiError::new("not_found", "未找到对应的接口。")),
+        _ => Err(ApiError::new("not_found", ErrorDetail::UnknownEndpoint)),
     }
 }
 
@@ -336,7 +337,7 @@ pub async fn internal_tick(
     headers: HeaderMap,
 ) -> Result<Json<TickReport>, ApiError> {
     let Some(expected) = state.config.tick_token.as_deref() else {
-        return Err(ApiError::new("not_found", "未找到对应的接口。"));
+        return Err(ApiError::new("not_found", ErrorDetail::UnknownEndpoint));
     };
     let given = headers
         .get(TICK_TOKEN_HEADER)
@@ -359,7 +360,7 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
 }
 
 pub async fn unknown_api() -> ApiError {
-    ApiError::new("not_found", "未找到对应的接口。")
+    ApiError::new("not_found", ErrorDetail::UnknownEndpoint)
 }
 
 pub async fn health() -> &'static str {

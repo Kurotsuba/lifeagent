@@ -18,14 +18,14 @@ import {
 } from "../api/types";
 import { Field, inputClass } from "../components/Field";
 import { primaryButtonClass, secondaryButtonClass } from "../components/buttonStyles";
-import { zhCN } from "../i18n/zh-CN";
+import { describeError, strings } from "../i18n";
 import { defaultDraft } from "../onboarding/draft";
 import { prefillFor } from "../onboarding/StepModel";
 import { LoadState } from "./LoadState";
 
-const tm = zhCN.onboarding.model;
-const ts = zhCN.settings.model;
-const tRole = zhCN.settings.role;
+const tm = strings.onboarding.model;
+const ts = strings.settings.model;
+const tRole = strings.settings.role;
 
 const providerKinds: ProviderKind[] = ["anthropic", "open_ai_compatible"];
 const ROLES: Role[] = ["parser", "planner", "conversation"];
@@ -152,7 +152,7 @@ function TestResultLabel({ result }: { result: TestModelResult | undefined }) {
     );
   }
   return (
-    <span className="text-xs text-red-600 dark:text-red-400">{result.error ?? tm.testFailed}</span>
+    <span className="text-xs text-red-600 dark:text-red-400">{result.error ? describeError(result.error) : tm.testFailed}</span>
   );
 }
 
@@ -220,7 +220,7 @@ export function ModelSection() {
     setStatus(null);
     try {
       await persist(draft);
-      setStatus({ ok: true, message: zhCN.settings.saveSucceeded });
+      setStatus({ ok: true, message: strings.settings.saveSucceeded });
     } catch (e) {
       setStatus({ ok: false, message: commandErrorMessage(e) });
     } finally {
@@ -371,7 +371,7 @@ export function ModelSection() {
           disabled={saving || testing !== null || !fillable}
           onClick={() => void handleSave()}
         >
-          {saving ? zhCN.common.saving : zhCN.common.save}
+          {saving ? strings.common.saving : strings.common.save}
         </button>
         {status ? (
           <span

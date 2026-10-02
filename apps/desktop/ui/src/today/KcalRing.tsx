@@ -1,6 +1,6 @@
-import { zhCN } from "../i18n/zh-CN";
+import { strings } from "../i18n";
 
-const t = zhCN.today.diet;
+const t = strings.today.diet;
 
 const SIZE = 128;
 const STROKE = 10;

@@ -3,7 +3,7 @@ import { logWeight } from "../api/commands";
 import { commandErrorMessage } from "../api/types";
 import { inputClass } from "../components/Field";
 import { primaryButtonClass, secondaryButtonClass } from "../components/buttonStyles";
-import { zhCN } from "../i18n/zh-CN";
+import { strings } from "../i18n";
 
 interface WeightLogDialogProps {
   onClose: () => void;
@@ -20,7 +20,7 @@ export function WeightLogDialog({ onClose, onSaved }: WeightLogDialogProps) {
   async function handleSave() {
     const value = Number(kg);
     if (!Number.isFinite(value) || value <= 0) {
-      setError(zhCN.today.logWeightInvalid);
+      setError(strings.today.logWeightInvalid);
       return;
     }
     setSaving(true);
@@ -38,7 +38,7 @@ export function WeightLogDialog({ onClose, onSaved }: WeightLogDialogProps) {
   return (
     <div className="absolute right-0 top-full z-10 mt-2 w-56 rounded-md border border-neutral-200 bg-white p-3 shadow-lg dark:border-neutral-700 dark:bg-neutral-800">
       <p className="mb-2 text-sm font-medium text-neutral-900 dark:text-neutral-50">
-        {zhCN.today.logWeightTitle}
+        {strings.today.logWeightTitle}
       </p>
       <input
         type="number"
@@ -46,7 +46,7 @@ export function WeightLogDialog({ onClose, onSaved }: WeightLogDialogProps) {
         min="0"
         autoFocus
         className={inputClass}
-        placeholder={zhCN.today.logWeightPlaceholder}
+        placeholder={strings.today.logWeightPlaceholder}
         value={kg}
         onChange={(e) => setKg(e.target.value)}
         onKeyDown={(e) => {
@@ -61,7 +61,7 @@ export function WeightLogDialog({ onClose, onSaved }: WeightLogDialogProps) {
           disabled={saving}
           onClick={onClose}
         >
-          {zhCN.common.cancel}
+          {strings.common.cancel}
         </button>
         <button
           type="button"
@@ -69,7 +69,7 @@ export function WeightLogDialog({ onClose, onSaved }: WeightLogDialogProps) {
           disabled={saving}
           onClick={handleSave}
         >
-          {zhCN.common.save}
+          {strings.common.save}
         </button>
       </div>
     </div>

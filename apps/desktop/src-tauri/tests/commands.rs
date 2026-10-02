@@ -311,7 +311,8 @@ async fn test_model_without_models_configured_resolves_ok_false() {
     let result = invoke(&webview, "test_model", json!({ "role": "conversation" })).unwrap();
 
     assert_eq!(result["ok"], json!(false));
-    assert!(result["error"].is_string());
+    assert_eq!(result["error"]["code"], json!("not_configured"));
+    assert_eq!(result["error"]["detail"]["kind"], json!("not_configured"));
 }
 
 /// The quick-entry popup hides itself (Esc, and after showing a reply) via the JS

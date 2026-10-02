@@ -21,7 +21,7 @@ use lifeagent_core::usage::RoleUsage;
 use lifeagent_llm::router::{ModelsConfig, RoleRequest};
 use lifeagent_llm::types::{Message, ResponseFormat, Role};
 use lifeagent_plugin_diet::import::{
-    self, FoodDataError, ImportPreview, ImportReport, ImportTarget, ParsedImport,
+    self, FoodDataError, ImportMessage, ImportPreview, ImportReport, ImportTarget, ParsedImport,
 };
 use lifeagent_plugin_diet::model::Dish;
 use lifeagent_plugin_diet::sources::{self, Food, SourceInfo};
@@ -219,7 +219,7 @@ pub async fn has_api_key(app: &CoreApp, provider_id: &str) -> Result<bool, Comma
 pub struct TestModelResult {
     pub ok: bool,
     pub latency_ms: u64,
-    pub error: Option<String>,
+    pub error: Option<CommandError>,
 }
 
 /// Sends "Reply with OK." on `role`'s currently-bound model (§10.2), for onboarding's and
@@ -249,14 +249,11 @@ pub async fn test_model(app: &CoreApp, role: Role) -> Result<TestModelResult, Co
             latency_ms,
             error: None,
         },
-        Err(e) => {
-            let message = CommandError::from(CoreError::Llm(e)).message;
-            TestModelResult {
-                ok: false,
-                latency_ms,
-                error: Some(message),
-            }
-        }
+        Err(e) => TestModelResult {
+            ok: false,
+            latency_ms,
+            error: Some(CommandError::from(CoreError::Llm(e))),
+        },
     })
 }
 
@@ -442,7 +439,6 @@ fn take_pending_import(
     pending: &PendingImportState,
     token: &str,
 ) -> Result<ParsedImport, CommandError> {
-    const EXPIRED: &str = "导入已过期，请重新选择文件";
     let mut guard = pending.slot();
     let expired = guard
         .as_ref()
@@ -457,9 +453,9 @@ fn take_pending_import(
             // A stale/mismatched request (e.g. a second browser tab) must not drop the import
             // that's still pending for whoever holds the current token.
             *guard = Some(record);
-            Err(FoodDataError::NotFound(EXPIRED.into()).into())
+            Err(FoodDataError::NotFound(ImportMessage::ImportExpired).into())
         }
-        None => Err(FoodDataError::NotFound(EXPIRED.into()).into()),
+        None => Err(FoodDataError::NotFound(ImportMessage::ImportExpired).into()),
     }
 }
 

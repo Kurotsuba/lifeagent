@@ -4,10 +4,10 @@ import { isDesktop } from "../api/platform";
 import { commandErrorMessage, type SettingsDto } from "../api/types";
 import { Field, inputClass } from "../components/Field";
 import { primaryButtonClass } from "../components/buttonStyles";
-import { zhCN } from "../i18n/zh-CN";
+import { strings } from "../i18n";
 import { LoadState } from "./LoadState";
 
-const t = zhCN.settings;
+const t = strings.settings;
 
 /** §10.3 groups 计划 (plan time, day boundary) and 通用 (notifications, autostart) as separate
  * bullets, but `SettingsDto`/`save_settings` persist all four atomically in one call — so this
@@ -113,7 +113,7 @@ export function GeneralSection() {
           disabled={saving}
           onClick={() => void handleSave()}
         >
-          {saving ? zhCN.common.saving : zhCN.common.save}
+          {saving ? strings.common.saving : strings.common.save}
         </button>
         {status ? (
           <span

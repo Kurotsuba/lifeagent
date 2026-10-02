@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { zhCN } from "../i18n/zh-CN";
+import { strings } from "../i18n";
 import { primaryButtonClass, secondaryButtonClass } from "./buttonStyles";
 
 interface ConfirmDeleteButtonProps {
@@ -31,7 +31,7 @@ export function ConfirmDeleteButton({ onConfirm }: ConfirmDeleteButtonProps) {
           disabled={busy}
           onClick={() => void handleConfirm()}
         >
-          {zhCN.common.confirmDelete}
+          {strings.common.confirmDelete}
         </button>
         <button
           type="button"
@@ -39,7 +39,7 @@ export function ConfirmDeleteButton({ onConfirm }: ConfirmDeleteButtonProps) {
           disabled={busy}
           onClick={() => setConfirming(false)}
         >
-          {zhCN.common.cancel}
+          {strings.common.cancel}
         </button>
       </div>
     );
@@ -51,7 +51,7 @@ export function ConfirmDeleteButton({ onConfirm }: ConfirmDeleteButtonProps) {
       className="shrink-0 text-xs text-neutral-400 hover:text-red-600 dark:hover:text-red-400"
       onClick={() => setConfirming(true)}
     >
-      {zhCN.common.delete}
+      {strings.common.delete}
     </button>
   );
 }

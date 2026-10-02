@@ -206,6 +206,7 @@ async fn usernames_are_unique_and_inputs_are_validated() {
         .await;
     assert_eq!(status, StatusCode::CONFLICT);
     assert_eq!(body["code"], "username_taken");
+    assert_eq!(body["detail"]["kind"], "username_taken");
 
     let (status, body) = server
         .post(
@@ -216,6 +217,7 @@ async fn usernames_are_unique_and_inputs_are_validated() {
         .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert_eq!(body["code"], "invalid_input");
+    assert_eq!(body["detail"]["kind"], "invalid_password");
 }
 
 #[tokio::test]

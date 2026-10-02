@@ -11,7 +11,7 @@ import {
 } from "../api/types";
 import { inputClass } from "../components/Field";
 import { primaryButtonClass } from "../components/buttonStyles";
-import { zhCN } from "../i18n/zh-CN";
+import { strings } from "../i18n";
 
 const HISTORY_LIMIT = 50;
 
@@ -121,11 +121,11 @@ export function Chat({ draftText, onDraftConsumed, onGoToSettings }: ChatProps) 
         <div className="mx-auto flex max-w-2xl flex-col gap-3">
           {!loaded ? (
             <p className="text-sm text-neutral-500 dark:text-neutral-400">
-              {zhCN.common.loading}
+              {strings.common.loading}
             </p>
           ) : null}
           {loaded && visible.length === 0 ? (
-            <p className="text-sm text-neutral-500 dark:text-neutral-400">{zhCN.chat.empty}</p>
+            <p className="text-sm text-neutral-500 dark:text-neutral-400">{strings.chat.empty}</p>
           ) : null}
           {visible.map((m, i) => {
             const isLastAssistant =
@@ -148,7 +148,7 @@ export function Chat({ draftText, onDraftConsumed, onGoToSettings }: ChatProps) 
                 >
                   {m.role === "assistant" && !m.content?.trim() ? (
                     <p className="italic text-neutral-500 dark:text-neutral-400">
-                      {zhCN.chat.thinking}
+                      {strings.chat.thinking}
                     </p>
                   ) : (
                     <p className="whitespace-pre-wrap">{m.content}</p>
@@ -172,7 +172,7 @@ export function Chat({ draftText, onDraftConsumed, onGoToSettings }: ChatProps) 
           {sending ? (
             <div className="flex justify-start">
               <div className="max-w-[75%] rounded-lg bg-neutral-100 px-3 py-2 text-sm text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400">
-                {zhCN.chat.sending}
+                {strings.chat.sending}
               </div>
             </div>
           ) : null}
@@ -182,15 +182,15 @@ export function Chat({ draftText, onDraftConsumed, onGoToSettings }: ChatProps) 
       {error ? (
         <div className="mx-auto flex w-full max-w-2xl flex-wrap items-center gap-3 px-6 pb-2 text-sm text-red-600 dark:text-red-400">
           <span>
-            {zhCN.chat.sendFailed}：{error.message}
+            {strings.common.labelled(strings.chat.sendFailed, error.message)}
           </span>
           <button type="button" className="underline" onClick={() => void handleSend()}>
-            {zhCN.common.retry}
+            {strings.common.retry}
           </button>
           {/* The web build has no model settings to go to: the operator owns them. */}
           {!isWeb && (error.code === "auth" || error.code === "not_configured") ? (
             <button type="button" className="underline" onClick={onGoToSettings}>
-              {zhCN.common.goToSettings}
+              {strings.common.goToSettings}
             </button>
           ) : null}
         </div>
@@ -201,7 +201,7 @@ export function Chat({ draftText, onDraftConsumed, onGoToSettings }: ChatProps) 
           <textarea
             className={`${inputClass} mt-0 min-h-[2.5rem] resize-none`}
             rows={1}
-            placeholder={zhCN.chat.inputPlaceholder}
+            placeholder={strings.chat.inputPlaceholder}
             value={text}
             disabled={sending}
             onChange={(e) => setText(e.target.value)}
@@ -213,7 +213,7 @@ export function Chat({ draftText, onDraftConsumed, onGoToSettings }: ChatProps) 
             disabled={sending || text.trim() === ""}
             onClick={() => void handleSend()}
           >
-            {sending ? zhCN.chat.sending : zhCN.chat.send}
+            {sending ? strings.chat.sending : strings.chat.send}
           </button>
         </div>
       </div>

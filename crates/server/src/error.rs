@@ -1,32 +1,32 @@
 //! `ApiError`: a `CommandError` (`lifeagent-api`, shared with the desktop) plus the HTTP status
-//! it is sent with. The body is always `{ "code": ..., "message": ... }`, message in zh-CN.
+//! it is sent with. The body is always `{ "code": ..., "message": ..., "detail": ... }`.
 
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
-use lifeagent_api::CommandError;
+use lifeagent_api::{CommandError, ErrorDetail};
 use lifeagent_core::error::CoreError;
 
 #[derive(Debug)]
 pub struct ApiError(pub CommandError);
 
 impl ApiError {
-    pub fn new(code: &str, message: &str) -> Self {
-        Self(CommandError::new(code, message))
+    pub fn new(code: &str, detail: ErrorDetail) -> Self {
+        Self(CommandError::new(code, detail))
     }
 
     pub fn unauthorized() -> Self {
-        Self::new("unauthorized", "请先登录。")
+        Self::new("unauthorized", ErrorDetail::Unauthorized)
     }
 
-    pub fn invalid(message: &str) -> Self {
-        Self::new("invalid_input", message)
+    pub fn invalid(detail: ErrorDetail) -> Self {
+        Self::new("invalid_input", detail)
     }
 
     /// Anything the caller can't fix: the detail is logged, never sent.
     pub fn internal(detail: impl std::fmt::Display) -> Self {
         tracing::error!(error = %detail, "internal server error");
-        Self::new("internal", "发生内部错误，请重试。")
+        Self::new("internal", ErrorDetail::Internal)
     }
 
     fn status(&self) -> StatusCode {
@@ -91,7 +91,11 @@ mod tests {
             ("internal", 500),
         ];
         for (code, status) in cases {
-            assert_eq!(ApiError::new(code, "x").status().as_u16(), status, "{code}");
+            assert_eq!(
+                ApiError::new(code, ErrorDetail::Internal).status().as_u16(),
+                status,
+                "{code}"
+            );
         }
     }
 }

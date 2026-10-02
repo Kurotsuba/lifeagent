@@ -30,6 +30,7 @@ use uuid::Uuid;
 
 use crate::error::ApiError;
 use crate::AppState;
+use lifeagent_api::ErrorDetail;
 
 pub const SESSION_COOKIE: &str = "lifeagent_session";
 const SESSION_DAYS: i64 = 30;
@@ -50,9 +51,7 @@ pub fn normalize_username(raw: &str) -> Result<String, ApiError> {
     if ok {
         Ok(name)
     } else {
-        Err(ApiError::invalid(
-            "用户名需为 3–32 位英文字母、数字或 _ - . 组成。",
-        ))
+        Err(ApiError::invalid(ErrorDetail::InvalidUsername))
     }
 }
 
@@ -60,7 +59,7 @@ pub fn validate_password(password: &str) -> Result<(), ApiError> {
     if (8..=128).contains(&password.chars().count()) {
         Ok(())
     } else {
-        Err(ApiError::invalid("密码需为 8–128 位。"))
+        Err(ApiError::invalid(ErrorDetail::InvalidPassword))
     }
 }
 
@@ -241,7 +240,7 @@ impl<S: Send + Sync> FromRequestParts<S> for PeerAddr {
 fn check_rate(state: &AppState, headers: &HeaderMap, peer: PeerAddr) -> Result<(), ApiError> {
     match client_ip(headers, peer.0) {
         Some(ip) if !state.limiter.allow(ip) => {
-            Err(ApiError::new("rate_limited", "尝试次数过多，请稍后再试。"))
+            Err(ApiError::new("rate_limited", ErrorDetail::TooManyAttempts))
         }
         _ => Ok(()),
     }
@@ -269,7 +268,7 @@ fn with_cookie(cookie: HeaderValue, body: impl IntoResponse) -> Response {
 }
 
 fn invalid_credentials() -> ApiError {
-    ApiError::new("invalid_credentials", "用户名或密码错误。")
+    ApiError::new("invalid_credentials", ErrorDetail::InvalidCredentials)
 }
 
 pub async fn register(
@@ -281,7 +280,7 @@ pub async fn register(
     check_rate(&state, &headers, peer)?;
     if let Some(expected) = &state.config.invite_code {
         if creds.invite_code.as_deref() != Some(expected.as_str()) {
-            return Err(ApiError::new("forbidden", "邀请码不正确。"));
+            return Err(ApiError::new("forbidden", ErrorDetail::WrongInviteCode));
         }
     }
     let username = normalize_username(&creds.username)?;
@@ -303,7 +302,7 @@ pub async fn register(
     .execute(&state.auth_db)
     .await?;
     if inserted.rows_affected() == 0 {
-        return Err(ApiError::new("username_taken", "该用户名已被使用。"));
+        return Err(ApiError::new("username_taken", ErrorDetail::UsernameTaken));
     }
 
     // Provisions the tenant (schema, role, migrations).

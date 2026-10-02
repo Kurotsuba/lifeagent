@@ -4,13 +4,13 @@ import type { KeyboardEvent } from "react";
 import { sendMessage } from "../api/commands";
 import { commandErrorMessage } from "../api/types";
 import { inputClass } from "../components/Field";
-import { zhCN } from "../i18n/zh-CN";
+import { strings } from "../i18n";
 
 /** Must match `QUICK_ENTRY_LABEL` in `apps/desktop/src-tauri/src/tray.rs` — the two sides only
  * agree on this by convention, the same as the `AppEvent` names in `api/events.ts`. */
 export const QUICK_ENTRY_WINDOW_LABEL = "quick-entry";
 
-const t = zhCN.quickEntry;
+const t = strings.quickEntry;
 const REPLY_DISPLAY_MS = 4000;
 
 /** Small always-on-top popup opened from the tray's 快速记录 item (§10.1/§10.3): one text box,

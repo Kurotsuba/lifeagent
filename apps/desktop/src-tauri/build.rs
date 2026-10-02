@@ -39,6 +39,7 @@ const COMMANDS: &[&str] = &[
     "preview_food_import",
     "commit_food_import",
     "cancel_food_import",
+    "set_locale",
 ];
 
 fn main() {

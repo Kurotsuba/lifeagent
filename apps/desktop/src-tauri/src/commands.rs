@@ -18,13 +18,13 @@ use lifeagent_core::profile::Profile;
 use lifeagent_core::usage::RoleUsage;
 use lifeagent_llm::router::ModelsConfig;
 use lifeagent_llm::types::Role;
-use lifeagent_plugin_diet::import::{FoodDataError, ImportReport};
+use lifeagent_plugin_diet::import::{FoodDataError, ImportMessage, ImportReport};
 use lifeagent_plugin_diet::sources::SourceInfo;
 use lifeagent_plugin_diet::targets::NutritionTargets;
 use tauri::ipc::InvokeBody;
-use tauri::State;
+use tauri::{AppHandle, State};
 
-use crate::error::CommandError;
+use crate::error::{CommandError, ErrorDetail};
 
 #[tauri::command]
 pub async fn get_app_state(state: State<'_, CoreApp>) -> Result<AppState, CommandError> {
@@ -302,7 +302,7 @@ pub async fn preview_food_import(
     let bytes = match request.body() {
         InvokeBody::Raw(bytes) => bytes,
         InvokeBody::Json(_) => {
-            return Err(FoodDataError::Invalid("请求缺少文件内容。".into()).into())
+            return Err(FoodDataError::Invalid(ImportMessage::MissingFileContent).into())
         }
     };
     let file_name = request
@@ -331,5 +331,22 @@ pub async fn cancel_food_import(
     token: String,
 ) -> Result<(), CommandError> {
     ops::cancel_food_import(&pending, &token);
+    Ok(())
+}
+
+// ---- UI language ----------------------------------------------------------------------------
+
+/// The webview reports its UI language (`"ja"`, `"en"` or `"zh-CN"`) so the tray menu and
+/// notifications match it (`locale.rs`).
+#[tauri::command]
+pub fn set_locale(app: AppHandle, locale: String) -> Result<(), CommandError> {
+    let Some(locale) = crate::locale::Locale::from_tag(&locale) else {
+        return Err(CommandError::new(
+            "invalid_input",
+            ErrorDetail::InvalidInput,
+        ));
+    };
+    crate::locale::set(locale);
+    crate::tray::apply_locale(&app);
     Ok(())
 }

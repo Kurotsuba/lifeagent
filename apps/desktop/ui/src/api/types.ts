@@ -2,8 +2,10 @@
  * TypeScript shapes mirroring the Rust types that cross the Tauri command boundary
  * (`docs/PHASE1_SPEC.md` §7/§10.2). Field names and enum values are snake_case, matching the
  * Rust `serde` derives exactly (see CLAUDE.md: "snake_case field names for everything crossing
- * a boundary"). No logic here — this file is data shapes only.
+ * a boundary"). Data shapes only, plus the `CommandError` guards at the end.
  */
+
+import { describeError } from "../i18n";
 
 export type Sex = "male" | "female";
 
@@ -81,7 +83,7 @@ export type Role = "parser" | "planner" | "conversation";
 export interface TestModelResult {
   ok: boolean;
   latency_ms: number;
-  error: string | null;
+  error: CommandError | null;
 }
 
 export interface AppState {
@@ -285,8 +287,60 @@ export interface Dish {
 export interface RowIssue {
   line: number;
   name: string | null;
-  message: string;
+  message: ImportMessage;
 }
+
+/** The first nutrition rule a row broke (`MacroViolation`, `crates/plugin-diet/src/foods.rs`). */
+export type MacroViolation =
+  | { rule: "negative" }
+  | { rule: "fiber_exceeds_carbs"; fiber_g: number; carbs_g: number }
+  | { rule: "macros_exceed_100g"; sum: number }
+  | { rule: "kcal_per_100g_too_high"; got: number }
+  | { rule: "kcal_per_serving_too_high"; got: number }
+  | { rule: "serving_not_positive" }
+  | { rule: "macros_exceed_serving"; sum: number; serving_g: number }
+  | { rule: "kcal_exceeds_serving"; kcal: number; serving_g: number };
+
+/** An import error or warning (`ImportMessage`, `crates/plugin-diet/src/import.rs`). */
+export type ImportMessage =
+  | { kind: "file_too_large"; max_mb: number }
+  | { kind: "not_utf8" }
+  | { kind: "csv_header"; error: string }
+  | { kind: "csv_row"; line: number; error: string }
+  | { kind: "json_parse"; error: string }
+  | { kind: "json_item_not_object"; line: number }
+  | { kind: "json_missing_rows" }
+  | { kind: "json_foods_not_array" }
+  | { kind: "json_dishes_not_array" }
+  | { kind: "json_wrong_shape" }
+  | { kind: "too_many_rows"; max: number }
+  | { kind: "no_valid_rows" }
+  | { kind: "missing_file_content" }
+  | { kind: "import_expired" }
+  | { kind: "source_name_length" }
+  | { kind: "not_a_dataset" }
+  | { kind: "source_not_found" }
+  | { kind: "unknown_basis"; value: string }
+  | { kind: "not_a_number"; field: string }
+  | { kind: "missing_field"; field: string }
+  | { kind: "missing_energy" }
+  | { kind: "not_positive"; field: string; got: number }
+  | { kind: "invalid_macros"; violation: MacroViolation }
+  | { kind: "kcal_kj_mismatch"; kcal: number; kcal_from_kj: number }
+  | { kind: "energy_mismatch"; kcal: number; estimated: number }
+  | { kind: "too_many_aliases"; max: number }
+  | { kind: "brand_on_food_row" }
+  | { kind: "food_name_empty" }
+  | { kind: "food_name_too_long"; max: number }
+  | { kind: "dish_name_empty" }
+  | { kind: "dish_name_too_long"; max: number }
+  | { kind: "brand_too_long"; max: number }
+  | { kind: "duplicate_food" }
+  | { kind: "duplicate_dish" }
+  | { kind: "duplicate_food_alias"; alias: string }
+  | { kind: "duplicate_dish_alias"; alias: string }
+  | { kind: "trace_values"; rows: number }
+  | { kind: "unknown_columns"; columns: string[] };
 
 /** `"100g"`: a food row. `"serving"`: a dish row, with `brand`/`serving_g` filled in
  * (`docs/DISH_NUTRITION.md` §7.3). */
@@ -359,9 +413,44 @@ export type CommandErrorCode =
   | "forbidden"
   | "rate_limited";
 
+/** What went wrong (`ErrorDetail`, `crates/api/src/error.rs`), worded by `describeError`. */
+export type ErrorDetail =
+  | { kind: "not_configured" }
+  | { kind: "invalid_input" }
+  | { kind: "not_found" }
+  | { kind: "nothing_to_plan" }
+  | { kind: "internal" }
+  | { kind: "llm_auth" }
+  | { kind: "llm_rate_limited" }
+  | { kind: "llm_timeout" }
+  | { kind: "llm_unavailable" }
+  | { kind: "height_out_of_range"; got: number }
+  | { kind: "age_out_of_range"; got: number }
+  | { kind: "meals_per_day_out_of_range"; got: number }
+  | { kind: "goal_rate_out_of_range"; got: number }
+  | { kind: "goal_target_out_of_range"; got: number }
+  | { kind: "weight_out_of_range"; got: number }
+  | { kind: "note_empty" }
+  | { kind: "note_too_long"; got: number; max: number }
+  | { kind: "plan_time_before_day_boundary"; plan_time: string; day_boundary: string }
+  | { kind: "instruction_empty" }
+  | { kind: "food_data"; detail: ImportMessage }
+  | { kind: "unauthorized" }
+  | { kind: "invalid_username" }
+  | { kind: "invalid_password" }
+  | { kind: "too_many_attempts" }
+  | { kind: "invalid_credentials" }
+  | { kind: "wrong_invite_code" }
+  | { kind: "username_taken" }
+  | { kind: "bad_request" }
+  | { kind: "unknown_endpoint" };
+
 export interface CommandError {
   code: CommandErrorCode;
+  /** zh-CN, from the server; shown only when `detail` is missing or of an unknown kind. */
   message: string;
+  /** Missing on errors made on this side (e.g. the network being down). */
+  detail?: ErrorDetail;
 }
 
 /** A rejected command surfaces the Rust `CommandError` value directly as the rejection reason
@@ -382,7 +471,7 @@ export function isCommandError(value: unknown): value is CommandError {
  * (e.g. an argument (de)serialization failure, which Tauri surfaces as a bare string). */
 export function commandErrorMessage(error: unknown): string {
   if (isCommandError(error)) {
-    return error.message;
+    return describeError(error);
   }
   if (typeof error === "string") {
     return error;

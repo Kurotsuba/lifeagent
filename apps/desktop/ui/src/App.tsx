@@ -7,7 +7,7 @@ import { isCommandError } from "./api/types";
 import { AuthScreen } from "./auth/AuthScreen";
 import { Chat } from "./chat/Chat";
 import { Sidebar } from "./components/Sidebar";
-import { zhCN } from "./i18n/zh-CN";
+import { strings } from "./i18n";
 import { Onboarding } from "./onboarding/Onboarding";
 import { Settings } from "./settings/Settings";
 import { Today } from "./today/Today";
@@ -38,7 +38,7 @@ export default function App() {
         } catch (e) {
           if (cancelled) return;
           setAuthNotice(
-            isCommandError(e) && e.code === "unauthorized" ? null : zhCN.common.networkError,
+            isCommandError(e) && e.code === "unauthorized" ? null : strings.common.networkError,
           );
           setScreen("auth");
           return;
@@ -66,7 +66,7 @@ export default function App() {
       setAuthNotice(notice);
       setScreen("auth");
     };
-    const onExpired = toAuth(zhCN.auth.sessionExpired);
+    const onExpired = toAuth(strings.auth.sessionExpired);
     const onSignedOut = toAuth(null);
     window.addEventListener(SESSION_EXPIRED_EVENT, onExpired);
     window.addEventListener(SIGNED_OUT_EVENT, onSignedOut);
@@ -105,7 +105,7 @@ export default function App() {
 
   return (
     <div className="flex h-screen items-center justify-center bg-neutral-50 text-neutral-900 dark:bg-neutral-900 dark:text-neutral-50">
-      <p className="text-lg">{zhCN.common.loading}</p>
+      <p className="text-lg">{strings.common.loading}</p>
     </div>
   );
 }

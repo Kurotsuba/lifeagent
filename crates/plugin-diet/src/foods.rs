@@ -3,7 +3,37 @@
 //! `sources.rs` (`TableSource`, `SourceChain`), which is the pluggable-source chain this module
 //! feeds `normalize`/`check_nutrition` into.
 
+use serde::Serialize;
+
 use crate::model::Macros;
+
+/// The first nutrition validity rule a row broke (§8.3 per 100 g, §7.2 per serving). `Display`
+/// is the English text the conversation model sees in a rejected tool call; the import preview
+/// sends the variant itself, so the UI can word it in the user's language.
+#[derive(Debug, Clone, PartialEq, Serialize, thiserror::Error)]
+#[serde(tag = "rule", rename_all = "snake_case")]
+pub enum MacroViolation {
+    #[error("all values must be numbers ≥ 0")]
+    Negative,
+    #[error(
+        "fiber_g ({fiber_g}) must not exceed carbs_g ({carbs_g}): carbs_g is total carbohydrate, fiber included"
+    )]
+    FiberExceedsCarbs { fiber_g: f64, carbs_g: f64 },
+    #[error("protein_g + carbs_g + fat_g must be ≤ 100 per 100 g, got {sum}")]
+    #[serde(rename = "macros_exceed_100g")]
+    MacrosExceed100g { sum: f64 },
+    #[error("kcal must be ≤ 900 per 100 g, got {got}")]
+    #[serde(rename = "kcal_per_100g_too_high")]
+    KcalPer100gTooHigh { got: f64 },
+    #[error("kcal must be ≤ 5000 per serving, got {got}")]
+    KcalPerServingTooHigh { got: f64 },
+    #[error("serving_g must be > 0")]
+    ServingNotPositive,
+    #[error("protein_g + carbs_g + fat_g ({sum}) must not exceed serving_g ({serving_g})")]
+    MacrosExceedServing { sum: f64, serving_g: f64 },
+    #[error("kcal ({kcal}) must not exceed 9 × serving_g ({serving_g})")]
+    KcalExceedsServing { kcal: f64, serving_g: f64 },
+}
 
 /// Punctuation stripped from the end of a name. Closing brackets are deliberately not in the
 /// list: names like "牛肉(熟)" end in one.
@@ -27,25 +57,23 @@ pub fn normalize(name: &str) -> String {
 
 /// The hard validity rules of §8.3, without the kcal correction. `Err` describes the first
 /// rule that failed.
-pub fn validate_per_100g(n: &Macros) -> Result<(), String> {
+pub fn validate_per_100g(n: &Macros) -> Result<(), MacroViolation> {
     let values = [n.kcal, n.protein_g, n.carbs_g, n.fat_g, n.fiber_g];
     if values.iter().any(|v| !v.is_finite() || *v < 0.0) {
-        return Err("all values must be numbers ≥ 0".into());
+        return Err(MacroViolation::Negative);
     }
     if n.fiber_g > n.carbs_g {
-        return Err(format!(
-            "fiber_g ({}) must not exceed carbs_g ({}): carbs_g is total carbohydrate, fiber included",
-            n.fiber_g, n.carbs_g
-        ));
+        return Err(MacroViolation::FiberExceedsCarbs {
+            fiber_g: n.fiber_g,
+            carbs_g: n.carbs_g,
+        });
     }
     let sum = n.protein_g + n.carbs_g + n.fat_g;
     if sum > 100.0 {
-        return Err(format!(
-            "protein_g + carbs_g + fat_g must be ≤ 100 per 100 g, got {sum}"
-        ));
+        return Err(MacroViolation::MacrosExceed100g { sum });
     }
     if n.kcal > 900.0 {
-        return Err(format!("kcal must be ≤ 900 per 100 g, got {}", n.kcal));
+        return Err(MacroViolation::KcalPer100gTooHigh { got: n.kcal });
     }
     Ok(())
 }
@@ -53,7 +81,7 @@ pub fn validate_per_100g(n: &Macros) -> Result<(), String> {
 /// The full §8.3 check for estimated values: the validity rules, then `kcal` replaced by the
 /// macro-derived energy when the two disagree by more than `max(20, 15%)`.
 pub fn check_nutrition(n: &Macros) -> Result<Macros, String> {
-    validate_per_100g(n)?;
+    validate_per_100g(n).map_err(|e| e.to_string())?;
     let e = 4.0 * n.protein_g + 4.0 * (n.carbs_g - n.fiber_g) + 9.0 * n.fat_g + 2.0 * n.fiber_g;
     let mut checked = *n;
     if (n.kcal - e).abs() > f64::max(20.0, 0.15 * e) {

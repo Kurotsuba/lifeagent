@@ -2,12 +2,12 @@ import { useEffect, useState } from "react";
 import { deleteMemory, getMemory } from "../api/commands";
 import { commandErrorMessage, type MemoryNote } from "../api/types";
 import { ConfirmDeleteButton } from "../components/ConfirmDeleteButton";
-import { zhCN } from "../i18n/zh-CN";
+import { strings } from "../i18n";
 import { LoadState } from "./LoadState";
 
 const MEMORY_LIMIT = 100;
 
-const t = zhCN.settings.memory;
+const t = strings.settings.memory;
 
 /** "2026-09-26T10:15:00Z" -> "2026-09-26 10:15", in the viewer's local time. */
 function formatCreatedAt(iso: string): string {

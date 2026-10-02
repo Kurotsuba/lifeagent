@@ -86,6 +86,11 @@ export function testModel(role: Role): Promise<TestModelResult> {
   return call("test_model", { role });
 }
 
+/** Desktop only: tells the shell the UI language, for its tray menu and notifications. */
+export function setDesktopLocale(locale: string): Promise<void> {
+  return call("set_locale", { locale });
+}
+
 export function getSettings(): Promise<SettingsDto> {
   return call("get_settings");
 }

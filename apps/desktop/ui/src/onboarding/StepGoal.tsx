@@ -3,10 +3,10 @@ import { previewTargets } from "../api/commands";
 import { commandErrorMessage } from "../api/types";
 import type { GoalDirection, NutritionTargets } from "../api/types";
 import { Field, inputClass } from "../components/Field";
-import { zhCN } from "../i18n/zh-CN";
+import { strings } from "../i18n";
 import { buildGoal, buildProfile, type OnboardingDraft } from "./draft";
 
-const t = zhCN.onboarding.goal;
+const t = strings.onboarding.goal;
 
 const directions: GoalDirection[] = ["lose", "maintain", "gain"];
 const rates = [0.25, 0.5, 0.75];

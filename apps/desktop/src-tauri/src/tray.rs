@@ -1,14 +1,26 @@
 //! Tray icon and menu (打开 / 快速记录 / 生成明日计划 / 退出), close-to-tray behavior, and the
-//! quick-entry popup window, per `docs/PHASE1_SPEC.md` §10.1/§10.3.
+//! quick-entry popup window, per `docs/PHASE1_SPEC.md` §10.1/§10.3. Labels follow the UI's
+//! language (`locale.rs`, `apply_locale`).
 
 use lifeagent_core::app::CoreApp;
 use lifeagent_core::plan::PlanTrigger;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
+use tauri::Wry;
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 
 use crate::error::CommandError;
+use crate::locale;
 use crate::notify;
+
+/// The menu items whose labels change with the UI language; managed state, so `set_locale` can
+/// relabel them.
+struct TrayItems {
+    open: MenuItem<Wry>,
+    quick_entry: MenuItem<Wry>,
+    generate_plan: MenuItem<Wry>,
+    quit: MenuItem<Wry>,
+}
 
 /// Window label the quick-entry popup is created/looked-up under; matched client-side
 /// (`main.tsx`) via `getCurrentWindow().label` to decide which React root to render.
@@ -22,12 +34,25 @@ const QUICK_ENTRY_HEIGHT: f64 = 120.0;
 /// click time, since the closure only needs to call existing `CoreApp` methods directly, not
 /// round-trip through the command/IPC layer it wasn't invoked through.
 pub fn build(app: &AppHandle, core_app: CoreApp) -> tauri::Result<()> {
-    let open = MenuItem::with_id(app, "open", "打开", true, None::<&str>)?;
-    let quick_entry = MenuItem::with_id(app, "quick_entry", "快速记录", true, None::<&str>)?;
-    let generate_plan =
-        MenuItem::with_id(app, "generate_plan", "生成明日计划", true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
+    let t = locale::texts(locale::current());
+    let open = MenuItem::with_id(app, "open", t.tray_open, true, None::<&str>)?;
+    let quick_entry =
+        MenuItem::with_id(app, "quick_entry", t.tray_quick_entry, true, None::<&str>)?;
+    let generate_plan = MenuItem::with_id(
+        app,
+        "generate_plan",
+        t.tray_generate_plan,
+        true,
+        None::<&str>,
+    )?;
+    let quit = MenuItem::with_id(app, "quit", t.tray_quit, true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&open, &quick_entry, &generate_plan, &quit])?;
+    app.manage(TrayItems {
+        open,
+        quick_entry,
+        generate_plan,
+        quit,
+    });
 
     // The app's own configured icon (`tauri.conf.json`'s `bundle.icon`) — a tray needs an icon
     // and this app ships no separate tray-specific asset, so reusing the window icon is the
@@ -56,6 +81,26 @@ pub fn build(app: &AppHandle, core_app: CoreApp) -> tauri::Result<()> {
     }
 
     Ok(())
+}
+
+/// Relabels the tray menu and the quick-entry window in the current language.
+pub fn apply_locale(app: &AppHandle) {
+    let t = locale::texts(locale::current());
+    if let Some(items) = app.try_state::<TrayItems>() {
+        for (item, text) in [
+            (&items.open, t.tray_open),
+            (&items.quick_entry, t.tray_quick_entry),
+            (&items.generate_plan, t.tray_generate_plan),
+            (&items.quit, t.tray_quit),
+        ] {
+            if let Err(e) = item.set_text(text) {
+                tracing::error!(error = %e, "tray: failed to relabel a menu item");
+            }
+        }
+    }
+    if let Some(window) = app.get_webview_window(QUICK_ENTRY_LABEL) {
+        let _ = window.set_title(t.quick_entry_title);
+    }
 }
 
 fn handle_menu_event(app: &AppHandle, id: &str, core_app: &CoreApp) {
@@ -94,7 +139,7 @@ fn open_quick_entry(app: &AppHandle) {
     }
     let result =
         WebviewWindowBuilder::new(app, QUICK_ENTRY_LABEL, WebviewUrl::App("index.html".into()))
-            .title("LifeAgent 快速记录")
+            .title(locale::texts(locale::current()).quick_entry_title)
             .inner_size(QUICK_ENTRY_WIDTH, QUICK_ENTRY_HEIGHT)
             .resizable(false)
             .decorations(false)
@@ -128,7 +173,7 @@ fn generate_tomorrow_plan(app: AppHandle, core_app: CoreApp) {
         };
         match &result {
             Ok(plan) => notify::show_tray_plan_result(&app, Ok(&plan.content.summary)),
-            Err(e) => notify::show_tray_plan_result(&app, Err(&e.message)),
+            Err(e) => notify::show_tray_plan_result(&app, Err(&e.code)),
         }
     });
 }

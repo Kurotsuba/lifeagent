@@ -18,7 +18,7 @@ use uuid::Uuid;
 
 use lifeagent_core::plugin::{PluginContext, PluginError};
 
-use crate::foods::normalize;
+use crate::foods::{normalize, MacroViolation};
 use crate::model::{Dish, Macros, SourceKind};
 
 pub const MANUAL_SOURCE_ID: &str = "manual";
@@ -801,7 +801,10 @@ pub async fn upsert_manual_food(
 
 /// The §7.2 hard rules for a per-serving dish row (the warning-only energy-vs-macros check is
 /// import-only, stage 3). Used by `diet_update_dish`; `Err` describes the first rule that failed.
-pub fn validate_dish_macros(per_serving: &Macros, serving_g: Option<f64>) -> Result<(), String> {
+pub fn validate_dish_macros(
+    per_serving: &Macros,
+    serving_g: Option<f64>,
+) -> Result<(), MacroViolation> {
     let values = [
         per_serving.kcal,
         per_serving.protein_g,
@@ -810,35 +813,32 @@ pub fn validate_dish_macros(per_serving: &Macros, serving_g: Option<f64>) -> Res
         per_serving.fiber_g,
     ];
     if values.iter().any(|v| !v.is_finite() || *v < 0.0) {
-        return Err("all values must be numbers ≥ 0".into());
+        return Err(MacroViolation::Negative);
     }
     if per_serving.fiber_g > per_serving.carbs_g {
-        return Err(format!(
-            "fiber_g ({}) must not exceed carbs_g ({}): carbs_g is total carbohydrate, fiber included",
-            per_serving.fiber_g, per_serving.carbs_g
-        ));
+        return Err(MacroViolation::FiberExceedsCarbs {
+            fiber_g: per_serving.fiber_g,
+            carbs_g: per_serving.carbs_g,
+        });
     }
     if per_serving.kcal > 5000.0 {
-        return Err(format!(
-            "kcal must be ≤ 5000 per serving, got {}",
-            per_serving.kcal
-        ));
+        return Err(MacroViolation::KcalPerServingTooHigh {
+            got: per_serving.kcal,
+        });
     }
     if let Some(g) = serving_g {
         if g <= 0.0 {
-            return Err("serving_g must be > 0".into());
+            return Err(MacroViolation::ServingNotPositive);
         }
         let sum = per_serving.protein_g + per_serving.carbs_g + per_serving.fat_g;
         if sum > g {
-            return Err(format!(
-                "protein_g + carbs_g + fat_g ({sum}) must not exceed serving_g ({g})"
-            ));
+            return Err(MacroViolation::MacrosExceedServing { sum, serving_g: g });
         }
         if per_serving.kcal > 9.0 * g {
-            return Err(format!(
-                "kcal ({}) must not exceed 9 × serving_g ({g})",
-                per_serving.kcal
-            ));
+            return Err(MacroViolation::KcalExceedsServing {
+                kcal: per_serving.kcal,
+                serving_g: g,
+            });
         }
     }
     Ok(())

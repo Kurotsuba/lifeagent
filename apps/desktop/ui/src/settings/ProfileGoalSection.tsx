@@ -9,13 +9,13 @@ import {
 } from "../api/commands";
 import { commandErrorMessage } from "../api/types";
 import { primaryButtonClass } from "../components/buttonStyles";
-import { zhCN } from "../i18n/zh-CN";
+import { strings } from "../i18n";
 import { LoadState } from "./LoadState";
 import { buildGoal, buildProfile, defaultDraft, type OnboardingDraft } from "../onboarding/draft";
 import { StepGoal } from "../onboarding/StepGoal";
 import { isStepProfileValid, StepProfile } from "../onboarding/StepProfile";
 
-const t = zhCN.settings;
+const t = strings.settings;
 
 /** Reuses onboarding's `StepProfile`/`StepGoal` components verbatim (§10.3: "same forms as
  * onboarding") against one shared draft, since `StepGoal`'s live kcal preview already needs the
@@ -107,7 +107,7 @@ export function ProfileGoalSection() {
           disabled={saving || !isStepProfileValid(draft)}
           onClick={() => void handleSave()}
         >
-          {saving ? zhCN.common.saving : zhCN.common.save}
+          {saving ? strings.common.saving : strings.common.save}
         </button>
         {status ? (
           <span

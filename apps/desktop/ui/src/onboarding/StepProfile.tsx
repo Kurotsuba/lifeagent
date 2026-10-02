@@ -1,9 +1,9 @@
 import { Field, inputClass } from "../components/Field";
-import { zhCN } from "../i18n/zh-CN";
+import { strings } from "../i18n";
 import type { ActivityLevel, DietaryPattern, Sex } from "../api/types";
 import type { OnboardingDraft } from "./draft";
 
-const t = zhCN.onboarding.profile;
+const t = strings.onboarding.profile;
 
 const activityLevels: ActivityLevel[] = [
   "sedentary",
@@ -145,7 +145,7 @@ export function StepProfile({ draft, update }: StepProfileProps) {
         </select>
       </Field>
 
-      <Field label={`${t.medicalNotes}（${zhCN.common.optional}）`}>
+      <Field label={strings.common.withOptional(t.medicalNotes)}>
         <textarea
           className={inputClass}
           rows={2}

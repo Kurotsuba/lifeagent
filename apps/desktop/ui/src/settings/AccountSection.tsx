@@ -3,9 +3,9 @@ import { deleteAccount, me, SIGNED_OUT_EVENT } from "../api/auth";
 import { commandErrorMessage } from "../api/types";
 import { Field, inputClass } from "../components/Field";
 import { primaryButtonClass } from "../components/buttonStyles";
-import { zhCN } from "../i18n/zh-CN";
+import { strings } from "../i18n";
 
-const t = zhCN.settings.account;
+const t = strings.settings.account;
 
 /** Web build only: who is logged in, and deleting the account with all of its data (the
  * server re-checks the password and drops the user's schema and role). */

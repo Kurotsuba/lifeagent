@@ -69,8 +69,13 @@ never call a real LLM in tests; use `MockChatModel` from `lifeagent-llm`.
   (DB JSON columns, Tauri commands, LLM tool arguments).
 - Numbers shown to the user (calories, macros, targets) are always computed in Rust code.
   The LLM may propose foods and portions, never final nutrition totals.
-- UI strings are Simplified Chinese (zh-CN) in Phase 1. Keep them in one file
-  (`apps/desktop/ui/src/i18n/zh-CN.ts`). The assistant replies in the language the user writes in.
+- UI strings come in Japanese (default), English and Simplified Chinese, one table per locale in
+  `apps/desktop/ui/src/i18n/` (`ja.ts`, `en.ts`, `zh-CN.ts`). `zh-CN.ts` defines the keys; the
+  others are type-checked against it, so add every new string to all three. Components read
+  `strings` from `apps/desktop/ui/src/i18n`. Errors the user can see leave Rust as data
+  (`ErrorDetail` in `crates/api/src/error.rs`, `ImportMessage` in the diet plugin) and are worded
+  by the UI's `errors`/`importMessages` tables, so a new one needs a variant and three
+  translations. The assistant replies in the language the user writes in.
 - Keep dependencies minimal. Add a crate only when it removes meaningful code or risk.
 
 ## Workflow

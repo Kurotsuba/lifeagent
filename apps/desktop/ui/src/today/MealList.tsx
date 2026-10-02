@@ -2,9 +2,9 @@ import { useState } from "react";
 import { deleteEntry } from "../api/commands";
 import { commandErrorMessage, type DietLoggedMeal } from "../api/types";
 import { ConfirmDeleteButton } from "../components/ConfirmDeleteButton";
-import { zhCN } from "../i18n/zh-CN";
+import { strings } from "../i18n";
 
-const t = zhCN.today.diet;
+const t = strings.today.diet;
 
 interface MealListProps {
   meals: DietLoggedMeal[];
@@ -40,13 +40,13 @@ export function MealList({ meals, onDeleted }: MealListProps) {
         >
           <div>
             <p className="font-medium text-neutral-900 dark:text-neutral-50">
-              {meal.time} · {zhCN.mealType[meal.meal_type]} ·{" "}
+              {meal.time} · {strings.mealType[meal.meal_type]} ·{" "}
               {t.kcalEaten(Math.round(meal.total.kcal))}
             </p>
             <p className="mt-1 text-neutral-600 dark:text-neutral-400">
               {meal.items.map((item, i) => (
                 <span key={`${meal.entry_id}-${i}`} title={item.source_name ?? undefined}>
-                  {i > 0 ? "、" : ""}
+                  {i > 0 ? strings.common.listSeparator : ""}
                   {item.kind === "dish" ? (
                     <>
                       {item.brand ? (

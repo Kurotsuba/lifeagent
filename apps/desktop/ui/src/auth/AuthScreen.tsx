@@ -3,9 +3,10 @@ import { login, register } from "../api/auth";
 import { commandErrorMessage } from "../api/types";
 import { Field, inputClass } from "../components/Field";
 import { primaryButtonClass } from "../components/buttonStyles";
-import { zhCN } from "../i18n/zh-CN";
+import { LanguageSelect } from "../components/LanguageSelect";
+import { strings } from "../i18n";
 
-const t = zhCN.auth;
+const t = strings.auth;
 
 interface AuthScreenProps {
   /** Shown above the form, e.g. after the session expired. */
@@ -58,9 +59,12 @@ export function AuthScreen({ notice, onSignedIn }: AuthScreenProps) {
     <div className="flex h-full items-center justify-center px-6">
       <form className="w-full max-w-sm space-y-4" onSubmit={(e) => void handleSubmit(e)}>
         <div>
-          <p className="text-sm font-semibold text-neutral-500 dark:text-neutral-400">
-            {zhCN.app.name}
-          </p>
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-semibold text-neutral-500 dark:text-neutral-400">
+              {strings.app.name}
+            </p>
+            <LanguageSelect />
+          </div>
           <h1 className="mt-1 text-xl font-semibold">{isRegister ? t.registerTitle : t.loginTitle}</h1>
         </div>
 
@@ -103,7 +107,7 @@ export function AuthScreen({ notice, onSignedIn }: AuthScreenProps) {
                 required
               />
             </Field>
-            <Field label={`${t.inviteCode}（${zhCN.common.optional}）`}>
+            <Field label={strings.common.withOptional(t.inviteCode)}>
               <input
                 className={inputClass}
                 autoComplete="off"

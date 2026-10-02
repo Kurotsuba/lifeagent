@@ -15,7 +15,7 @@ use uuid::Uuid;
 
 use lifeagent_core::plugin::{PluginContext, PluginError};
 
-use crate::foods::{normalize, validate_per_100g};
+use crate::foods::{normalize, validate_per_100g, MacroViolation};
 use crate::model::Macros;
 use crate::sources::{self, DatasetOrigin, SourceInfo};
 
@@ -33,10 +33,10 @@ const MAX_BRANDS: usize = 20;
 pub enum FoodDataError {
     /// User-caused: bad file, limits, zero valid rows, rename length, …
     #[error("{0}")]
-    Invalid(String),
+    Invalid(ImportMessage),
     /// Unknown source id, expired import token.
     #[error("{0}")]
-    NotFound(String),
+    NotFound(ImportMessage),
     #[error(transparent)]
     Plugin(#[from] PluginError),
 }
@@ -67,7 +67,166 @@ impl ImportFormat {
 pub struct RowIssue {
     pub line: usize,
     pub name: Option<String>,
-    pub message: String,
+    pub message: ImportMessage,
+}
+
+/// Everything an import can report to the user — file-level failures (`FoodDataError`) and
+/// row-level errors and warnings (`RowIssue`) — as data, so the UI words it in the user's
+/// language (`apps/desktop/ui/src/i18n`). `Display` is the zh-CN text the CLI prints.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ImportMessage {
+    // ---- File level ----
+    FileTooLarge {
+        max_mb: usize,
+    },
+    NotUtf8,
+    CsvHeader {
+        error: String,
+    },
+    CsvRow {
+        line: usize,
+        error: String,
+    },
+    JsonParse {
+        error: String,
+    },
+    JsonItemNotObject {
+        line: usize,
+    },
+    JsonMissingRows,
+    JsonFoodsNotArray,
+    JsonDishesNotArray,
+    JsonWrongShape,
+    TooManyRows {
+        max: usize,
+    },
+    NoValidRows,
+    MissingFileContent,
+    ImportExpired,
+    SourceNameLength,
+    NotADataset,
+    SourceNotFound,
+    // ---- Row level ----
+    UnknownBasis {
+        value: String,
+    },
+    /// `field` is the column name as written in the file format (`protein_g`, `kcal`, …).
+    NotANumber {
+        field: &'static str,
+    },
+    MissingField {
+        field: &'static str,
+    },
+    MissingEnergy,
+    NotPositive {
+        field: &'static str,
+        got: f64,
+    },
+    InvalidMacros {
+        violation: MacroViolation,
+    },
+    KcalKjMismatch {
+        kcal: f64,
+        kcal_from_kj: f64,
+    },
+    EnergyMismatch {
+        kcal: f64,
+        estimated: f64,
+    },
+    TooManyAliases {
+        max: usize,
+    },
+    BrandOnFoodRow,
+    FoodNameEmpty,
+    FoodNameTooLong {
+        max: usize,
+    },
+    DishNameEmpty,
+    DishNameTooLong {
+        max: usize,
+    },
+    BrandTooLong {
+        max: usize,
+    },
+    DuplicateFood,
+    DuplicateDish,
+    DuplicateFoodAlias {
+        alias: String,
+    },
+    DuplicateDishAlias {
+        alias: String,
+    },
+    TraceValues {
+        rows: usize,
+    },
+    UnknownColumns {
+        columns: Vec<String>,
+    },
+}
+
+impl std::fmt::Display for ImportMessage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use ImportMessage::*;
+        match self {
+            FileTooLarge { max_mb } => write!(f, "文件超过 {max_mb} MB 限制"),
+            NotUtf8 => write!(f, "文件不是 UTF-8 编码，请用 UTF-8 另存后重试"),
+            CsvHeader { error } => write!(f, "CSV 表头解析失败：{error}"),
+            CsvRow { line, error } => write!(f, "CSV 第 {line} 行解析失败：{error}"),
+            JsonParse { error } => write!(f, "JSON 解析失败：{error}"),
+            JsonItemNotObject { line } => write!(f, "第 {line} 项不是对象"),
+            JsonMissingRows => write!(f, "JSON 对象缺少 foods 或 dishes 字段"),
+            JsonFoodsNotArray => write!(f, "foods 必须是数组"),
+            JsonDishesNotArray => write!(f, "dishes 必须是数组"),
+            JsonWrongShape => write!(f, "JSON 必须是数组，或包含 foods/dishes 字段的对象"),
+            TooManyRows { max } => write!(f, "文件行数超过 {max} 行限制"),
+            NoValidRows => write!(f, "文件中没有可导入的有效数据行"),
+            MissingFileContent => write!(f, "请求缺少文件内容。"),
+            ImportExpired => write!(f, "导入已过期，请重新选择文件"),
+            SourceNameLength => write!(f, "数据源名称需为 1-60 个字符"),
+            NotADataset => write!(f, "只能替换数据集来源"),
+            SourceNotFound => write!(f, "数据源不存在"),
+            UnknownBasis { value } => {
+                write!(f, "basis 列的值无法识别：{value:?}（应为 100g 或 serving）")
+            }
+            NotANumber { field } => write!(f, "{field} 不是数字"),
+            MissingField { field } => write!(f, "缺少必填字段 {field}"),
+            MissingEnergy => write!(f, "缺少必填字段 kcal 或 kj"),
+            NotPositive { field, got } => write!(f, "{field} 必须大于 0，实际为 {got}"),
+            InvalidMacros { violation } => write!(f, "{violation}"),
+            KcalKjMismatch { kcal, kcal_from_kj } => write!(
+                f,
+                "kcal（{kcal:.0}）与 kj 换算得到的 {kcal_from_kj:.0} 相差超过 2%，以 kcal 为准"
+            ),
+            EnergyMismatch { kcal, estimated } => write!(
+                f,
+                "kcal（{kcal:.0}）与营养素推算的能量（{estimated:.0}）相差较大，导入的数值保持不变"
+            ),
+            TooManyAliases { max } => write!(f, "别名数超过 {max} 个，多余的已忽略"),
+            BrandOnFoodRow => write!(
+                f,
+                "brand 列仅对菜品行（basis=serving）有效，本行（100g 基准）已忽略该列"
+            ),
+            FoodNameEmpty => write!(f, "食物名称不能为空"),
+            FoodNameTooLong { max } => write!(f, "食物名称超过 {max} 字符"),
+            DishNameEmpty => write!(f, "菜品名称不能为空"),
+            DishNameTooLong { max } => write!(f, "菜品名称超过 {max} 字符"),
+            BrandTooLong { max } => write!(f, "品牌名称超过 {max} 字符"),
+            DuplicateFood => write!(f, "与文件中更早一行的食物名称重复"),
+            DuplicateDish => write!(f, "与文件中更早一行的菜品（同品牌同名称）重复"),
+            DuplicateFoodAlias { alias } => {
+                write!(f, "别名“{alias}”与文件中其他食物名称或别名重复，已忽略")
+            }
+            DuplicateDishAlias { alias } => {
+                write!(
+                    f,
+                    "别名“{alias}”与文件中同品牌的其他菜品名称或别名重复，已忽略"
+                )
+            }
+            TraceValues { rows } => write!(f, "{rows} 行使用了“Tr/微量”标记，已按 0 处理"),
+            UnknownColumns { columns } => write!(f, "忽略了未知列：{}", columns.join("、")),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -288,7 +447,7 @@ enum RowKind {
 /// The `basis`/`基准` column (or, for a bare JSON array, the per-row `"basis"` key): `100g` /
 /// `每100g` (also `100 g`, whitespace-insensitive) selects a food row (the default when the
 /// column is absent or blank); `serving` / `份` / `每份` selects a dish row.
-fn parse_row_kind(raw: Option<&str>) -> Result<RowKind, String> {
+fn parse_row_kind(raw: Option<&str>) -> Result<RowKind, ImportMessage> {
     let Some(s) = raw.map(str::trim).filter(|s| !s.is_empty()) else {
         return Ok(RowKind::Food);
     };
@@ -300,9 +459,9 @@ fn parse_row_kind(raw: Option<&str>) -> Result<RowKind, String> {
     match norm.as_str() {
         "100g" | "每100g" => Ok(RowKind::Food),
         "serving" | "份" | "每份" => Ok(RowKind::Dish),
-        _ => Err(format!(
-            "basis 列的值无法识别：{s:?}（应为 100g 或 serving）"
-        )),
+        _ => Err(ImportMessage::UnknownBasis {
+            value: s.to_string(),
+        }),
     }
 }
 
@@ -441,7 +600,7 @@ impl RawRow {
 
 /// A raw row paired with its resolved kind (or the "basis 列" text error that kept it from
 /// resolving to one).
-type KindedRow = (RawRow, Result<RowKind, String>);
+type KindedRow = (RawRow, Result<RowKind, ImportMessage>);
 
 // ---- Format detection and file-level parsing (§6.1) --------------------------------------------
 
@@ -474,7 +633,11 @@ fn parse_csv(text: &str) -> Result<(Vec<RawRow>, Vec<String>), FoodDataError> {
         .from_reader(text.as_bytes());
     let headers = reader
         .headers()
-        .map_err(|e| FoodDataError::Invalid(format!("CSV 表头解析失败：{e}")))?
+        .map_err(|e| {
+            FoodDataError::Invalid(ImportMessage::CsvHeader {
+                error: e.to_string(),
+            })
+        })?
         .clone();
     let mut columns: Vec<Option<Column>> = Vec::with_capacity(headers.len());
     let mut unknown = Vec::new();
@@ -490,8 +653,12 @@ fn parse_csv(text: &str) -> Result<(Vec<RawRow>, Vec<String>), FoodDataError> {
 
     let mut rows = Vec::new();
     for (i, record) in reader.records().enumerate() {
-        let record = record
-            .map_err(|e| FoodDataError::Invalid(format!("CSV 第 {} 行解析失败：{e}", i + 2)))?;
+        let record = record.map_err(|e| {
+            FoodDataError::Invalid(ImportMessage::CsvRow {
+                line: i + 2,
+                error: e.to_string(),
+            })
+        })?;
         let mut row = RawRow::empty(i + 2);
         for (idx, field) in record.iter().enumerate() {
             if let Some(Some(col)) = columns.get(idx) {
@@ -540,7 +707,9 @@ fn parse_json_row_array(
     for (i, item) in array.into_iter().enumerate() {
         let line = i + 1;
         let Value::Object(obj) = item else {
-            return Err(FoodDataError::Invalid(format!("第 {line} 项不是对象")));
+            return Err(FoodDataError::Invalid(ImportMessage::JsonItemNotObject {
+                line,
+            }));
         };
         for key in obj.keys() {
             if !JSON_KNOWN_KEYS.contains(&key.as_str()) {
@@ -587,8 +756,11 @@ fn parse_json_row_array(
 type ParsedJsonRows = (Option<String>, Vec<KindedRow>, Vec<String>);
 
 fn parse_json(text: &str) -> Result<ParsedJsonRows, FoodDataError> {
-    let value: Value = serde_json::from_str(text)
-        .map_err(|e| FoodDataError::Invalid(format!("JSON 解析失败：{e}")))?;
+    let value: Value = serde_json::from_str(text).map_err(|e| {
+        FoodDataError::Invalid(ImportMessage::JsonParse {
+            error: e.to_string(),
+        })
+    })?;
     match value {
         Value::Array(a) => {
             let (rows, unknown) = parse_json_row_array(a, RowArrayKind::Mixed)?;
@@ -608,16 +780,14 @@ fn parse_json(text: &str) -> Result<ParsedJsonRows, FoodDataError> {
             let foods_val = obj.remove("foods");
             let dishes_val = obj.remove("dishes");
             if foods_val.is_none() && dishes_val.is_none() {
-                return Err(FoodDataError::Invalid(
-                    "JSON 对象缺少 foods 或 dishes 字段".into(),
-                ));
+                return Err(FoodDataError::Invalid(ImportMessage::JsonMissingRows));
             }
 
             let mut kinded = Vec::new();
             let mut unknown_all: HashSet<String> = HashSet::new();
             if let Some(v) = foods_val {
                 let Value::Array(a) = v else {
-                    return Err(FoodDataError::Invalid("foods 必须是数组".into()));
+                    return Err(FoodDataError::Invalid(ImportMessage::JsonFoodsNotArray));
                 };
                 let (rows, unknown) = parse_json_row_array(a, RowArrayKind::Food)?;
                 unknown_all.extend(unknown);
@@ -625,7 +795,7 @@ fn parse_json(text: &str) -> Result<ParsedJsonRows, FoodDataError> {
             }
             if let Some(v) = dishes_val {
                 let Value::Array(a) = v else {
-                    return Err(FoodDataError::Invalid("dishes 必须是数组".into()));
+                    return Err(FoodDataError::Invalid(ImportMessage::JsonDishesNotArray));
                 };
                 let (rows, unknown) = parse_json_row_array(a, RowArrayKind::Dish)?;
                 unknown_all.extend(unknown);
@@ -633,9 +803,7 @@ fn parse_json(text: &str) -> Result<ParsedJsonRows, FoodDataError> {
             }
             Ok((name, kinded, unknown_all.into_iter().collect()))
         }
-        _ => Err(FoodDataError::Invalid(
-            "JSON 必须是数组，或包含 foods/dishes 字段的对象".into(),
-        )),
+        _ => Err(FoodDataError::Invalid(ImportMessage::JsonWrongShape)),
     }
 }
 
@@ -646,39 +814,43 @@ fn parse_json(text: &str) -> Result<ParsedJsonRows, FoodDataError> {
 /// afterwards) and dish rows (used as-is: dish macros are already per serving).
 fn resolve_macros(
     raw: &RawRow,
-    issue: &impl Fn(String) -> RowIssue,
+    issue: &impl Fn(ImportMessage) -> RowIssue,
     trace_rows: &mut usize,
 ) -> Result<(Macros, Vec<RowIssue>), RowIssue> {
     let mut warnings = Vec::new();
 
-    let (protein, p_trace) =
-        resolve_numeric(&raw.protein).map_err(|_| issue("protein_g 不是数字".into()))?;
-    let protein = protein.ok_or_else(|| issue("缺少必填字段 protein_g".into()))?;
-    let (carbs, c_trace) =
-        resolve_numeric(&raw.carbs).map_err(|_| issue("carbs_g 不是数字".into()))?;
-    let carbs = carbs.ok_or_else(|| issue("缺少必填字段 carbs_g".into()))?;
-    let (fat, f_trace) = resolve_numeric(&raw.fat).map_err(|_| issue("fat_g 不是数字".into()))?;
-    let fat = fat.ok_or_else(|| issue("缺少必填字段 fat_g".into()))?;
-    let (fiber, fi_trace) =
-        resolve_numeric(&raw.fiber).map_err(|_| issue("fiber_g 不是数字".into()))?;
+    let (protein, p_trace) = resolve_numeric(&raw.protein)
+        .map_err(|_| issue(ImportMessage::NotANumber { field: "protein_g" }))?;
+    let protein =
+        protein.ok_or_else(|| issue(ImportMessage::MissingField { field: "protein_g" }))?;
+    let (carbs, c_trace) = resolve_numeric(&raw.carbs)
+        .map_err(|_| issue(ImportMessage::NotANumber { field: "carbs_g" }))?;
+    let carbs = carbs.ok_or_else(|| issue(ImportMessage::MissingField { field: "carbs_g" }))?;
+    let (fat, f_trace) = resolve_numeric(&raw.fat)
+        .map_err(|_| issue(ImportMessage::NotANumber { field: "fat_g" }))?;
+    let fat = fat.ok_or_else(|| issue(ImportMessage::MissingField { field: "fat_g" }))?;
+    let (fiber, fi_trace) = resolve_numeric(&raw.fiber)
+        .map_err(|_| issue(ImportMessage::NotANumber { field: "fiber_g" }))?;
     let fiber = fiber.unwrap_or(0.0);
 
-    let (kcal_val, k_trace) =
-        resolve_numeric(&raw.kcal).map_err(|_| issue("kcal 不是数字".into()))?;
-    let (kj_val, kj_trace) = resolve_numeric(&raw.kj).map_err(|_| issue("kj 不是数字".into()))?;
+    let (kcal_val, k_trace) = resolve_numeric(&raw.kcal)
+        .map_err(|_| issue(ImportMessage::NotANumber { field: "kcal" }))?;
+    let (kj_val, kj_trace) =
+        resolve_numeric(&raw.kj).map_err(|_| issue(ImportMessage::NotANumber { field: "kj" }))?;
     let kcal_from_kj = kj_val.map(|kj| kj / 4.184);
     let kcal = match (kcal_val, kcal_from_kj) {
         (Some(k), Some(kj_k)) => {
             if (k - kj_k).abs() > 0.02 * k.abs().max(1.0) {
-                warnings.push(issue(format!(
-                    "kcal（{k:.0}）与 kj 换算得到的 {kj_k:.0} 相差超过 2%，以 kcal 为准"
-                )));
+                warnings.push(issue(ImportMessage::KcalKjMismatch {
+                    kcal: k,
+                    kcal_from_kj: kj_k,
+                }));
             }
             k
         }
         (Some(k), None) => k,
         (None, Some(kj_k)) => kj_k,
-        (None, None) => return Err(issue("缺少必填字段 kcal 或 kj".into())),
+        (None, None) => return Err(issue(ImportMessage::MissingEnergy)),
     };
     for traced in [p_trace, c_trace, f_trace, fi_trace, k_trace, kj_trace] {
         if traced {
@@ -700,17 +872,17 @@ fn resolve_macros(
 
 fn energy_mismatch_warning(
     macros: &Macros,
-    issue: &impl Fn(String) -> RowIssue,
+    issue: &impl Fn(ImportMessage) -> RowIssue,
 ) -> Option<RowIssue> {
     let e = 4.0 * macros.protein_g
         + 4.0 * (macros.carbs_g - macros.fiber_g)
         + 9.0 * macros.fat_g
         + 2.0 * macros.fiber_g;
     if (macros.kcal - e).abs() > f64::max(20.0, 0.15 * e) {
-        Some(issue(format!(
-            "kcal（{:.0}）与营养素推算的能量（{e:.0}）相差较大，导入的数值保持不变",
-            macros.kcal
-        )))
+        Some(issue(ImportMessage::EnergyMismatch {
+            kcal: macros.kcal,
+            estimated: e,
+        }))
     } else {
         None
     }
@@ -720,7 +892,7 @@ fn resolve_row_aliases(
     raw_aliases: &[String],
     name_key: &str,
     warnings: &mut Vec<RowIssue>,
-    issue: &impl Fn(String) -> RowIssue,
+    issue: &impl Fn(ImportMessage) -> RowIssue,
 ) -> Vec<String> {
     let mut aliases = Vec::new();
     for alias_raw in raw_aliases.iter().take(MAX_ALIASES_PER_ROW) {
@@ -731,9 +903,9 @@ fn resolve_row_aliases(
         aliases.push(key);
     }
     if raw_aliases.len() > MAX_ALIASES_PER_ROW {
-        warnings.push(issue(format!(
-            "别名数超过 {MAX_ALIASES_PER_ROW} 个，多余的已忽略"
-        )));
+        warnings.push(issue(ImportMessage::TooManyAliases {
+            max: MAX_ALIASES_PER_ROW,
+        }));
     }
     aliases
 }
@@ -744,7 +916,7 @@ fn process_food_row(
 ) -> Result<(ValidFoodRow, Vec<RowIssue>), RowIssue> {
     let line = raw.line;
     let name = raw.name.clone().unwrap_or_default().trim().to_string();
-    let issue = |message: String| RowIssue {
+    let issue = |message: ImportMessage| RowIssue {
         line,
         name: (!name.is_empty()).then(|| name.clone()),
         message,
@@ -752,19 +924,20 @@ fn process_food_row(
     let mut warnings = Vec::new();
 
     if raw.brand.as_deref().is_some_and(|b| !b.trim().is_empty()) {
-        warnings.push(issue(
-            "brand 列仅对菜品行（basis=serving）有效，本行（100g 基准）已忽略该列".into(),
-        ));
+        warnings.push(issue(ImportMessage::BrandOnFoodRow));
     }
 
-    let (basis, basis_trace) =
-        resolve_numeric(&raw.basis_g).map_err(|_| issue("basis_g 不是数字".into()))?;
+    let (basis, basis_trace) = resolve_numeric(&raw.basis_g)
+        .map_err(|_| issue(ImportMessage::NotANumber { field: "basis_g" }))?;
     let basis = basis.unwrap_or(100.0);
     if basis_trace {
         *trace_rows += 1;
     }
     if basis <= 0.0 {
-        return Err(issue(format!("basis_g 必须大于 0，实际为 {basis}")));
+        return Err(issue(ImportMessage::NotPositive {
+            field: "basis_g",
+            got: basis,
+        }));
     }
 
     let (raw_macros, macro_warnings) = resolve_macros(&raw, &issue, trace_rows)?;
@@ -778,14 +951,15 @@ fn process_food_row(
         fat_g: raw_macros.fat_g * scale,
         fiber_g: raw_macros.fiber_g * scale,
     };
-    validate_per_100g(&macros).map_err(issue)?;
+    validate_per_100g(&macros)
+        .map_err(|violation| issue(ImportMessage::InvalidMacros { violation }))?;
 
     let name_key = normalize(&name);
     if name_key.is_empty() {
-        return Err(issue("食物名称不能为空".into()));
+        return Err(issue(ImportMessage::FoodNameEmpty));
     }
     if name.chars().count() > 100 {
-        return Err(issue("食物名称超过 100 字符".into()));
+        return Err(issue(ImportMessage::FoodNameTooLong { max: 100 }));
     }
 
     warnings.extend(energy_mismatch_warning(&macros, &issue));
@@ -809,40 +983,44 @@ fn process_dish_row(
 ) -> Result<(ValidDishRow, Vec<RowIssue>), RowIssue> {
     let line = raw.line;
     let name = raw.name.clone().unwrap_or_default().trim().to_string();
-    let issue = |message: String| RowIssue {
+    let issue = |message: ImportMessage| RowIssue {
         line,
         name: (!name.is_empty()).then(|| name.clone()),
         message,
     };
     let mut warnings = Vec::new();
 
-    let (serving_g, basis_trace) =
-        resolve_numeric(&raw.basis_g).map_err(|_| issue("serving_g（basis_g）不是数字".into()))?;
+    let (serving_g, basis_trace) = resolve_numeric(&raw.basis_g)
+        .map_err(|_| issue(ImportMessage::NotANumber { field: "serving_g" }))?;
     if basis_trace {
         *trace_rows += 1;
     }
     if let Some(g) = serving_g {
         if g <= 0.0 {
-            return Err(issue(format!("serving_g 必须大于 0，实际为 {g}")));
+            return Err(issue(ImportMessage::NotPositive {
+                field: "serving_g",
+                got: g,
+            }));
         }
     }
 
     let (macros, macro_warnings) = resolve_macros(&raw, &issue, trace_rows)?;
     warnings.extend(macro_warnings);
 
-    sources::validate_dish_macros(&macros, serving_g).map_err(issue)?;
+    sources::validate_dish_macros(&macros, serving_g)
+        .map_err(|violation| issue(ImportMessage::InvalidMacros { violation }))?;
 
     let name_key = normalize(&name);
     if name_key.is_empty() {
-        return Err(issue("菜品名称不能为空".into()));
+        return Err(issue(ImportMessage::DishNameEmpty));
     }
     if name.chars().count() > 100 {
-        return Err(issue("菜品名称超过 100 字符".into()));
+        return Err(issue(ImportMessage::DishNameTooLong { max: 100 }));
     }
 
     let brand = raw.brand.clone().unwrap_or_default().trim().to_string();
     if brand.chars().count() > 60 {
-        return Err(issue("品牌名称超过 60 字符".into()));
+        return Err(issue(ImportMessage::BrandTooLong { max: 60 }));
     }
     let brand_key = normalize(&brand);
 
@@ -867,13 +1045,12 @@ fn process_dish_row(
 /// Pure: bytes in, rows and issues out. No DB, no clock, no model.
 pub fn parse(file_name: &str, bytes: &[u8]) -> Result<ParsedImport, FoodDataError> {
     if bytes.len() > MAX_BYTES {
-        return Err(FoodDataError::Invalid(format!(
-            "文件超过 {} MB 限制",
-            MAX_BYTES / (1024 * 1024)
-        )));
+        return Err(FoodDataError::Invalid(ImportMessage::FileTooLarge {
+            max_mb: MAX_BYTES / (1024 * 1024),
+        }));
     }
-    let text = std::str::from_utf8(bytes)
-        .map_err(|_| FoodDataError::Invalid("文件不是 UTF-8 编码，请用 UTF-8 另存后重试".into()))?;
+    let text =
+        std::str::from_utf8(bytes).map_err(|_| FoodDataError::Invalid(ImportMessage::NotUtf8))?;
     let text = text.strip_prefix('\u{feff}').unwrap_or(text);
 
     let format = detect_format(file_name, text);
@@ -896,9 +1073,9 @@ pub fn parse(file_name: &str, bytes: &[u8]) -> Result<ParsedImport, FoodDataErro
         ImportFormat::Json => parse_json(text)?,
     };
     if kinded_rows.len() > MAX_ROWS {
-        return Err(FoodDataError::Invalid(format!(
-            "文件行数超过 {MAX_ROWS} 行限制"
-        )));
+        return Err(FoodDataError::Invalid(ImportMessage::TooManyRows {
+            max: MAX_ROWS,
+        }));
     }
     let suggested_name = envelope_name
         .filter(|n| !n.trim().is_empty())
@@ -934,7 +1111,7 @@ pub fn parse(file_name: &str, bytes: &[u8]) -> Result<ParsedImport, FoodDataErro
                         errors.push(RowIssue {
                             line: row.line,
                             name: Some(row.name.clone()),
-                            message: "与文件中更早一行的食物名称重复".into(),
+                            message: ImportMessage::DuplicateFood,
                         });
                         continue;
                     }
@@ -949,7 +1126,7 @@ pub fn parse(file_name: &str, bytes: &[u8]) -> Result<ParsedImport, FoodDataErro
                         errors.push(RowIssue {
                             line: row.line,
                             name: Some(row.name.clone()),
-                            message: "与文件中更早一行的菜品（同品牌同名称）重复".into(),
+                            message: ImportMessage::DuplicateDish,
                         });
                         continue;
                     }
@@ -964,7 +1141,7 @@ pub fn parse(file_name: &str, bytes: &[u8]) -> Result<ParsedImport, FoodDataErro
         warnings.push(RowIssue {
             line: 0,
             name: None,
-            message: format!("{trace_rows} 行使用了“Tr/微量”标记，已按 0 处理"),
+            message: ImportMessage::TraceValues { rows: trace_rows },
         });
     }
     if !unknown_columns.is_empty() {
@@ -973,7 +1150,7 @@ pub fn parse(file_name: &str, bytes: &[u8]) -> Result<ParsedImport, FoodDataErro
         warnings.push(RowIssue {
             line: 0,
             name: None,
-            message: format!("忽略了未知列：{}", cols.join("、")),
+            message: ImportMessage::UnknownColumns { columns: cols },
         });
     }
 
@@ -991,7 +1168,9 @@ pub fn parse(file_name: &str, bytes: &[u8]) -> Result<ParsedImport, FoodDataErro
                 warnings.push(RowIssue {
                     line: row.line,
                     name: Some(row.name.clone()),
-                    message: format!("别名“{alias}”与文件中其他食物名称或别名重复，已忽略"),
+                    message: ImportMessage::DuplicateFoodAlias {
+                        alias: alias.clone(),
+                    },
                 });
                 continue;
             }
@@ -1018,7 +1197,9 @@ pub fn parse(file_name: &str, bytes: &[u8]) -> Result<ParsedImport, FoodDataErro
                 warnings.push(RowIssue {
                     line: row.line,
                     name: Some(row.name.clone()),
-                    message: format!("别名“{alias}”与文件中同品牌的其他菜品名称或别名重复，已忽略"),
+                    message: ImportMessage::DuplicateDishAlias {
+                        alias: alias.clone(),
+                    },
                 });
                 continue;
             }
@@ -1030,9 +1211,7 @@ pub fn parse(file_name: &str, bytes: &[u8]) -> Result<ParsedImport, FoodDataErro
     }
 
     if food_rows.is_empty() && dish_rows.is_empty() {
-        return Err(FoodDataError::Invalid(
-            "文件中没有可导入的有效数据行".into(),
-        ));
+        return Err(FoodDataError::Invalid(ImportMessage::NoValidRows));
     }
 
     let error_count = errors.len();
@@ -1161,7 +1340,7 @@ pub async fn commit(
         ImportTarget::New { name } => {
             let name = name.trim();
             if name.is_empty() || name.chars().count() > 60 {
-                return Err(FoodDataError::Invalid("数据源名称需为 1-60 个字符".into()));
+                return Err(FoodDataError::Invalid(ImportMessage::SourceNameLength));
             }
             let (max_priority,): (i64,) = sqlx::query_as(
                 "SELECT COALESCE(MAX(priority), 0) FROM diet_food_sources WHERE kind = 'dataset'",
@@ -1192,12 +1371,8 @@ pub async fn commit(
                     .await?;
             match kind {
                 Some((k,)) if k == "dataset" => {}
-                Some(_) => return Err(FoodDataError::Invalid("只能替换数据集来源".into())),
-                None => {
-                    return Err(FoodDataError::NotFound(format!(
-                        "数据源不存在：{source_id}"
-                    )))
-                }
+                Some(_) => return Err(FoodDataError::Invalid(ImportMessage::NotADataset)),
+                None => return Err(FoodDataError::NotFound(ImportMessage::SourceNotFound)),
             }
             let old_foods: Vec<(String, i64)> =
                 sqlx::query_as("SELECT name_key, use_count FROM diet_foods WHERE source_id = $1")
@@ -1456,7 +1631,7 @@ mod tests {
     fn non_utf8_is_rejected_with_a_zh_message() {
         let bytes = vec![0xFF, 0xFE, 0x00];
         let err = parse("test.csv", &bytes).unwrap_err();
-        assert!(matches!(err, FoodDataError::Invalid(m) if m.contains("UTF-8")));
+        assert!(matches!(err, FoodDataError::Invalid(m) if m.to_string().contains("UTF-8")));
     }
 
     #[test]
@@ -1488,7 +1663,10 @@ mod tests {
         let bytes = csv_bytes("name,kcal,kj,protein_g,carbs_g,fat_g\nx,110,418.4,1,1,1\n");
         let parsed = parse("t.csv", &bytes).unwrap();
         assert_eq!(parsed.food_rows[0].macros.kcal, 110.0);
-        assert!(parsed.warnings.iter().any(|w| w.message.contains("kj")));
+        assert!(parsed
+            .warnings
+            .iter()
+            .any(|w| w.message.to_string().contains("kj")));
     }
 
     #[test]
@@ -1518,7 +1696,7 @@ mod tests {
         assert!(parsed
             .warnings
             .iter()
-            .any(|w| w.message.contains("2 行使用了")));
+            .any(|w| w.message.to_string().contains("2 行使用了")));
     }
 
     #[test]
@@ -1561,7 +1739,10 @@ mod tests {
         let parsed = parse("t.csv", &bytes).unwrap();
         assert_eq!(parsed.valid_rows(), 2);
         assert!(parsed.food_rows[0].aliases.is_empty());
-        assert!(parsed.warnings.iter().any(|w| w.message.contains("重复")));
+        assert!(parsed
+            .warnings
+            .iter()
+            .any(|w| w.message.to_string().contains("重复")));
     }
 
     #[test]
@@ -1579,7 +1760,10 @@ mod tests {
         let bytes = csv_bytes("name,kcal,protein_g,carbs_g,fat_g\nx,300,1,1,1\n");
         let parsed = parse("t.csv", &bytes).unwrap();
         assert_eq!(parsed.food_rows[0].macros.kcal, 300.0);
-        assert!(parsed.warnings.iter().any(|w| w.message.contains("推算")));
+        assert!(parsed
+            .warnings
+            .iter()
+            .any(|w| w.message.to_string().contains("推算")));
     }
 
     #[test]
@@ -1600,7 +1784,10 @@ mod tests {
     fn unknown_columns_produce_one_file_level_warning() {
         let bytes = csv_bytes("name,kcal,protein_g,carbs_g,fat_g,foo\nx,100,1,1,1,bar\n");
         let parsed = parse("t.csv", &bytes).unwrap();
-        assert!(parsed.warnings.iter().any(|w| w.message.contains("foo")));
+        assert!(parsed
+            .warnings
+            .iter()
+            .any(|w| w.message.to_string().contains("foo")));
     }
 
     #[test]
@@ -1669,7 +1856,7 @@ mod tests {
         let parsed = parse("t.csv", &bytes).unwrap();
         assert_eq!(parsed.valid_food_rows(), 1);
         assert_eq!(parsed.error_count, 1);
-        assert!(parsed.errors[0].message.contains("basis"));
+        assert!(parsed.errors[0].message.to_string().contains("basis"));
     }
 
     #[test]
@@ -1677,7 +1864,10 @@ mod tests {
         let bytes = csv_bytes("name,brand,kcal,protein_g,carbs_g,fat_g\n米饭,金龙鱼,100,1,1,1\n");
         let parsed = parse("t.csv", &bytes).unwrap();
         assert_eq!(parsed.valid_food_rows(), 1);
-        assert!(parsed.warnings.iter().any(|w| w.message.contains("brand")));
+        assert!(parsed
+            .warnings
+            .iter()
+            .any(|w| w.message.to_string().contains("brand")));
     }
 
     #[test]
@@ -1732,7 +1922,7 @@ mod tests {
         let parsed = parse("t.csv", &bytes).unwrap();
         assert_eq!(parsed.valid_dish_rows(), 2);
         assert_eq!(parsed.error_count, 1);
-        assert!(parsed.errors[0].message.contains("重复"));
+        assert!(parsed.errors[0].message.to_string().contains("重复"));
     }
 
     #[test]
@@ -1764,7 +1954,10 @@ mod tests {
             .find(|r| r.name == "牛めし（並盛）")
             .unwrap();
         assert!(matched.aliases.is_empty());
-        assert!(parsed.warnings.iter().any(|w| w.message.contains("重复")));
+        assert!(parsed
+            .warnings
+            .iter()
+            .any(|w| w.message.to_string().contains("重复")));
     }
 
     #[test]

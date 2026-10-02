@@ -10,7 +10,7 @@
  */
 
 import { invoke } from "@tauri-apps/api/core";
-import { zhCN } from "../i18n/zh-CN";
+import { strings } from "../i18n";
 import { isDesktop } from "./platform";
 import { isCommandError, type CommandError } from "./types";
 
@@ -28,7 +28,7 @@ function snakeCaseKeys(args: Args): Args {
   return out;
 }
 
-const networkError: CommandError = { code: "internal", message: zhCN.common.networkError };
+const networkError: CommandError = { code: "internal", message: strings.common.networkError };
 
 /** Sends a request to the server and unwraps its answer: the JSON result, or a rejection with
  * the server's `CommandError` body. `reportExpiry`: announce a 401 as `SESSION_EXPIRED_EVENT`
