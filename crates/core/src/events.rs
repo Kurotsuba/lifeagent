@@ -216,6 +216,19 @@ impl EventStore {
         row.map(Self::row_to_event).transpose()
     }
 
+    /// A live (not deleted) event by id.
+    pub async fn get(&self, id: &str) -> Result<Option<Event>, CoreError> {
+        let row: Option<(String, String, String, String, String, String)> = sqlx::query_as(
+            "SELECT id, event_type, occurred_at, logical_date, payload_json, source
+             FROM events WHERE id = ? AND deleted_at IS NULL",
+        )
+        .bind(id)
+        .fetch_optional(&self.db)
+        .await?;
+
+        row.map(Self::row_to_event).transpose()
+    }
+
     pub async fn soft_delete(&self, id: &str) -> Result<Event, CoreError> {
         let row: Option<(String, String, String, String, String, String)> = sqlx::query_as(
             "SELECT id, event_type, occurred_at, logical_date, payload_json, source

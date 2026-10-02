@@ -1992,6 +1992,32 @@ redirect in `foods lookup` (`sources::lookup_redirect`, a `redirect` key next to
   real key, as in the 2026-09-28 test that found the problem: import the table, log a meal, and
   run `foods lookup` on the ingredient names to see the `match` redirects.
 
+## 2026-09-29 — Conversation history carries dates; past-day deletes need `past_day`
+
+Bug from a real run: the user logged meals on 09-28, then on 09-29 wrote "我今天在家烧了牛肉饭作为
+早餐". The model took it for a correction of the 09-28 breakfast, deleted that entry, and logged
+the new one under 09-29. The history window (§7.10) spans days, but it had no dates in it. The
+only date the model saw was `Logical date:` in the system prompt, against ~30 messages about
+"今天" that were really 09-28.
+
+- **Each user message sent to the model starts with `[sent YYYY-MM-DD HH:MM, logical date
+  YYYY-MM-DD]`** (`app::user_time_tag`, local time + `day_boundary`). This is added in
+  `to_llm_messages` only, so stored content and the Chat page stay unchanged. Only user messages
+  are tagged: every turn starts with one, so assistant and tool messages inherit their date
+  from it. Both the wall-clock time and the logical date are given, because they differ before
+  the day boundary.
+- **The system prompt explains the tag.** "Today" means the message's logical date, a report
+  about today is not a correction of an earlier day unless the user says so, and the model
+  should not repeat the tag.
+- **Tool results name the day.** `diet_log_meal` returns `date`, and `core_delete_entry` returns
+  `logical_date`.
+- **`core_delete_entry` refuses entries from an earlier logical date unless `past_day: true`**
+  (`InvalidArgs`, with an explanation the model can act on). This is a hard guard, so a
+  misreading can no longer silently delete a past day's data. Correcting yesterday on purpose
+  still works in one extra call. Later-dated entries are not guarded: nothing creates them in
+  normal use. The UI delete (`CoreApp::delete_entry`) is not affected.
+- The wrongly deleted 09-28 entry in the user's DB was restored by hand (`deleted_at = NULL`).
+
 ## 2026-10-01 — Google Gemini through the OpenAI-compatible provider
 
 Gemini is supported without a new `ProviderKind`. Google's OpenAI-compatible endpoint

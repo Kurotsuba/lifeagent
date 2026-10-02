@@ -250,6 +250,7 @@ async fn log_meal(ctx: &PluginContext, args: Value) -> Result<ToolOutput, Plugin
     let target = intake::targets_for(ctx, event.logical_date).await?;
     let content = json!({
         "entry_id": event.id,
+        "date": event.logical_date.to_string(),
         "meal_type": meal.meal_type,
         "items": meal.items.iter().map(MealItem::to_json).collect::<Vec<_>>(),
         "total": meal.total.to_json(),
@@ -450,6 +451,8 @@ mod tests {
         // 200 g rice at 116/100 g + 100 g egg at 144/100 g.
         assert_eq!(out.content["total"]["kcal"], 376.0);
         assert_eq!(out.content["day_total"]["kcal"], 376.0);
+        let today = env.ctx.today().await.unwrap();
+        assert_eq!(out.content["date"], today.to_string());
         assert_eq!(out.content["items"][0]["estimated"], true);
         assert!(out.content["remaining"]["kcal"].is_number());
         assert_eq!(out.summary, "已记录午餐 · 376 kcal");

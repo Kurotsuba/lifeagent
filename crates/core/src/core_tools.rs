@@ -93,12 +93,17 @@ pub fn specs() -> Vec<lifeagent_llm::types::ToolSpec> {
             name: "core_delete_entry".into(),
             description: "Soft-delete a previously logged entry (meal, weight, ...) by its \
                 id. Use this when the user corrects or retracts something they reported, \
-                before logging the corrected version."
+                before logging the corrected version. Entries from an earlier logical date \
+                are refused unless `past_day` is true; set it only when the user explicitly \
+                asks to change that earlier day's record."
                 .into(),
             parameters: json!({
                 "type": "object",
                 "required": ["entry_id"],
-                "properties": { "entry_id": {"type": "string"} }
+                "properties": {
+                    "entry_id": {"type": "string"},
+                    "past_day": {"type": "boolean"}
+                }
             }),
         },
     ]
@@ -294,14 +299,35 @@ async fn forget(ctx: &PluginContext, args: Value) -> Result<ToolOutput, PluginEr
 #[derive(Deserialize)]
 struct DeleteEntryArgs {
     entry_id: String,
+    #[serde(default)]
+    past_day: bool,
 }
 
+/// Refuses entries from an earlier logical date unless `past_day` is set: a model that
+/// mistakes today's report for a correction of yesterday's otherwise silently deletes
+/// yesterday's data.
 async fn delete_entry(ctx: &PluginContext, args: Value) -> Result<ToolOutput, PluginError> {
     let args: DeleteEntryArgs =
         serde_json::from_value(args).map_err(|e| PluginError::InvalidArgs(e.to_string()))?;
+    let today = ctx.today().await?;
+    let Some(existing) = ctx.events.get(&args.entry_id).await? else {
+        return Err(PluginError::NotFound(format!("entry {}", args.entry_id)));
+    };
+    if existing.logical_date < today && !args.past_day {
+        return Err(PluginError::InvalidArgs(format!(
+            "entry {} is from {}, not today ({today}). Not deleted. If the user is reporting \
+             something new for today, log it without deleting anything. Only if they \
+             explicitly asked to change the {} record, call again with past_day: true.",
+            existing.id, existing.logical_date, existing.logical_date
+        )));
+    }
     let event = ctx.events.soft_delete(&args.entry_id).await?;
     Ok(ToolOutput {
-        content: json!({"entry_id": event.id, "event_type": event.event_type}),
+        content: json!({
+            "entry_id": event.id,
+            "event_type": event.event_type,
+            "logical_date": event.logical_date.to_string(),
+        }),
         summary: "已删除记录".to_string(),
     })
 }
@@ -483,6 +509,56 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(ctx.events.latest("body.weight_logged").await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn delete_entry_reports_the_entry_logical_date() {
+        let (ctx, _mock, _dir) = crate::test_support::context().await;
+        let event = ctx
+            .events
+            .append(
+                "body.weight_logged",
+                ctx.clock.now(),
+                json!({"kg": 60.0}),
+                EventSource::Chat,
+            )
+            .await
+            .unwrap();
+
+        let out = call(&ctx, "core_delete_entry", json!({"entry_id": event.id}))
+            .await
+            .unwrap();
+        assert_eq!(out.content["logical_date"], event.logical_date.to_string());
+    }
+
+    #[tokio::test]
+    async fn delete_entry_refuses_an_earlier_day_entry_unless_past_day_is_set() {
+        let env = crate::test_support::env().await;
+        let ctx = &env.ctx;
+        let event = ctx
+            .events
+            .append(
+                "body.weight_logged",
+                ctx.clock.now(),
+                json!({"kg": 60.0}),
+                EventSource::Chat,
+            )
+            .await
+            .unwrap();
+        env.clock.advance(chrono::Duration::days(1));
+
+        let refused = call(ctx, "core_delete_entry", json!({"entry_id": event.id})).await;
+        assert!(matches!(refused, Err(PluginError::InvalidArgs(m)) if m.contains("past_day")));
+        assert!(ctx.events.get(&event.id).await.unwrap().is_some());
+
+        call(
+            ctx,
+            "core_delete_entry",
+            json!({"entry_id": event.id, "past_day": true}),
+        )
+        .await
+        .unwrap();
+        assert!(ctx.events.get(&event.id).await.unwrap().is_none());
     }
 
     #[tokio::test]

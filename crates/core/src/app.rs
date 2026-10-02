@@ -8,7 +8,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
-use chrono::{DateTime, Datelike, NaiveDate, Utc};
+use chrono::{DateTime, Datelike, Local, NaiveDate, NaiveDateTime, NaiveTime, Utc};
 use lifeagent_llm::router::{
     LlmRouter, ModelsConfig, ProviderConfig, ProviderKind, RoleBinding, RoleRequest,
 };
@@ -33,7 +33,7 @@ use crate::profile::ProfileService;
 use crate::scheduler::{Scheduler, TICK_INTERVAL};
 use crate::secrets::{KeyringSecretStore, SecretKeyProvider, SecretStore};
 use crate::settings::Settings;
-use crate::time::logical_date;
+use crate::time::{logical_date, logical_date_from_local};
 use crate::tools::ToolRegistry;
 use crate::usage::DbUsageSink;
 
@@ -648,10 +648,11 @@ impl CoreApp {
         // already lists the meal that call just logged, and the model then tells the user it
         // was "already recorded". Tool results carry the updated totals instead.
         let system_prompt = context::build_system_prompt(&plugin_ctx, &self.0.plugins).await?;
+        let boundary = self.0.settings.day_boundary().await?;
 
         for _ in 0..MAX_ITERATIONS {
             let history = self.0.conversation.history_window().await?;
-            let messages = Self::to_llm_messages(system_prompt.clone(), &history)?;
+            let messages = Self::to_llm_messages(system_prompt.clone(), &history, boundary)?;
 
             let resp = router
                 .complete(
@@ -736,18 +737,28 @@ impl CoreApp {
         Ok(Some(serde_json::to_string(&stored)?))
     }
 
+    /// Each user message is prefixed with when it was sent (see [`user_time_tag`]): the
+    /// history window spans day boundaries, and without it yesterday's "今天" reads as today's.
     fn to_llm_messages(
         system_prompt: String,
         history: &[StoredMessage],
+        boundary: NaiveTime,
     ) -> Result<Vec<Message>, CoreError> {
         let mut messages = vec![Message::System {
             content: system_prompt,
         }];
         for m in history {
             match m.role {
-                MessageRole::User => messages.push(Message::User {
-                    content: m.content.clone().unwrap_or_default(),
-                }),
+                MessageRole::User => {
+                    let local = m.created_at.with_timezone(&Local).naive_local();
+                    messages.push(Message::User {
+                        content: format!(
+                            "{} {}",
+                            user_time_tag(local, boundary),
+                            m.content.as_deref().unwrap_or_default()
+                        ),
+                    })
+                }
                 MessageRole::Assistant => {
                     let tool_calls = match &m.tool_calls_json {
                         Some(json) => {
@@ -777,6 +788,16 @@ impl CoreApp {
         }
         Ok(messages)
     }
+}
+
+/// `[sent YYYY-MM-DD HH:MM, logical date YYYY-MM-DD]`, the prefix the conversation model
+/// sees on each user message. Pure over the local time so tests don't depend on the TZ.
+fn user_time_tag(local: NaiveDateTime, boundary: NaiveTime) -> String {
+    format!(
+        "[sent {}, logical date {}]",
+        local.format("%Y-%m-%d %H:%M"),
+        logical_date_from_local(local, boundary)
+    )
 }
 
 #[cfg(test)]
@@ -1107,6 +1128,70 @@ mod tests {
 
         let turn = app.send_message("你好").await.unwrap();
         assert_eq!(turn.reply, EMPTY_REPLY);
+    }
+
+    #[test]
+    fn user_time_tag_uses_the_logical_date() {
+        let boundary = NaiveTime::from_hms_opt(4, 0, 0).unwrap();
+        let at = |h, m| {
+            NaiveDate::from_ymd_opt(2026, 9, 29)
+                .unwrap()
+                .and_hms_opt(h, m, 0)
+                .unwrap()
+        };
+        assert_eq!(
+            user_time_tag(at(10, 43), boundary),
+            "[sent 2026-09-29 10:43, logical date 2026-09-29]"
+        );
+        // Before the day boundary: still the previous day.
+        assert_eq!(
+            user_time_tag(at(3, 30), boundary),
+            "[sent 2026-09-29 03:30, logical date 2026-09-28]"
+        );
+    }
+
+    #[tokio::test]
+    async fn send_message_tags_user_messages_with_their_own_send_time() {
+        let dir = tempfile::tempdir().unwrap();
+        let clock = Arc::new(FixedClock::new(Utc::now()));
+        let mock = Arc::new(MockChatModel::new());
+        mock.push_response(response(Some("好的"), vec![]));
+        mock.push_response(response(Some("好的"), vec![]));
+        let app = CoreAppBuilder::new(dir.path().to_path_buf())
+            .clock(clock.clone())
+            .secrets(Arc::new(MemorySecretStore::new()))
+            .chat_model_override(mock.clone())
+            .build()
+            .await
+            .unwrap();
+        let boundary = app.0.settings.day_boundary().await.unwrap();
+        let tag = |t: DateTime<Utc>| user_time_tag(t.with_timezone(&Local).naive_local(), boundary);
+
+        let day1 = clock.now();
+        app.send_message("早饭吃了牛肉饭").await.unwrap();
+        clock.advance(chrono::Duration::days(1));
+        let day2 = clock.now();
+        app.send_message("我今天早饭吃了牛肉饭").await.unwrap();
+
+        let requests = mock.received_requests();
+        let users: Vec<&str> = requests
+            .last()
+            .unwrap()
+            .messages
+            .iter()
+            .filter_map(|m| match m {
+                Message::User { content } => Some(content.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            users,
+            vec![
+                format!("{} 早饭吃了牛肉饭", tag(day1)),
+                format!("{} 我今天早饭吃了牛肉饭", tag(day2)),
+            ]
+        );
+        assert_ne!(tag(day1), tag(day2));
     }
 
     #[tokio::test]
