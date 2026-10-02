@@ -1,12 +1,12 @@
-//! Scheduler (§7.13) and daily DB backup (§12), per `docs/PHASE1_SPEC.md` as amended by B3
-//! and B4 in `docs/DECISIONS.md`.
+//! Scheduler (§7.13), per `docs/PHASE1_SPEC.md` as amended by B3 in `docs/DECISIONS.md`.
+//!
+//! The daily SQLite backup (§12, B4) was removed with the move to Postgres: Cloud SQL's
+//! automated backups replace it (`docs/HACKATHON.md` §1).
 
 use std::collections::HashMap;
-use std::path::Path;
 use std::time::Duration;
 
 use chrono::{DateTime, Local, NaiveDate, NaiveDateTime, NaiveTime, Utc};
-use sqlx::SqlitePool;
 
 use crate::app::CoreApp;
 use crate::error::CoreError;
@@ -19,8 +19,6 @@ pub const TICK_INTERVAL: Duration = Duration::from_secs(60);
 const RETRY_AFTER_MINUTES: i64 = 15;
 /// At most this many scheduled generation attempts per target date (§7.13).
 const MAX_ATTEMPTS: u32 = 3;
-/// Dated backups kept (§12).
-const BACKUPS_KEPT: usize = 7;
 
 /// Whether `plan_time` has passed on logical day `today` (§7.13). `plan_time` within logical
 /// day `today` falls on calendar date `today` because settings validation enforces
@@ -35,7 +33,7 @@ struct Attempts {
     next_at: DateTime<Utc>,
 }
 
-/// Plan generation and backup state across ticks. Attempt counts are in memory only (§7.13).
+/// Plan generation state across ticks. Attempt counts are in memory only (§7.13).
 pub struct Scheduler {
     app: CoreApp,
     attempts: HashMap<NaiveDate, Attempts>,
@@ -49,7 +47,7 @@ impl Scheduler {
         }
     }
 
-    /// One tick: take the daily backup if due, then generate tomorrow's plan if due. Errors
+    /// One tick: generate tomorrow's plan if due. Errors
     /// are logged, never propagated — the scheduler must keep ticking.
     pub async fn tick(&mut self) {
         let today = match self.app.logical_today().await {
@@ -59,9 +57,6 @@ impl Scheduler {
                 return;
             }
         };
-        if let Err(e) = backup_if_due(self.app.db(), self.app.data_dir(), today).await {
-            tracing::warn!(error = %e, "daily backup failed; will retry next tick");
-        }
         if let Err(e) = self.plan_if_due(today).await {
             tracing::warn!(error = %e, "scheduler: plan check failed");
         }
@@ -117,63 +112,6 @@ impl Scheduler {
     }
 }
 
-/// Takes today's backup unless it already exists (§12, B4). Returns whether one was taken.
-pub async fn backup_if_due(
-    db: &SqlitePool,
-    data_dir: &Path,
-    today: NaiveDate,
-) -> Result<bool, CoreError> {
-    let dir = data_dir.join("backups");
-    let file = dir.join(format!("lifeagent-{today}.db"));
-    if tokio::fs::try_exists(&file).await? {
-        return Ok(false);
-    }
-    tokio::fs::create_dir_all(&dir).await?;
-
-    // VACUUM INTO refuses to overwrite, so a partial file left by a crash must never sit at
-    // the final name: write to .tmp, then rename.
-    let tmp = dir.join(format!("lifeagent-{today}.db.tmp"));
-    match tokio::fs::remove_file(&tmp).await {
-        Ok(()) => {}
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-        Err(e) => return Err(e.into()),
-    }
-    let tmp_path = tmp
-        .to_str()
-        .ok_or_else(|| CoreError::Validation(format!("backup path is not UTF-8: {tmp:?}")))?;
-    // Unlike a file copy, VACUUM INTO includes commits still in the -wal file.
-    sqlx::query("VACUUM INTO ?")
-        .bind(tmp_path)
-        .execute(db)
-        .await?;
-    tokio::fs::rename(&tmp, &file).await?;
-
-    prune_backups(&dir).await?;
-    Ok(true)
-}
-
-/// Deletes all but the newest `BACKUPS_KEPT` dated backups.
-async fn prune_backups(dir: &Path) -> Result<(), CoreError> {
-    let mut dated = Vec::new();
-    let mut entries = tokio::fs::read_dir(dir).await?;
-    while let Some(entry) = entries.next_entry().await? {
-        let name = entry.file_name();
-        let date = name
-            .to_str()
-            .and_then(|n| n.strip_prefix("lifeagent-"))
-            .and_then(|n| n.strip_suffix(".db"))
-            .and_then(|d| NaiveDate::parse_from_str(d, "%Y-%m-%d").ok());
-        if let Some(date) = date {
-            dated.push((date, entry.path()));
-        }
-    }
-    dated.sort_by_key(|(date, _)| std::cmp::Reverse(*date));
-    for (_, path) in dated.into_iter().skip(BACKUPS_KEPT) {
-        tokio::fs::remove_file(path).await?;
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -218,64 +156,5 @@ mod tests {
         // Boundary 00:00, plan_time 06:00: logical day == calendar day.
         assert!(!is_due(at(24, 5, 59), date(24), hm(6, 0)));
         assert!(is_due(at(24, 6, 0), date(24), hm(6, 0)));
-    }
-
-    #[tokio::test]
-    async fn backup_contains_a_row_still_in_the_wal() {
-        let (db, dir) = crate::db::test_pool().await;
-        sqlx::query("INSERT INTO settings (key, value_json, updated_at) VALUES ('k', '42', 'now')")
-            .execute(&db)
-            .await
-            .unwrap();
-        // Small writes stay in the -wal file until a checkpoint; a plain file copy would miss
-        // this row.
-        assert!(dir.path().join("lifeagent.db-wal").exists());
-
-        assert!(backup_if_due(&db, dir.path(), date(24)).await.unwrap());
-
-        let backup = dir.path().join("backups/lifeagent-2026-09-24.db");
-        let opts = sqlx::sqlite::SqliteConnectOptions::new().filename(&backup);
-        let backup_db = SqlitePool::connect_with(opts).await.unwrap();
-        let value: String = sqlx::query_scalar("SELECT value_json FROM settings WHERE key = 'k'")
-            .fetch_one(&backup_db)
-            .await
-            .unwrap();
-        assert_eq!(value, "42");
-    }
-
-    #[tokio::test]
-    async fn one_backup_per_logical_day() {
-        let (db, dir) = crate::db::test_pool().await;
-        assert!(backup_if_due(&db, dir.path(), date(24)).await.unwrap());
-        assert!(!backup_if_due(&db, dir.path(), date(24)).await.unwrap());
-        assert!(backup_if_due(&db, dir.path(), date(25)).await.unwrap());
-    }
-
-    #[tokio::test]
-    async fn only_the_newest_7_backups_are_kept() {
-        let (db, dir) = crate::db::test_pool().await;
-        for d in 1..=9 {
-            backup_if_due(&db, dir.path(), date(d)).await.unwrap();
-        }
-        let mut names: Vec<String> = std::fs::read_dir(dir.path().join("backups"))
-            .unwrap()
-            .map(|e| e.unwrap().file_name().into_string().unwrap())
-            .collect();
-        names.sort();
-        assert_eq!(names.len(), 7);
-        assert_eq!(names[0], "lifeagent-2026-09-03.db");
-        assert_eq!(names[6], "lifeagent-2026-09-09.db");
-    }
-
-    #[tokio::test]
-    async fn a_leftover_tmp_file_does_not_block_the_backup() {
-        let (db, dir) = crate::db::test_pool().await;
-        let backups = dir.path().join("backups");
-        std::fs::create_dir_all(&backups).unwrap();
-        std::fs::write(backups.join("lifeagent-2026-09-24.db.tmp"), b"partial").unwrap();
-
-        assert!(backup_if_due(&db, dir.path(), date(24)).await.unwrap());
-        assert!(backups.join("lifeagent-2026-09-24.db").exists());
-        assert!(!backups.join("lifeagent-2026-09-24.db.tmp").exists());
     }
 }

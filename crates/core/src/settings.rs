@@ -11,7 +11,7 @@ use lifeagent_llm::router::ModelsConfig;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::Value;
-use sqlx::SqlitePool;
+use sqlx::PgPool;
 
 use crate::error::{CoreError, ValidationRule};
 use crate::time::{format_hhmm, parse_hhmm};
@@ -29,18 +29,18 @@ const DEFAULT_DAY_BOUNDARY: NaiveTime = match NaiveTime::from_hms_opt(4, 0, 0) {
 
 #[derive(Clone)]
 pub struct Settings {
-    db: SqlitePool,
+    db: PgPool,
 }
 
 impl Settings {
-    pub fn new(db: SqlitePool) -> Self {
+    pub fn new(db: PgPool) -> Self {
         Self { db }
     }
 
     /// Reads a setting's raw JSON value, or `None` if it has never been set.
     pub async fn get_raw(&self, key: &str) -> Result<Option<Value>, CoreError> {
         let row: Option<(String,)> =
-            sqlx::query_as("SELECT value_json FROM settings WHERE key = ?")
+            sqlx::query_as("SELECT value_json FROM settings WHERE key = $1")
                 .bind(key)
                 .fetch_optional(&self.db)
                 .await?;
@@ -202,11 +202,11 @@ async fn upsert<'e, E>(
     now: DateTime<Utc>,
 ) -> Result<(), CoreError>
 where
-    E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
+    E: sqlx::Executor<'e, Database = sqlx::Postgres>,
 {
     let json = serde_json::to_string(value)?;
     sqlx::query(
-        "INSERT INTO settings (key, value_json, updated_at) VALUES (?, ?, ?)
+        "INSERT INTO settings (key, value_json, updated_at) VALUES ($1, $2, $3)
          ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at",
     )
     .bind(key)

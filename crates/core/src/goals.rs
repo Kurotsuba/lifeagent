@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use sqlx::SqlitePool;
+use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::clock::Clock;
@@ -74,18 +74,18 @@ pub fn with_default_target(goal: &WeightGoal, latest_weight_kg: Option<f64>) -> 
 
 #[derive(Clone)]
 pub struct GoalsService {
-    db: SqlitePool,
+    db: PgPool,
     clock: Arc<dyn Clock>,
 }
 
 impl GoalsService {
-    pub fn new(db: SqlitePool, clock: Arc<dyn Clock>) -> Self {
+    pub fn new(db: PgPool, clock: Arc<dyn Clock>) -> Self {
         Self { db, clock }
     }
 
     pub async fn get_active_weight_goal(&self) -> Result<Option<WeightGoal>, CoreError> {
         let row: Option<(String,)> = sqlx::query_as(
-            "SELECT params_json FROM goals WHERE domain = ? AND kind = ? AND active = 1
+            "SELECT params_json FROM goals WHERE domain = $1 AND kind = $2 AND active = 1
              ORDER BY created_at DESC LIMIT 1",
         )
         .bind(DOMAIN)
@@ -108,7 +108,7 @@ impl GoalsService {
         let mut tx = self.db.begin().await?;
 
         sqlx::query(
-            "UPDATE goals SET active = 0, updated_at = ? WHERE domain = ? AND kind = ? AND active = 1",
+            "UPDATE goals SET active = 0, updated_at = $1 WHERE domain = $2 AND kind = $3 AND active = 1",
         )
         .bind(&now_str)
         .bind(DOMAIN)
@@ -118,7 +118,7 @@ impl GoalsService {
 
         sqlx::query(
             "INSERT INTO goals (id, domain, kind, params_json, active, created_at, updated_at)
-             VALUES (?, ?, ?, ?, 1, ?, ?)",
+             VALUES ($1, $2, $3, $4, 1, $5, $6)",
         )
         .bind(Uuid::now_v7().to_string())
         .bind(DOMAIN)

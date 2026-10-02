@@ -40,24 +40,10 @@ impl Plugin for DietPlugin {
             name: "Diet",
             version: env!("CARGO_PKG_VERSION"),
             event_types: vec![intake::MEAL_EVENT],
-            migrations: vec![
-                PluginMigration {
-                    version: 1,
-                    sql: foods::MIGRATION_1,
-                },
-                PluginMigration {
-                    version: 2,
-                    sql: sources::MIGRATION_2,
-                },
-                PluginMigration {
-                    version: 3,
-                    sql: sources::MIGRATION_3,
-                },
-                PluginMigration {
-                    version: 4,
-                    sql: sources::MIGRATION_4,
-                },
-            ],
+            migrations: vec![PluginMigration {
+                version: 1,
+                sql: sources::MIGRATION_1,
+            }],
         }
     }
 
@@ -195,7 +181,7 @@ pub(crate) mod testutil {
         sqlx::query(
             "INSERT INTO diet_food_sources
                 (id, kind, name, priority, enabled, origin_json, created_at, updated_at)
-             VALUES (?, 'dataset', ?, ?, 1, '{}', ?, ?)",
+             VALUES ($1, 'dataset', $2, $3, 1, '{}', $4, $5)",
         )
         .bind(&id)
         .bind(name)
@@ -210,7 +196,7 @@ pub(crate) mod testutil {
                 "INSERT INTO diet_foods
                     (id, source_id, name, name_key, kcal, protein_g, carbs_g, fat_g, fiber_g,
                      use_count, created_at, updated_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 0, $10, $11)",
             )
             .bind(uuid::Uuid::now_v7().to_string())
             .bind(&id)
@@ -233,7 +219,7 @@ pub(crate) mod testutil {
     /// Bumps a dataset's `updated_at` to the clock's "now", as an import, replace, enable or
     /// reorder does.
     pub async fn touch_dataset(env: &TestEnv, id: &str) {
-        sqlx::query("UPDATE diet_food_sources SET updated_at = ? WHERE id = ?")
+        sqlx::query("UPDATE diet_food_sources SET updated_at = $1 WHERE id = $2")
             .bind(env.clock.now().to_rfc3339())
             .bind(id)
             .execute(&env.ctx.db)

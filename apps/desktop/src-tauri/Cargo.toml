@@ -35,4 +35,4 @@ chrono = { workspace = true }
 # dependency's `tray-icon` for test builds only — Cargo unions features across dependency
 # declarations of the same crate, so a release build never pulls this in.
 tauri = { version = "2", features = ["test"] }
-tempfile = { workspace = true }
+lifeagent-core = { workspace = true, features = ["test-support"] }

@@ -1062,16 +1062,17 @@ pub async fn preview(
     let mut shadowed_by_manual = 0usize;
     let mut replaces_estimates = 0usize;
     for row in &parsed.food_rows {
-        let manual: Option<(String,)> =
-            sqlx::query_as("SELECT id FROM diet_foods WHERE source_id = 'manual' AND name_key = ?")
-                .bind(&row.name_key)
-                .fetch_optional(&ctx.db)
-                .await?;
+        let manual: Option<(String,)> = sqlx::query_as(
+            "SELECT id FROM diet_foods WHERE source_id = 'manual' AND name_key = $1",
+        )
+        .bind(&row.name_key)
+        .fetch_optional(&ctx.db)
+        .await?;
         if manual.is_some() {
             shadowed_by_manual += 1;
         }
         let estimate: Option<(String,)> = sqlx::query_as(
-            "SELECT id FROM diet_foods WHERE source_id = 'llm_estimate' AND name_key = ?",
+            "SELECT id FROM diet_foods WHERE source_id = 'llm_estimate' AND name_key = $1",
         )
         .bind(&row.name_key)
         .fetch_optional(&ctx.db)
@@ -1084,7 +1085,7 @@ pub async fn preview(
     let mut dish_shadowed_by_manual = 0usize;
     for row in &parsed.dish_rows {
         let manual: Option<(String,)> = sqlx::query_as(
-            "SELECT id FROM diet_dishes WHERE source_id = 'manual' AND brand_key = ? AND name_key = ?",
+            "SELECT id FROM diet_dishes WHERE source_id = 'manual' AND brand_key = $1 AND name_key = $2",
         )
         .bind(&row.brand_key)
         .bind(&row.name_key)
@@ -1171,7 +1172,7 @@ pub async fn commit(
             sqlx::query(
                 "INSERT INTO diet_food_sources
                     (id, kind, name, priority, enabled, origin_json, created_at, updated_at)
-                 VALUES (?, 'dataset', ?, ?, 1, ?, ?, ?)",
+                 VALUES ($1, 'dataset', $2, $3, 1, $4, $5, $6)",
             )
             .bind(&id)
             .bind(name)
@@ -1185,7 +1186,7 @@ pub async fn commit(
         }
         ImportTarget::Replace { source_id } => {
             let kind: Option<(String,)> =
-                sqlx::query_as("SELECT kind FROM diet_food_sources WHERE id = ?")
+                sqlx::query_as("SELECT kind FROM diet_food_sources WHERE id = $1")
                     .bind(source_id)
                     .fetch_optional(&mut *tx)
                     .await?;
@@ -1199,13 +1200,13 @@ pub async fn commit(
                 }
             }
             let old_foods: Vec<(String, i64)> =
-                sqlx::query_as("SELECT name_key, use_count FROM diet_foods WHERE source_id = ?")
+                sqlx::query_as("SELECT name_key, use_count FROM diet_foods WHERE source_id = $1")
                     .bind(source_id)
                     .fetch_all(&mut *tx)
                     .await?;
             carried_food_counts = old_foods.into_iter().collect();
             let old_dishes: Vec<(String, String, i64)> = sqlx::query_as(
-                "SELECT brand_key, name_key, use_count FROM diet_dishes WHERE source_id = ?",
+                "SELECT brand_key, name_key, use_count FROM diet_dishes WHERE source_id = $1",
             )
             .bind(source_id)
             .fetch_all(&mut *tx)
@@ -1214,16 +1215,16 @@ pub async fn commit(
                 .into_iter()
                 .map(|(b, n, u)| ((b, n), u))
                 .collect();
-            sqlx::query("DELETE FROM diet_foods WHERE source_id = ?")
+            sqlx::query("DELETE FROM diet_foods WHERE source_id = $1")
                 .bind(source_id)
                 .execute(&mut *tx)
                 .await?;
-            sqlx::query("DELETE FROM diet_dishes WHERE source_id = ?")
+            sqlx::query("DELETE FROM diet_dishes WHERE source_id = $1")
                 .bind(source_id)
                 .execute(&mut *tx)
                 .await?;
             sqlx::query(
-                "UPDATE diet_food_sources SET origin_json = ?, updated_at = ? WHERE id = ?",
+                "UPDATE diet_food_sources SET origin_json = $1, updated_at = $2 WHERE id = $3",
             )
             .bind(&origin_json)
             .bind(&now)
@@ -1242,7 +1243,7 @@ pub async fn commit(
             "INSERT INTO diet_foods
                 (id, source_id, name, name_key, kcal, protein_g, carbs_g, fat_g, fiber_g,
                  use_count, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
         )
         .bind(&id)
         .bind(&source_id)
@@ -1260,7 +1261,7 @@ pub async fn commit(
         .await?;
         for alias in &row.aliases {
             sqlx::query(
-                "INSERT INTO diet_food_aliases (source_id, alias_key, food_id) VALUES (?, ?, ?)",
+                "INSERT INTO diet_food_aliases (source_id, alias_key, food_id) VALUES ($1, $2, $3)",
             )
             .bind(&source_id)
             .bind(alias)
@@ -1282,7 +1283,7 @@ pub async fn commit(
             "INSERT INTO diet_dishes
                 (id, source_id, brand, brand_key, name, name_key, serving_g, kcal, protein_g,
                  carbs_g, fat_g, fiber_g, use_count, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)",
         )
         .bind(&id)
         .bind(&source_id)
@@ -1304,7 +1305,7 @@ pub async fn commit(
         for alias in &row.aliases {
             sqlx::query(
                 "INSERT INTO diet_dish_source_aliases (source_id, brand_key, alias_key, dish_id)
-                 VALUES (?, ?, ?, ?)",
+                 VALUES ($1, $2, $3, $4)",
             )
             .bind(&source_id)
             .bind(&row.brand_key)

@@ -23,12 +23,12 @@ pub struct MemoryNote {
 
 #[derive(Clone)]
 pub struct MemoryService {
-    db: sqlx::SqlitePool,
+    db: sqlx::PgPool,
     clock: Arc<dyn Clock>,
 }
 
 impl MemoryService {
-    pub fn new(db: sqlx::SqlitePool, clock: Arc<dyn Clock>) -> Self {
+    pub fn new(db: sqlx::PgPool, clock: Arc<dyn Clock>) -> Self {
         Self { db, clock }
     }
 
@@ -48,7 +48,7 @@ impl MemoryService {
         let id = Uuid::now_v7().to_string();
         let created_at = self.clock.now();
         sqlx::query(
-            "INSERT INTO memory_notes (id, note, created_at, deleted_at) VALUES (?, ?, ?, NULL)",
+            "INSERT INTO memory_notes (id, note, created_at, deleted_at) VALUES ($1, $2, $3, NULL)",
         )
         .bind(&id)
         .bind(trimmed)
@@ -66,14 +66,14 @@ impl MemoryService {
     /// Newest-first, excluding soft-deleted notes. §7.9 caps this at 50 for the context
     /// builder (M3); callers pick the limit that fits their use.
     pub async fn list(&self, limit: u32) -> Result<Vec<MemoryNote>, CoreError> {
-        // `rowid DESC` breaks ties when two notes share the same `created_at` (e.g. under a
-        // `FixedClock` that hasn't advanced between calls) — otherwise SQLite's tie order is
+        // `seq DESC` breaks ties when two notes share the same `created_at` (e.g. under a
+        // `FixedClock` that hasn't advanced between calls) — otherwise Postgres's tie order is
         // unspecified and "newest first" would not hold.
         let rows: Vec<(String, String, String)> = sqlx::query_as(
             "SELECT id, note, created_at FROM memory_notes
-             WHERE deleted_at IS NULL ORDER BY created_at DESC, rowid DESC LIMIT ?",
+             WHERE deleted_at IS NULL ORDER BY created_at DESC, seq DESC LIMIT $1",
         )
-        .bind(limit)
+        .bind(i64::from(limit))
         .fetch_all(&self.db)
         .await?;
 
@@ -95,7 +95,7 @@ impl MemoryService {
     pub async fn forget(&self, note_id: &str) -> Result<(), CoreError> {
         let now = self.clock.now().to_rfc3339();
         let result = sqlx::query(
-            "UPDATE memory_notes SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL",
+            "UPDATE memory_notes SET deleted_at = $1 WHERE id = $2 AND deleted_at IS NULL",
         )
         .bind(now)
         .bind(note_id)
@@ -113,7 +113,7 @@ impl MemoryService {
 mod tests {
     use super::*;
 
-    async fn service() -> (MemoryService, tempfile::TempDir) {
+    async fn service() -> (MemoryService, crate::db::TestDb) {
         let (pool, dir) = crate::db::test_pool().await;
         (
             MemoryService::new(pool, Arc::new(crate::clock::FixedClock::new(Utc::now()))),

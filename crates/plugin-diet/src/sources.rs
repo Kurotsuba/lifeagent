@@ -13,7 +13,7 @@ use std::collections::HashSet;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use sqlx::SqlitePool;
+use sqlx::PgPool;
 use uuid::Uuid;
 
 use lifeagent_core::plugin::{PluginContext, PluginError};
@@ -24,15 +24,20 @@ use crate::model::{Dish, Macros, SourceKind};
 pub const MANUAL_SOURCE_ID: &str = "manual";
 pub const LLM_ESTIMATE_SOURCE_ID: &str = "llm_estimate";
 
-/// Diet plugin migration 2: rebuilds `diet_foods` around a chain of sources, per
-/// `docs/NUTRITION_SOURCES.md` §3.
-pub const MIGRATION_2: &str = "
+/// The diet plugin's one migration (Postgres): the final Phase 1 schema in a single step, per
+/// `docs/NUTRITION_SOURCES.md` §3, `docs/DISH_NUTRITION.md` §3 and `docs/FOOD_MATCHING.md` §6.1.
+///
+/// The SQLite build reached this schema through four migrations, two of which rebuilt tables
+/// and moved rows with SQLite-only SQL. Postgres databases start empty, so that history is
+/// folded into this one (see `docs/DECISIONS.md`, "Postgres port"). Types follow the core
+/// schema's rules: REAL becomes DOUBLE PRECISION (Rust f64), INTEGER becomes BIGINT (i64).
+pub const MIGRATION_1: &str = "
 CREATE TABLE diet_food_sources (
   id           TEXT PRIMARY KEY,
   kind         TEXT NOT NULL,
   name         TEXT NOT NULL,
-  priority     INTEGER NOT NULL,
-  enabled      INTEGER NOT NULL DEFAULT 1,
+  priority     BIGINT NOT NULL,
+  enabled      BIGINT NOT NULL DEFAULT 1,
   origin_json  TEXT NOT NULL DEFAULT '{}',
   created_at   TEXT NOT NULL,
   updated_at   TEXT NOT NULL
@@ -41,49 +46,36 @@ CREATE TABLE diet_food_sources (
 INSERT INTO diet_food_sources (id, kind, name, priority, enabled, origin_json, created_at, updated_at)
 VALUES
   ('manual', 'manual', '手动录入', 0, 1, '{}',
-   strftime('%Y-%m-%dT%H:%M:%S+00:00','now'), strftime('%Y-%m-%dT%H:%M:%S+00:00','now')),
+   to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"+00:00\"'),
+   to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"+00:00\"')),
   ('llm_estimate', 'llm_estimate', 'AI 估算', 1000000, 1, '{}',
-   strftime('%Y-%m-%dT%H:%M:%S+00:00','now'), strftime('%Y-%m-%dT%H:%M:%S+00:00','now'));
+   to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"+00:00\"'),
+   to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"+00:00\"'));
 
-CREATE TABLE diet_foods_v2 (
+CREATE TABLE diet_foods (
   id          TEXT PRIMARY KEY,
   source_id   TEXT NOT NULL REFERENCES diet_food_sources(id) ON DELETE CASCADE,
   name        TEXT NOT NULL,
   name_key    TEXT NOT NULL,
-  kcal        REAL NOT NULL,
-  protein_g   REAL NOT NULL,
-  carbs_g     REAL NOT NULL,
-  fat_g       REAL NOT NULL,
-  fiber_g     REAL NOT NULL DEFAULT 0,
-  use_count   INTEGER NOT NULL DEFAULT 0,
+  kcal        DOUBLE PRECISION NOT NULL,
+  protein_g   DOUBLE PRECISION NOT NULL,
+  carbs_g     DOUBLE PRECISION NOT NULL,
+  fat_g       DOUBLE PRECISION NOT NULL,
+  fiber_g     DOUBLE PRECISION NOT NULL DEFAULT 0,
+  use_count   BIGINT NOT NULL DEFAULT 0,
   created_at  TEXT NOT NULL,
   updated_at  TEXT NOT NULL,
   UNIQUE (source_id, name_key)
 );
 
-INSERT INTO diet_foods_v2
-  (id, source_id, name, name_key, kcal, protein_g, carbs_g, fat_g, fiber_g, use_count,
-   created_at, updated_at)
-SELECT id,
-       CASE source WHEN 'user' THEN 'manual' WHEN 'llm_estimate' THEN 'llm_estimate' END,
-       name, name_key, kcal, protein_g, carbs_g, fat_g, fiber_g, use_count, created_at, updated_at
-FROM diet_foods;
+CREATE INDEX diet_foods_name_key ON diet_foods(name_key);
 
 CREATE TABLE diet_name_aliases (
   alias_key   TEXT PRIMARY KEY,
   target_key  TEXT NOT NULL,
-  created_at  TEXT NOT NULL
+  created_at  TEXT NOT NULL,
+  origin      TEXT NOT NULL DEFAULT 'user'
 );
-
-INSERT INTO diet_name_aliases (alias_key, target_key, created_at)
-SELECT j.value, f.name_key, f.updated_at
-FROM diet_foods f, json_each(f.aliases_json) j;
-
-DROP TABLE diet_foods;
-
-ALTER TABLE diet_foods_v2 RENAME TO diet_foods;
-
-CREATE INDEX diet_foods_name_key ON diet_foods(name_key);
 
 CREATE TABLE diet_food_aliases (
   source_id  TEXT NOT NULL REFERENCES diet_food_sources(id) ON DELETE CASCADE,
@@ -91,12 +83,7 @@ CREATE TABLE diet_food_aliases (
   food_id    TEXT NOT NULL REFERENCES diet_foods(id) ON DELETE CASCADE,
   PRIMARY KEY (source_id, alias_key)
 );
-";
 
-/// Diet plugin migration 3: per-serving dishes alongside per-100 g foods, per
-/// `docs/DISH_NUTRITION.md` §3. Additive only — no existing table or row changes, so no rebuild
-/// is needed.
-pub const MIGRATION_3: &str = "
 CREATE TABLE diet_dishes (
   id          TEXT PRIMARY KEY,
   source_id   TEXT NOT NULL REFERENCES diet_food_sources(id) ON DELETE CASCADE,
@@ -104,13 +91,13 @@ CREATE TABLE diet_dishes (
   brand_key   TEXT NOT NULL DEFAULT '',
   name        TEXT NOT NULL,
   name_key    TEXT NOT NULL,
-  serving_g   REAL,
-  kcal        REAL NOT NULL,
-  protein_g   REAL NOT NULL,
-  carbs_g     REAL NOT NULL,
-  fat_g       REAL NOT NULL,
-  fiber_g     REAL NOT NULL DEFAULT 0,
-  use_count   INTEGER NOT NULL DEFAULT 0,
+  serving_g   DOUBLE PRECISION,
+  kcal        DOUBLE PRECISION NOT NULL,
+  protein_g   DOUBLE PRECISION NOT NULL,
+  carbs_g     DOUBLE PRECISION NOT NULL,
+  fat_g       DOUBLE PRECISION NOT NULL,
+  fiber_g     DOUBLE PRECISION NOT NULL DEFAULT 0,
+  use_count   BIGINT NOT NULL DEFAULT 0,
   created_at  TEXT NOT NULL,
   updated_at  TEXT NOT NULL,
   UNIQUE (source_id, brand_key, name_key)
@@ -134,17 +121,11 @@ CREATE TABLE diet_dish_name_aliases (
   created_at       TEXT NOT NULL,
   PRIMARY KEY (brand_key, alias_key)
 );
-";
 
-/// Diet plugin migration 4: remembers which names were already checked against the imported
-/// data, and where a redirect came from, per `docs/FOOD_MATCHING.md` §6.1. Additive only.
-pub const MIGRATION_4: &str = "
 CREATE TABLE diet_food_match_checks (
   name_key    TEXT PRIMARY KEY,
   checked_at  TEXT NOT NULL
 );
-
-ALTER TABLE diet_name_aliases ADD COLUMN origin TEXT NOT NULL DEFAULT 'user';
 ";
 
 /// A dataset source's provenance, stored as `diet_food_sources.origin_json`. `manual` and
@@ -238,11 +219,11 @@ type DishRow = (
 /// Backs `manual`, every `dataset`, and the `llm_estimate` cache: one indexed query per lookup.
 pub struct TableSource {
     info: SourceInfo,
-    db: SqlitePool,
+    db: PgPool,
 }
 
 impl TableSource {
-    pub fn new(info: SourceInfo, db: SqlitePool) -> Self {
+    pub fn new(info: SourceInfo, db: PgPool) -> Self {
         Self { info, db }
     }
 
@@ -315,7 +296,7 @@ impl FoodSource for TableSource {
         }
         let by_name: Option<FoodRow> = sqlx::query_as(
             "SELECT id, name, name_key, kcal, protein_g, carbs_g, fat_g, fiber_g, use_count
-             FROM diet_foods WHERE source_id = ? AND name_key = ?",
+             FROM diet_foods WHERE source_id = $1 AND name_key = $2",
         )
         .bind(&self.info.id)
         .bind(key)
@@ -328,7 +309,7 @@ impl FoodSource for TableSource {
                     "SELECT f.id, f.name, f.name_key, f.kcal, f.protein_g, f.carbs_g, f.fat_g,
                             f.fiber_g, f.use_count
                      FROM diet_food_aliases a JOIN diet_foods f ON f.id = a.food_id
-                     WHERE a.source_id = ? AND a.alias_key = ?",
+                     WHERE a.source_id = $1 AND a.alias_key = $2",
                 )
                 .bind(&self.info.id)
                 .bind(key)
@@ -340,7 +321,7 @@ impl FoodSource for TableSource {
     }
 
     async fn record_use(&self, food: &Food) -> Result<(), PluginError> {
-        sqlx::query("UPDATE diet_foods SET use_count = use_count + 1 WHERE id = ?")
+        sqlx::query("UPDATE diet_foods SET use_count = use_count + 1 WHERE id = $1")
             .bind(&food.id)
             .execute(&self.db)
             .await?;
@@ -354,7 +335,7 @@ impl FoodSource for TableSource {
         let by_name: Option<DishRow> = sqlx::query_as(
             "SELECT id, brand, brand_key, name, name_key, serving_g, kcal, protein_g, carbs_g,
                     fat_g, fiber_g, use_count
-             FROM diet_dishes WHERE source_id = ? AND brand_key = ? AND name_key = ?",
+             FROM diet_dishes WHERE source_id = $1 AND brand_key = $2 AND name_key = $3",
         )
         .bind(&self.info.id)
         .bind(brand_key)
@@ -368,7 +349,7 @@ impl FoodSource for TableSource {
                     "SELECT d.id, d.brand, d.brand_key, d.name, d.name_key, d.serving_g, d.kcal,
                             d.protein_g, d.carbs_g, d.fat_g, d.fiber_g, d.use_count
                      FROM diet_dish_source_aliases a JOIN diet_dishes d ON d.id = a.dish_id
-                     WHERE a.source_id = ? AND a.brand_key = ? AND a.alias_key = ?",
+                     WHERE a.source_id = $1 AND a.brand_key = $2 AND a.alias_key = $3",
                 )
                 .bind(&self.info.id)
                 .bind(brand_key)
@@ -383,7 +364,7 @@ impl FoodSource for TableSource {
         let rows: Vec<DishRow> = sqlx::query_as(
             "SELECT id, brand, brand_key, name, name_key, serving_g, kcal, protein_g, carbs_g,
                     fat_g, fiber_g, use_count
-             FROM diet_dishes WHERE source_id = ? AND brand_key = ?",
+             FROM diet_dishes WHERE source_id = $1 AND brand_key = $2",
         )
         .bind(&self.info.id)
         .bind(brand_key)
@@ -393,7 +374,7 @@ impl FoodSource for TableSource {
     }
 
     async fn record_dish_use(&self, dish: &Dish) -> Result<(), PluginError> {
-        sqlx::query("UPDATE diet_dishes SET use_count = use_count + 1 WHERE id = ?")
+        sqlx::query("UPDATE diet_dishes SET use_count = use_count + 1 WHERE id = $1")
             .bind(&dish.id)
             .execute(&self.db)
             .await?;
@@ -404,7 +385,7 @@ impl FoodSource for TableSource {
 /// Enabled sources in priority order (§4.3).
 pub struct SourceChain {
     sources: Vec<Box<dyn FoodSource>>,
-    db: SqlitePool,
+    db: PgPool,
 }
 
 impl SourceChain {
@@ -545,7 +526,7 @@ impl SourceChain {
 
     async fn alias_target(&self, key: &str) -> Result<Option<String>, PluginError> {
         let target: Option<(String,)> =
-            sqlx::query_as("SELECT target_key FROM diet_name_aliases WHERE alias_key = ?")
+            sqlx::query_as("SELECT target_key FROM diet_name_aliases WHERE alias_key = $1")
                 .bind(key)
                 .fetch_optional(&self.db)
                 .await?;
@@ -595,7 +576,7 @@ impl SourceChain {
         key: &str,
     ) -> Result<Option<String>, PluginError> {
         let target: Option<(String,)> = sqlx::query_as(
-            "SELECT target_name_key FROM diet_dish_name_aliases WHERE brand_key = ? AND alias_key = ?",
+            "SELECT target_name_key FROM diet_dish_name_aliases WHERE brand_key = $1 AND alias_key = $2",
         )
         .bind(brand_key)
         .bind(key)
@@ -644,9 +625,9 @@ impl SourceChain {
                        SUM(use_count) OVER (PARTITION BY brand_key) AS total_uses
                 FROM enabled_dishes
              )
-             SELECT brand FROM ranked WHERE rn = 1 ORDER BY total_uses DESC, brand ASC LIMIT ?",
+             SELECT brand FROM ranked WHERE rn = 1 ORDER BY total_uses DESC, brand ASC LIMIT $1",
         )
-        .bind(limit)
+        .bind(i64::from(limit))
         .fetch_all(&self.db)
         .await?;
         Ok(rows.into_iter().map(|(b,)| b).collect())
@@ -668,9 +649,9 @@ impl SourceChain {
                        SUM(use_count) OVER (PARTITION BY name_key) AS total_uses
                 FROM enabled_dishes
              )
-             SELECT name FROM ranked WHERE rn = 1 ORDER BY total_uses DESC, name ASC LIMIT ?",
+             SELECT name FROM ranked WHERE rn = 1 ORDER BY total_uses DESC, name ASC LIMIT $1",
         )
-        .bind(limit)
+        .bind(i64::from(limit))
         .fetch_all(&self.db)
         .await?;
         Ok(rows.into_iter().map(|(n,)| n).collect())
@@ -711,7 +692,7 @@ pub async fn insert_estimate(
         "INSERT INTO diet_foods
             (id, source_id, name, name_key, kcal, protein_g, carbs_g, fat_g, fiber_g,
              use_count, created_at, updated_at)
-         VALUES (?, 'llm_estimate', ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+         VALUES ($1, 'llm_estimate', $2, $3, $4, $5, $6, $7, $8, 0, $9, $10)
          ON CONFLICT(source_id, name_key) DO NOTHING",
     )
     .bind(Uuid::now_v7().to_string())
@@ -743,9 +724,9 @@ pub async fn known_names(ctx: &PluginContext, limit: u32) -> Result<Vec<String>,
                    SUM(use_count) OVER (PARTITION BY name_key) AS total_uses
             FROM enabled_foods
          )
-         SELECT name FROM ranked WHERE rn = 1 ORDER BY total_uses DESC, name ASC LIMIT ?",
+         SELECT name FROM ranked WHERE rn = 1 ORDER BY total_uses DESC, name ASC LIMIT $1",
     )
-    .bind(limit)
+    .bind(i64::from(limit))
     .fetch_all(&ctx.db)
     .await?;
     Ok(rows.into_iter().map(|(n,)| n).collect())
@@ -769,14 +750,14 @@ pub async fn upsert_manual_food(
         ));
     }
     let redirect: Option<(String,)> =
-        sqlx::query_as("SELECT target_key FROM diet_name_aliases WHERE alias_key = ?")
+        sqlx::query_as("SELECT target_key FROM diet_name_aliases WHERE alias_key = $1")
             .bind(&raw_key)
             .fetch_optional(&ctx.db)
             .await?;
     let key = redirect.map_or(raw_key, |(t,)| t);
 
     let existing: Option<(String, String)> = sqlx::query_as(
-        "SELECT id, name FROM diet_foods WHERE source_id = 'manual' AND name_key = ?",
+        "SELECT id, name FROM diet_foods WHERE source_id = 'manual' AND name_key = $1",
     )
     .bind(&key)
     .fetch_optional(&ctx.db)
@@ -793,7 +774,7 @@ pub async fn upsert_manual_food(
         "INSERT INTO diet_foods
             (id, source_id, name, name_key, kcal, protein_g, carbs_g, fat_g, fiber_g,
              use_count, created_at, updated_at)
-         VALUES (?, 'manual', ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+         VALUES ($1, 'manual', $2, $3, $4, $5, $6, $7, $8, 0, $9, $10)
          ON CONFLICT(source_id, name_key) DO UPDATE SET
             kcal = excluded.kcal, protein_g = excluded.protein_g, carbs_g = excluded.carbs_g,
             fat_g = excluded.fat_g, fiber_g = excluded.fiber_g, updated_at = excluded.updated_at",
@@ -885,7 +866,7 @@ pub async fn upsert_manual_dish(
     let brand_key = normalize(brand);
 
     let redirect: Option<(String,)> = sqlx::query_as(
-        "SELECT target_name_key FROM diet_dish_name_aliases WHERE brand_key = ? AND alias_key = ?",
+        "SELECT target_name_key FROM diet_dish_name_aliases WHERE brand_key = $1 AND alias_key = $2",
     )
     .bind(&brand_key)
     .bind(&raw_key)
@@ -894,7 +875,7 @@ pub async fn upsert_manual_dish(
     let key = redirect.map_or(raw_key, |(t,)| t);
 
     let existing: Option<(String, String, String)> = sqlx::query_as(
-        "SELECT id, name, brand FROM diet_dishes WHERE source_id = 'manual' AND brand_key = ? AND name_key = ?",
+        "SELECT id, name, brand FROM diet_dishes WHERE source_id = 'manual' AND brand_key = $1 AND name_key = $2",
     )
     .bind(&brand_key)
     .bind(&key)
@@ -916,7 +897,7 @@ pub async fn upsert_manual_dish(
         "INSERT INTO diet_dishes
             (id, source_id, brand, brand_key, name, name_key, serving_g, kcal, protein_g,
              carbs_g, fat_g, fiber_g, use_count, created_at, updated_at)
-         VALUES (?, 'manual', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+         VALUES ($1, 'manual', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 0, $12, $13)
          ON CONFLICT(source_id, brand_key, name_key) DO UPDATE SET
             serving_g = excluded.serving_g, kcal = excluded.kcal, protein_g = excluded.protein_g,
             carbs_g = excluded.carbs_g, fat_g = excluded.fat_g, fiber_g = excluded.fiber_g,
@@ -980,7 +961,7 @@ pub async fn add_user_alias(
 
     // No `X -> alias`: reject when `target_key` is itself an existing alias key.
     let target_is_alias: Option<(String,)> =
-        sqlx::query_as("SELECT alias_key FROM diet_name_aliases WHERE alias_key = ? LIMIT 1")
+        sqlx::query_as("SELECT alias_key FROM diet_name_aliases WHERE alias_key = $1 LIMIT 1")
             .bind(&target_key)
             .fetch_optional(&ctx.db)
             .await?;
@@ -991,7 +972,7 @@ pub async fn add_user_alias(
     }
     // No `Y -> X` followed by `X -> Z`: reject when `alias_key` is already some alias's target.
     let alias_is_a_target: Option<(String,)> =
-        sqlx::query_as("SELECT alias_key FROM diet_name_aliases WHERE target_key = ? LIMIT 1")
+        sqlx::query_as("SELECT alias_key FROM diet_name_aliases WHERE target_key = $1 LIMIT 1")
             .bind(&alias_key)
             .fetch_optional(&ctx.db)
             .await?;
@@ -1002,7 +983,7 @@ pub async fn add_user_alias(
     }
 
     sqlx::query(
-        "INSERT INTO diet_name_aliases (alias_key, target_key, created_at) VALUES (?, ?, ?)",
+        "INSERT INTO diet_name_aliases (alias_key, target_key, created_at) VALUES ($1, $2, $3)",
     )
     .bind(&alias_key)
     .bind(&target_key)
@@ -1030,7 +1011,7 @@ pub async fn lookup_redirect(
 ) -> Result<Option<Redirect>, PluginError> {
     let key = normalize(name);
     let row: Option<(String, String)> =
-        sqlx::query_as("SELECT target_key, origin FROM diet_name_aliases WHERE alias_key = ?")
+        sqlx::query_as("SELECT target_key, origin FROM diet_name_aliases WHERE alias_key = $1")
             .bind(&key)
             .fetch_optional(&ctx.db)
             .await?;
@@ -1050,7 +1031,7 @@ pub async fn remove_alias(ctx: &PluginContext, alias: &str) -> Result<String, Pl
     if key.is_empty() {
         return Err(PluginError::InvalidArgs("alias must not be empty".into()));
     }
-    let deleted = sqlx::query("DELETE FROM diet_name_aliases WHERE alias_key = ?")
+    let deleted = sqlx::query("DELETE FROM diet_name_aliases WHERE alias_key = $1")
         .bind(&key)
         .execute(&ctx.db)
         .await?
@@ -1064,9 +1045,9 @@ pub async fn remove_alias(ctx: &PluginContext, alias: &str) -> Result<String, Pl
 
 // ---- Source management (§7.1) ------------------------------------------------------------------
 
-async fn fetch_source_info(db: &SqlitePool, id: &str) -> Result<SourceInfo, PluginError> {
+async fn fetch_source_info(db: &PgPool, id: &str) -> Result<SourceInfo, PluginError> {
     let row: Option<(String, String, i64, i64, String)> = sqlx::query_as(
-        "SELECT kind, name, priority, enabled, origin_json FROM diet_food_sources WHERE id = ?",
+        "SELECT kind, name, priority, enabled, origin_json FROM diet_food_sources WHERE id = $1",
     )
     .bind(id)
     .fetch_optional(db)
@@ -1089,12 +1070,12 @@ async fn fetch_source_info(db: &SqlitePool, id: &str) -> Result<SourceInfo, Plug
 pub async fn get_source(ctx: &PluginContext, id: &str) -> Result<SourceInfo, PluginError> {
     let mut info = fetch_source_info(&ctx.db, id).await?;
     let (food_count,): (i64,) =
-        sqlx::query_as("SELECT COUNT(*) FROM diet_foods WHERE source_id = ?")
+        sqlx::query_as("SELECT COUNT(*) FROM diet_foods WHERE source_id = $1")
             .bind(id)
             .fetch_one(&ctx.db)
             .await?;
     let (dish_count,): (i64,) =
-        sqlx::query_as("SELECT COUNT(*) FROM diet_dishes WHERE source_id = ?")
+        sqlx::query_as("SELECT COUNT(*) FROM diet_dishes WHERE source_id = $1")
             .bind(id)
             .fetch_one(&ctx.db)
             .await?;
@@ -1129,7 +1110,7 @@ pub async fn export_source(
     let info = fetch_source_info(&ctx.db, source_id).await?;
     let foods: Vec<(String, String, f64, f64, f64, f64, f64)> = sqlx::query_as(
         "SELECT id, name, kcal, protein_g, carbs_g, fat_g, fiber_g FROM diet_foods
-         WHERE source_id = ? ORDER BY name ASC",
+         WHERE source_id = $1 ORDER BY name ASC",
     )
     .bind(source_id)
     .fetch_all(&ctx.db)
@@ -1137,7 +1118,7 @@ pub async fn export_source(
     let mut food_rows = Vec::with_capacity(foods.len());
     for (id, name, kcal, protein_g, carbs_g, fat_g, fiber_g) in foods {
         let aliases: Vec<(String,)> = sqlx::query_as(
-            "SELECT alias_key FROM diet_food_aliases WHERE source_id = ? AND food_id = ?",
+            "SELECT alias_key FROM diet_food_aliases WHERE source_id = $1 AND food_id = $2",
         )
         .bind(source_id)
         .bind(&id)
@@ -1161,7 +1142,7 @@ pub async fn export_source(
 
     let dishes: Vec<ExportDishRow> = sqlx::query_as(
         "SELECT id, brand, brand_key, name, serving_g, kcal, protein_g, carbs_g, fat_g, fiber_g
-             FROM diet_dishes WHERE source_id = ? ORDER BY brand ASC, name ASC",
+             FROM diet_dishes WHERE source_id = $1 ORDER BY brand ASC, name ASC",
     )
     .bind(source_id)
     .fetch_all(&ctx.db)
@@ -1171,7 +1152,7 @@ pub async fn export_source(
     {
         let aliases: Vec<(String,)> = sqlx::query_as(
             "SELECT alias_key FROM diet_dish_source_aliases
-             WHERE source_id = ? AND brand_key = ? AND dish_id = ?",
+             WHERE source_id = $1 AND brand_key = $2 AND dish_id = $3",
         )
         .bind(source_id)
         .bind(&brand_key)
@@ -1283,12 +1264,12 @@ pub async fn list_dishes(
                 "SELECT d.id, d.brand, d.brand_key, d.name, d.name_key, d.serving_g, d.kcal, \
                         d.protein_g, d.carbs_g, d.fat_g, d.fiber_g, d.use_count, s.id, s.kind, s.name
                  FROM diet_dishes d JOIN diet_food_sources s ON d.source_id = s.id
-                 WHERE d.source_id = ? AND d.brand_key = ?
-                 ORDER BY d.use_count DESC, d.name ASC LIMIT ?",
+                 WHERE d.source_id = $1 AND d.brand_key = $2
+                 ORDER BY d.use_count DESC, d.name ASC LIMIT $3",
             )
             .bind(sid)
             .bind(bk)
-            .bind(limit)
+            .bind(i64::from(limit))
             .fetch_all(&ctx.db)
             .await?
         }
@@ -1297,11 +1278,11 @@ pub async fn list_dishes(
                 "SELECT d.id, d.brand, d.brand_key, d.name, d.name_key, d.serving_g, d.kcal, \
                         d.protein_g, d.carbs_g, d.fat_g, d.fiber_g, d.use_count, s.id, s.kind, s.name
                  FROM diet_dishes d JOIN diet_food_sources s ON d.source_id = s.id
-                 WHERE d.source_id = ?
-                 ORDER BY d.use_count DESC, d.name ASC LIMIT ?",
+                 WHERE d.source_id = $1
+                 ORDER BY d.use_count DESC, d.name ASC LIMIT $2",
             )
             .bind(sid)
-            .bind(limit)
+            .bind(i64::from(limit))
             .fetch_all(&ctx.db)
             .await?
         }
@@ -1310,11 +1291,11 @@ pub async fn list_dishes(
                 "SELECT d.id, d.brand, d.brand_key, d.name, d.name_key, d.serving_g, d.kcal, \
                         d.protein_g, d.carbs_g, d.fat_g, d.fiber_g, d.use_count, s.id, s.kind, s.name
                  FROM diet_dishes d JOIN diet_food_sources s ON d.source_id = s.id
-                 WHERE d.brand_key = ?
-                 ORDER BY d.use_count DESC, d.name ASC LIMIT ?",
+                 WHERE d.brand_key = $1
+                 ORDER BY d.use_count DESC, d.name ASC LIMIT $2",
             )
             .bind(bk)
-            .bind(limit)
+            .bind(i64::from(limit))
             .fetch_all(&ctx.db)
             .await?
         }
@@ -1323,9 +1304,9 @@ pub async fn list_dishes(
                 "SELECT d.id, d.brand, d.brand_key, d.name, d.name_key, d.serving_g, d.kcal, \
                         d.protein_g, d.carbs_g, d.fat_g, d.fiber_g, d.use_count, s.id, s.kind, s.name
                  FROM diet_dishes d JOIN diet_food_sources s ON d.source_id = s.id
-                 ORDER BY d.use_count DESC, d.name ASC LIMIT ?",
+                 ORDER BY d.use_count DESC, d.name ASC LIMIT $1",
             )
-            .bind(limit)
+            .bind(i64::from(limit))
             .fetch_all(&ctx.db)
             .await?
         }
@@ -1365,10 +1346,11 @@ pub async fn list_sources(ctx: &PluginContext) -> Result<Vec<SourceInfo>, Plugin
 }
 
 async fn ensure_dataset(ctx: &PluginContext, id: &str) -> Result<(), PluginError> {
-    let kind: Option<(String,)> = sqlx::query_as("SELECT kind FROM diet_food_sources WHERE id = ?")
-        .bind(id)
-        .fetch_optional(&ctx.db)
-        .await?;
+    let kind: Option<(String,)> =
+        sqlx::query_as("SELECT kind FROM diet_food_sources WHERE id = $1")
+            .bind(id)
+            .fetch_optional(&ctx.db)
+            .await?;
     match kind {
         Some((k,)) if k == SourceKind::Dataset.db_str() => Ok(()),
         Some(_) => Err(PluginError::InvalidArgs(format!(
@@ -1399,7 +1381,7 @@ pub async fn reorder_datasets(ctx: &PluginContext, ids: &[String]) -> Result<(),
     let now = ctx.clock.now().to_rfc3339();
     let mut tx = ctx.db.begin().await?;
     for (i, id) in ids.iter().enumerate() {
-        sqlx::query("UPDATE diet_food_sources SET priority = ?, updated_at = ? WHERE id = ?")
+        sqlx::query("UPDATE diet_food_sources SET priority = $1, updated_at = $2 WHERE id = $3")
             .bind(i as i64 + 1)
             .bind(&now)
             .bind(id)
@@ -1413,8 +1395,8 @@ pub async fn reorder_datasets(ctx: &PluginContext, ids: &[String]) -> Result<(),
 /// Datasets only.
 pub async fn set_enabled(ctx: &PluginContext, id: &str, enabled: bool) -> Result<(), PluginError> {
     ensure_dataset(ctx, id).await?;
-    sqlx::query("UPDATE diet_food_sources SET enabled = ?, updated_at = ? WHERE id = ?")
-        .bind(enabled)
+    sqlx::query("UPDATE diet_food_sources SET enabled = $1, updated_at = $2 WHERE id = $3")
+        .bind(i64::from(enabled))
         .bind(ctx.clock.now().to_rfc3339())
         .bind(id)
         .execute(&ctx.db)
@@ -1431,7 +1413,7 @@ pub async fn rename_source(ctx: &PluginContext, id: &str, name: &str) -> Result<
             "source name must be 1-60 characters".into(),
         ));
     }
-    sqlx::query("UPDATE diet_food_sources SET name = ?, updated_at = ? WHERE id = ?")
+    sqlx::query("UPDATE diet_food_sources SET name = $1, updated_at = $2 WHERE id = $3")
         .bind(name)
         .bind(ctx.clock.now().to_rfc3339())
         .bind(id)
@@ -1444,7 +1426,7 @@ pub async fn rename_source(ctx: &PluginContext, id: &str, name: &str) -> Result<
 /// they keep a snapshot of their values.
 pub async fn delete_source(ctx: &PluginContext, id: &str) -> Result<(), PluginError> {
     ensure_dataset(ctx, id).await?;
-    sqlx::query("DELETE FROM diet_food_sources WHERE id = ?")
+    sqlx::query("DELETE FROM diet_food_sources WHERE id = $1")
         .bind(id)
         .execute(&ctx.db)
         .await?;
@@ -1519,12 +1501,12 @@ pub async fn list_foods(
                 "SELECT f.id, f.name, f.name_key, f.kcal, f.protein_g, f.carbs_g, f.fat_g, \
                         f.fiber_g, f.use_count, s.id, s.kind, s.name
                  FROM diet_foods f JOIN diet_food_sources s ON f.source_id = s.id
-                 WHERE f.source_id = ? AND f.name_key LIKE ?
-                 ORDER BY f.use_count DESC, f.name ASC LIMIT ?",
+                 WHERE f.source_id = $1 AND f.name_key LIKE $2
+                 ORDER BY f.use_count DESC, f.name ASC LIMIT $3",
             )
             .bind(sid)
             .bind(pat)
-            .bind(limit)
+            .bind(i64::from(limit))
             .fetch_all(&ctx.db)
             .await?
         }
@@ -1533,11 +1515,11 @@ pub async fn list_foods(
                 "SELECT f.id, f.name, f.name_key, f.kcal, f.protein_g, f.carbs_g, f.fat_g, \
                         f.fiber_g, f.use_count, s.id, s.kind, s.name
                  FROM diet_foods f JOIN diet_food_sources s ON f.source_id = s.id
-                 WHERE f.source_id = ?
-                 ORDER BY f.use_count DESC, f.name ASC LIMIT ?",
+                 WHERE f.source_id = $1
+                 ORDER BY f.use_count DESC, f.name ASC LIMIT $2",
             )
             .bind(sid)
-            .bind(limit)
+            .bind(i64::from(limit))
             .fetch_all(&ctx.db)
             .await?
         }
@@ -1546,11 +1528,11 @@ pub async fn list_foods(
                 "SELECT f.id, f.name, f.name_key, f.kcal, f.protein_g, f.carbs_g, f.fat_g, \
                         f.fiber_g, f.use_count, s.id, s.kind, s.name
                  FROM diet_foods f JOIN diet_food_sources s ON f.source_id = s.id
-                 WHERE f.name_key LIKE ?
-                 ORDER BY f.use_count DESC, f.name ASC LIMIT ?",
+                 WHERE f.name_key LIKE $1
+                 ORDER BY f.use_count DESC, f.name ASC LIMIT $2",
             )
             .bind(pat)
-            .bind(limit)
+            .bind(i64::from(limit))
             .fetch_all(&ctx.db)
             .await?
         }
@@ -1559,9 +1541,9 @@ pub async fn list_foods(
                 "SELECT f.id, f.name, f.name_key, f.kcal, f.protein_g, f.carbs_g, f.fat_g, \
                         f.fiber_g, f.use_count, s.id, s.kind, s.name
                  FROM diet_foods f JOIN diet_food_sources s ON f.source_id = s.id
-                 ORDER BY f.use_count DESC, f.name ASC LIMIT ?",
+                 ORDER BY f.use_count DESC, f.name ASC LIMIT $1",
             )
-            .bind(limit)
+            .bind(i64::from(limit))
             .fetch_all(&ctx.db)
             .await?
         }
@@ -1774,7 +1756,7 @@ mod tests {
         .unwrap();
         sqlx::query(
             "INSERT INTO diet_food_sources (id, kind, name, priority, enabled, origin_json, created_at, updated_at)
-             VALUES (?, 'dataset', ?, ?, 1, '{}', ?, ?)",
+             VALUES ($1, 'dataset', $2, $3, 1, '{}', $4, $5)",
         )
         .bind(&id)
         .bind(name)
@@ -1800,7 +1782,7 @@ mod tests {
             "INSERT INTO diet_foods
                 (id, source_id, name, name_key, kcal, protein_g, carbs_g, fat_g, fiber_g,
                  use_count, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 0, $10, $11)",
         )
         .bind(&id)
         .bind(source_id)
@@ -1826,7 +1808,7 @@ mod tests {
         food_id: &str,
     ) {
         sqlx::query(
-            "INSERT INTO diet_food_aliases (source_id, alias_key, food_id) VALUES (?, ?, ?)",
+            "INSERT INTO diet_food_aliases (source_id, alias_key, food_id) VALUES ($1, $2, $3)",
         )
         .bind(source_id)
         .bind(normalize(alias))
@@ -2025,7 +2007,7 @@ mod tests {
             "INSERT INTO diet_dishes
                 (id, source_id, brand, brand_key, name, name_key, serving_g, kcal, protein_g,
                  carbs_g, fat_g, fiber_g, use_count, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 0, $13, $14)",
         )
         .bind(&id)
         .bind(source_id)
@@ -2056,7 +2038,7 @@ mod tests {
     ) {
         sqlx::query(
             "INSERT INTO diet_dish_source_aliases (source_id, brand_key, alias_key, dish_id)
-             VALUES (?, ?, ?, ?)",
+             VALUES ($1, $2, $3, $4)",
         )
         .bind(source_id)
         .bind(normalize(brand))
@@ -2105,7 +2087,7 @@ mod tests {
         insert_dataset_dish(&env, &b, "", "a定食（大）", None, RICE).await;
         // A branded dish is excluded even though it's in an enabled source.
         insert_dataset_dish(&env, &a, "松屋", "牛めし", None, RICE).await;
-        sqlx::query("UPDATE diet_dishes SET use_count = 3 WHERE source_id = ?")
+        sqlx::query("UPDATE diet_dishes SET use_count = 3 WHERE source_id = $1")
             .bind(&b)
             .execute(&env.ctx.db)
             .await
@@ -2246,7 +2228,7 @@ mod tests {
         sqlx::query(
             "INSERT INTO diet_dish_name_aliases
                 (brand_key, alias_key, target_name_key, origin, created_at)
-             VALUES (?, ?, ?, 'user', ?)",
+             VALUES ($1, $2, $3, 'user', $4)",
         )
         .bind(normalize(brand))
         .bind(normalize(alias))

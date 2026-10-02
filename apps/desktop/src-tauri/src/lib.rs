@@ -19,6 +19,7 @@ mod tray;
 use std::sync::Arc;
 
 use lifeagent_core::app::{CoreApp, CoreAppBuilder};
+use lifeagent_core::db::DbConfig;
 use lifeagent_plugin_diet::DietPlugin;
 use tauri::Manager;
 
@@ -41,7 +42,8 @@ pub fn run() {
             None,
         ))
         .setup(move |app| {
-            let data_dir = data_dir?;
+            // Still needed for logs (`data_dir/logs`); the data itself is in Postgres.
+            data_dir?;
             // `start_scheduler()` calls `tokio::spawn` directly, which needs an active Tokio
             // runtime context to find its reactor — true inside this `block_on`, not true of
             // `setup()`'s own calling thread once it returns. Both go in the same `block_on` so
@@ -50,7 +52,7 @@ pub fn run() {
             let handle = app.handle().clone();
             let (core_app, autostart_enabled): (CoreApp, bool) =
                 tauri::async_runtime::block_on(async {
-                    let core_app = CoreAppBuilder::new(data_dir)
+                    let core_app = CoreAppBuilder::new(DbConfig::from_env())
                         .plugin(Arc::new(DietPlugin))
                         .build()
                         .await?;

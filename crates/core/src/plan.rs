@@ -9,7 +9,7 @@ use lifeagent_llm::json::complete_json;
 use lifeagent_llm::types::{Message, Role};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use sqlx::SqlitePool;
+use sqlx::PgPool;
 use tokio::sync::Mutex;
 
 use crate::clock::Clock;
@@ -97,7 +97,7 @@ pub struct StoredPlan {
 
 #[derive(Clone)]
 pub struct PlanStore {
-    db: SqlitePool,
+    db: PgPool,
     clock: Arc<dyn Clock>,
 }
 
@@ -114,7 +114,7 @@ type PlanRow = (
 );
 
 impl PlanStore {
-    pub fn new(db: SqlitePool, clock: Arc<dyn Clock>) -> Self {
+    pub fn new(db: PgPool, clock: Arc<dyn Clock>) -> Self {
         Self { db, clock }
     }
 
@@ -123,7 +123,7 @@ impl PlanStore {
         let row: Option<PlanRow> = sqlx::query_as(
             "SELECT plan_date, version, status, trigger, instruction, content_json, warnings_json,
                     created_at
-             FROM plans WHERE plan_date = ? ORDER BY version DESC LIMIT 1",
+             FROM plans WHERE plan_date = $1 ORDER BY version DESC LIMIT 1",
         )
         .bind(date.to_string())
         .fetch_optional(&self.db)
@@ -142,7 +142,7 @@ impl PlanStore {
     ) -> Result<StoredPlan, CoreError> {
         let mut tx = self.db.begin().await?;
         let max: Option<i64> =
-            sqlx::query_scalar("SELECT MAX(version) FROM plans WHERE plan_date = ?")
+            sqlx::query_scalar("SELECT MAX(version) FROM plans WHERE plan_date = $1")
                 .bind(date.to_string())
                 .fetch_one(&mut *tx)
                 .await?;
@@ -154,7 +154,7 @@ impl PlanStore {
             "INSERT INTO plans
                 (plan_date, version, status, trigger, instruction, content_json, warnings_json,
                  created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
         )
         .bind(date.to_string())
         .bind(version)
@@ -184,9 +184,9 @@ impl PlanStore {
     /// intent (§16); it doesn't change the plan.
     pub async fn accept(&self, date: NaiveDate) -> Result<(), CoreError> {
         let result = sqlx::query(
-            "UPDATE plans SET status = ?1
-             WHERE plan_date = ?2
-               AND version = (SELECT MAX(version) FROM plans WHERE plan_date = ?2)",
+            "UPDATE plans SET status = $1
+             WHERE plan_date = $2
+               AND version = (SELECT MAX(version) FROM plans WHERE plan_date = $2)",
         )
         .bind(PlanStatus::Accepted.as_str())
         .bind(date.to_string())
@@ -510,7 +510,7 @@ mod tests {
         }
     }
 
-    async fn store() -> (PlanStore, tempfile::TempDir) {
+    async fn store() -> (PlanStore, crate::db::TestDb) {
         let (db, dir) = crate::db::test_pool().await;
         let clock = Arc::new(crate::clock::FixedClock::new(Utc::now()));
         (PlanStore::new(db, clock), dir)

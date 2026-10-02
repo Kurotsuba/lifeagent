@@ -13,19 +13,19 @@ use chrono::{DateTime, Utc};
 use lifeagent_llm::router::{UsageEvent, UsageSink};
 use lifeagent_llm::types::Role;
 use serde::Serialize;
-use sqlx::SqlitePool;
+use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::clock::Clock;
 use crate::error::CoreError;
 
 pub struct DbUsageSink {
-    db: SqlitePool,
+    db: PgPool,
     clock: Arc<dyn Clock>,
 }
 
 impl DbUsageSink {
-    pub fn new(db: SqlitePool, clock: Arc<dyn Clock>) -> Self {
+    pub fn new(db: PgPool, clock: Arc<dyn Clock>) -> Self {
         Self { db, clock }
     }
 }
@@ -60,10 +60,10 @@ pub struct RoleUsage {
 
 /// Total prompt/completion tokens per role, for calls recorded at or after `since`. Used by
 /// `CoreApp::usage_summary` with `since` = the start of the current calendar month (UTC).
-pub async fn summary(db: &SqlitePool, since: DateTime<Utc>) -> Result<Vec<RoleUsage>, CoreError> {
+pub async fn summary(db: &PgPool, since: DateTime<Utc>) -> Result<Vec<RoleUsage>, CoreError> {
     let rows: Vec<(String, Option<i64>, Option<i64>)> = sqlx::query_as(
-        "SELECT role, SUM(prompt_tokens), SUM(completion_tokens)
-         FROM llm_usage WHERE created_at >= ? GROUP BY role",
+        "SELECT role, SUM(prompt_tokens)::BIGINT, SUM(completion_tokens)::BIGINT
+         FROM llm_usage WHERE created_at >= $1 GROUP BY role",
     )
     .bind(since.to_rfc3339())
     .fetch_all(db)
@@ -86,16 +86,16 @@ impl UsageSink for DbUsageSink {
         let result = sqlx::query(
             "INSERT INTO llm_usage
                 (id, role, provider_id, model, prompt_tokens, completion_tokens, latency_ms, ok, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
         )
         .bind(Uuid::now_v7().to_string())
         .bind(role_str(event.role))
         .bind(&event.provider_id)
         .bind(&event.model)
-        .bind(event.prompt_tokens)
-        .bind(event.completion_tokens)
+        .bind(i64::from(event.prompt_tokens))
+        .bind(i64::from(event.completion_tokens))
         .bind(event.latency_ms as i64)
-        .bind(event.ok)
+        .bind(i64::from(event.ok))
         .bind(self.clock.now().to_rfc3339())
         .execute(&self.db)
         .await;

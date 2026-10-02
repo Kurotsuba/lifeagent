@@ -2585,7 +2585,6 @@ version = "0.37.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b1f111c8c41e7c61a49cd34e44c7619462967221a6443b0ec299e0ac30cfb9b1"
 dependencies = [
- "cc",
  "pkg-config",
  "vcpkg",
 ]
@@ -2597,7 +2596,6 @@ dependencies = [
  "anyhow",
  "chrono",
  "clap",
- "directories",
  "lifeagent-core",
  "lifeagent-llm",
  "lifeagent-plugin-diet",
@@ -2615,13 +2613,11 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "chrono",
- "directories",
  "keyring",
  "lifeagent-llm",
  "serde",
  "serde_json",
  "sqlx",
- "tempfile",
  "thiserror 2.0.20",
  "tokio",
  "tracing",
@@ -2645,7 +2641,6 @@ dependencies = [
  "tauri-plugin-autostart",
  "tauri-plugin-notification",
  "tauri-plugin-single-instance",
- "tempfile",
  "tokio",
  "tracing",
  "tracing-appender",
@@ -2678,7 +2673,6 @@ dependencies = [
  "serde",
  "serde_json",
  "sqlx",
- "tempfile",
  "thiserror 2.0.20",
  "tokio",
  "tracing",
@@ -4511,7 +4505,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "sqlx-core",
- "sqlx-sqlite",
+ "sqlx-postgres",
  "syn 2.0.119",
  "thiserror 2.0.20",
  "tokio",

@@ -112,14 +112,14 @@ struct Env {
     app: CoreApp,
     clock: Arc<FixedClock>,
     mock: Arc<MockChatModel>,
-    dir: tempfile::TempDir,
+    _db: lifeagent_core::db::TestDb,
 }
 
 async fn env_at(now: DateTime<Utc>) -> Env {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = lifeagent_core::db::TestDb::new();
     let clock = Arc::new(FixedClock::new(now));
     let mock = Arc::new(MockChatModel::new());
-    let app = CoreAppBuilder::new(dir.path().to_path_buf())
+    let app = CoreAppBuilder::new(dir.config.clone())
         .clock(clock.clone())
         .secrets(Arc::new(MemorySecretStore::new()))
         .plugin(Arc::new(DietPlugin))
@@ -146,7 +146,7 @@ async fn env_at(now: DateTime<Utc>) -> Env {
         app,
         clock,
         mock,
-        dir,
+        _db: dir,
     }
 }
 
@@ -279,11 +279,6 @@ async fn scheduler_catches_up_after_midnight_once_and_takes_the_backup() {
     assert_eq!(planner_requests(&env.mock).len(), 1);
     // Catch-up only targets tomorrow; today's missing plan is not backfilled.
     assert_eq!(env.app.get_plan(today).await.unwrap(), None);
-    assert!(env
-        .dir
-        .path()
-        .join("backups/lifeagent-2026-09-23.db")
-        .exists());
 }
 
 #[tokio::test]
@@ -294,12 +289,6 @@ async fn scheduler_does_nothing_before_plan_time() {
     scheduler.tick().await;
 
     assert!(env.mock.received_requests().is_empty());
-    // The backup doesn't wait for plan_time.
-    assert!(env
-        .dir
-        .path()
-        .join("backups/lifeagent-2026-09-23.db")
-        .exists());
 }
 
 #[tokio::test]

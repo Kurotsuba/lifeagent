@@ -1,7 +1,5 @@
-//! Default data directory resolution, per `docs/PHASE1_SPEC.md` §3.
-//!
-//! Mirrors `lifeagent-cli`'s `paths::default_data_dir` (`crates/cli/src/paths.rs`): both are
-//! leaf composition roots, and the ~10 lines here aren't worth a shared crate for.
+//! Default data directory resolution, per `docs/PHASE1_SPEC.md` §3. Since the Postgres port
+//! (`docs/DECISIONS.md`, 2026-10-02) it only holds the desktop app's `logs/`.
 
 use std::path::PathBuf;
 

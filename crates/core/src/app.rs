@@ -5,7 +5,6 @@
 //! and is added incrementally rather than stubbed out here.
 
 use std::collections::{BTreeMap, HashMap};
-use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
 use chrono::{DateTime, Datelike, Local, NaiveDate, NaiveDateTime, NaiveTime, Utc};
@@ -15,7 +14,7 @@ use lifeagent_llm::router::{
 use lifeagent_llm::types::{ChatModel, Message, ResponseFormat, Role, ToolCall};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use sqlx::SqlitePool;
+use sqlx::PgPool;
 use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::{broadcast, Mutex};
 
@@ -82,7 +81,7 @@ pub struct TodayView {
 }
 
 pub struct CoreAppBuilder {
-    data_dir: PathBuf,
+    db: db::DbConfig,
     clock: Arc<dyn Clock>,
     secrets: Arc<dyn SecretStore>,
     plugins: Vec<Arc<dyn Plugin>>,
@@ -90,9 +89,9 @@ pub struct CoreAppBuilder {
 }
 
 impl CoreAppBuilder {
-    pub fn new(data_dir: PathBuf) -> Self {
+    pub fn new(db: db::DbConfig) -> Self {
         Self {
-            data_dir,
+            db,
             clock: Arc::new(SystemClock),
             secrets: Arc::new(KeyringSecretStore),
             plugins: Vec::new(),
@@ -126,7 +125,7 @@ impl CoreAppBuilder {
     /// Opens the database, runs core and plugin migrations, builds the tool registry and the
     /// LLM router, and starts the event dispatcher. Must be called inside a tokio runtime.
     pub async fn build(self) -> Result<CoreApp, CoreError> {
-        let db = db::open(&self.data_dir).await?;
+        let db = db::open(&self.db).await?;
         let settings = Settings::new(db.clone());
         let events = EventStore::new(db.clone(), self.clock.clone(), settings.clone());
         let profile = ProfileService::new(db.clone(), self.clock.clone());
@@ -145,7 +144,6 @@ impl CoreAppBuilder {
 
         let app = CoreApp(Arc::new(CoreAppInner {
             db,
-            data_dir: self.data_dir,
             clock: self.clock,
             settings,
             secrets: self.secrets,
@@ -175,7 +173,7 @@ impl CoreAppBuilder {
     /// are really configured.
     async fn build_router(
         &self,
-        db: &SqlitePool,
+        db: &PgPool,
         settings: &Settings,
     ) -> Result<(Arc<LlmRouter>, bool), CoreError> {
         let usage_sink = Arc::new(DbUsageSink::new(db.clone(), self.clock.clone()));
@@ -264,8 +262,7 @@ struct RouterState {
 }
 
 struct CoreAppInner {
-    db: SqlitePool,
-    data_dir: PathBuf,
+    db: PgPool,
     clock: Arc<dyn Clock>,
     settings: Settings,
     secrets: Arc<dyn SecretStore>,
@@ -331,12 +328,6 @@ impl CoreApp {
         &self.0.plans
     }
 
-    pub(crate) fn db(&self) -> &SqlitePool {
-        &self.0.db
-    }
-    pub(crate) fn data_dir(&self) -> &std::path::Path {
-        &self.0.data_dir
-    }
     /// The injected `Clock` — composition roots use it for "now" (e.g. settings' `updated_at`)
     /// instead of `Utc::now()`, so tests can control time.
     pub fn clock(&self) -> &Arc<dyn Clock> {
@@ -818,9 +809,9 @@ mod tests {
         }
     }
 
-    async fn builder() -> (CoreAppBuilder, tempfile::TempDir) {
-        let dir = tempfile::tempdir().unwrap();
-        let builder = CoreAppBuilder::new(dir.path().to_path_buf())
+    async fn builder() -> (CoreAppBuilder, crate::db::TestDb) {
+        let dir = crate::db::TestDb::new();
+        let builder = CoreAppBuilder::new(dir.config.clone())
             .clock(Arc::new(FixedClock::new(Utc::now())))
             .secrets(Arc::new(MemorySecretStore::new()));
         (builder, dir)
@@ -1044,11 +1035,11 @@ mod tests {
     /// configured," so the shell can route to Settings instead of failing to launch at all.
     #[tokio::test]
     async fn stored_models_config_with_an_unreachable_key_falls_back_to_unconfigured() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::db::TestDb::new();
         let clock = Arc::new(FixedClock::new(Utc::now()));
         let secrets = Arc::new(MemorySecretStore::new());
 
-        let app = CoreAppBuilder::new(dir.path().to_path_buf())
+        let app = CoreAppBuilder::new(dir.config.clone())
             .clock(clock.clone())
             .secrets(secrets.clone())
             .build()
@@ -1063,7 +1054,7 @@ mod tests {
         // Deliberately no `secrets.set("anthropic", ...)`: the key is missing, as it would be
         // if the OS keyring were unreachable at startup despite a config already on disk.
 
-        let app2 = CoreAppBuilder::new(dir.path().to_path_buf())
+        let app2 = CoreAppBuilder::new(dir.config.clone())
             .clock(clock)
             .secrets(secrets)
             .build()
@@ -1152,12 +1143,12 @@ mod tests {
 
     #[tokio::test]
     async fn send_message_tags_user_messages_with_their_own_send_time() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::db::TestDb::new();
         let clock = Arc::new(FixedClock::new(Utc::now()));
         let mock = Arc::new(MockChatModel::new());
         mock.push_response(response(Some("好的"), vec![]));
         mock.push_response(response(Some("好的"), vec![]));
-        let app = CoreAppBuilder::new(dir.path().to_path_buf())
+        let app = CoreAppBuilder::new(dir.config.clone())
             .clock(clock.clone())
             .secrets(Arc::new(MemorySecretStore::new()))
             .chat_model_override(mock.clone())

@@ -10,7 +10,7 @@ use lifeagent_llm::error::LlmError;
 use lifeagent_llm::router::LlmRouter;
 use lifeagent_llm::types::ToolSpec;
 use serde_json::Value;
-use sqlx::SqlitePool;
+use sqlx::PgPool;
 use thiserror::Error;
 
 use crate::clock::Clock;
@@ -40,11 +40,11 @@ pub struct PluginManifest {
 }
 
 /// Everything a plugin needs to do its work. Assembled fresh by `CoreApp` for each call —
-/// cheap, since every field is a cloneable handle (`SqlitePool`, `Arc<...>`, or a service
+/// cheap, since every field is a cloneable handle (`PgPool`, `Arc<...>`, or a service
 /// wrapping one).
 #[derive(Clone)]
 pub struct PluginContext {
-    pub db: SqlitePool,
+    pub db: PgPool,
     pub events: EventStore,
     pub llm: Arc<LlmRouter>,
     pub clock: Arc<dyn Clock>,
@@ -175,12 +175,12 @@ pub trait Plugin: Send + Sync {
 /// Applies any of `manifest`'s migrations not yet recorded in `plugin_migrations`, in version
 /// order, each inside its own transaction (§5 "Plugin migrations").
 pub async fn apply_migrations(
-    db: &SqlitePool,
+    db: &PgPool,
     clock: &dyn Clock,
     manifest: &PluginManifest,
 ) -> Result<(), CoreError> {
     let applied_rows: Vec<(i64,)> =
-        sqlx::query_as("SELECT version FROM plugin_migrations WHERE plugin_id = ?")
+        sqlx::query_as("SELECT version FROM plugin_migrations WHERE plugin_id = $1")
             .bind(manifest.id)
             .fetch_all(db)
             .await?;
@@ -194,9 +194,28 @@ pub async fn apply_migrations(
             continue;
         }
         let mut tx = db.begin().await?;
-        sqlx::query(migration.sql).execute(&mut *tx).await?;
+        // Two app instances opening the same schema at once (e.g. two Cloud Run instances)
+        // must not both apply a migration: serialize on a per-schema lock held until commit,
+        // then re-check under it.
         sqlx::query(
-            "INSERT INTO plugin_migrations (plugin_id, version, applied_at) VALUES (?, ?, ?)",
+            "SELECT pg_advisory_xact_lock(hashtext('plugin_migrations.' || current_schema()))",
+        )
+        .execute(&mut *tx)
+        .await?;
+        let already: Option<(i64,)> = sqlx::query_as(
+            "SELECT version FROM plugin_migrations WHERE plugin_id = $1 AND version = $2",
+        )
+        .bind(manifest.id)
+        .bind(migration.version as i64)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if already.is_some() {
+            continue;
+        }
+        // `raw_sql`: a migration may hold several statements, which a prepared statement can't.
+        sqlx::raw_sql(migration.sql).execute(&mut *tx).await?;
+        sqlx::query(
+            "INSERT INTO plugin_migrations (plugin_id, version, applied_at) VALUES ($1, $2, $3)",
         )
         .bind(manifest.id)
         .bind(migration.version as i64)

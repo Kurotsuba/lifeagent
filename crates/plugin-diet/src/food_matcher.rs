@@ -356,7 +356,7 @@ async fn check_is_fresh(
     latest_dataset_change: Option<DateTime<Utc>>,
 ) -> Result<bool, PluginError> {
     let row: Option<(String,)> =
-        sqlx::query_as("SELECT checked_at FROM diet_food_match_checks WHERE name_key = ?")
+        sqlx::query_as("SELECT checked_at FROM diet_food_match_checks WHERE name_key = $1")
             .bind(key)
             .fetch_optional(&ctx.db)
             .await?;
@@ -375,7 +375,7 @@ async fn check_is_fresh(
 /// Upserts `checked_at = now` for `key` (§6.1).
 pub(crate) async fn record_check(ctx: &PluginContext, key: &str) -> Result<(), PluginError> {
     sqlx::query(
-        "INSERT INTO diet_food_match_checks (name_key, checked_at) VALUES (?, ?)
+        "INSERT INTO diet_food_match_checks (name_key, checked_at) VALUES ($1, $2)
          ON CONFLICT(name_key) DO UPDATE SET checked_at = excluded.checked_at",
     )
     .bind(key)
@@ -388,7 +388,7 @@ pub(crate) async fn record_check(ctx: &PluginContext, key: &str) -> Result<(), P
 /// An explicit user redirect is the user's decision; matching never overrides it.
 async fn has_user_alias(ctx: &PluginContext, key: &str) -> Result<bool, PluginError> {
     let row: Option<(String,)> =
-        sqlx::query_as("SELECT origin FROM diet_name_aliases WHERE alias_key = ?")
+        sqlx::query_as("SELECT origin FROM diet_name_aliases WHERE alias_key = $1")
             .bind(key)
             .fetch_optional(&ctx.db)
             .await?;
@@ -403,7 +403,7 @@ async fn store_pick(ctx: &PluginContext, key: &str, target_key: &str) -> Result<
     }
     let mut tx = ctx.db.begin().await?;
     let target_is_alias: Option<(String,)> =
-        sqlx::query_as("SELECT alias_key FROM diet_name_aliases WHERE alias_key = ?")
+        sqlx::query_as("SELECT alias_key FROM diet_name_aliases WHERE alias_key = $1")
             .bind(target_key)
             .fetch_optional(&mut *tx)
             .await?;
@@ -412,7 +412,7 @@ async fn store_pick(ctx: &PluginContext, key: &str, target_key: &str) -> Result<
     }
     // Aliases that pointed at `key` now point at the picked row, so no chain forms. One that
     // would end up pointing at itself is dropped.
-    sqlx::query("UPDATE diet_name_aliases SET target_key = ? WHERE target_key = ?")
+    sqlx::query("UPDATE diet_name_aliases SET target_key = $1 WHERE target_key = $2")
         .bind(target_key)
         .bind(key)
         .execute(&mut *tx)
@@ -422,7 +422,7 @@ async fn store_pick(ctx: &PluginContext, key: &str, target_key: &str) -> Result<
         .await?;
     sqlx::query(
         "INSERT INTO diet_name_aliases (alias_key, target_key, created_at, origin)
-         VALUES (?, ?, ?, 'match')
+         VALUES ($1, $2, $3, 'match')
          ON CONFLICT(alias_key) DO UPDATE SET
             target_key = excluded.target_key, created_at = excluded.created_at,
             origin = excluded.origin",
@@ -454,7 +454,7 @@ mod tests {
         env: &lifeagent_core::test_support::TestEnv,
         alias: &str,
     ) -> Option<(String, String)> {
-        sqlx::query_as("SELECT target_key, origin FROM diet_name_aliases WHERE alias_key = ?")
+        sqlx::query_as("SELECT target_key, origin FROM diet_name_aliases WHERE alias_key = $1")
             .bind(alias)
             .fetch_optional(&env.ctx.db)
             .await
@@ -519,7 +519,7 @@ mod tests {
         let env = env().await;
         insert_estimate(&env.ctx, "稻米饭(估)", RICE).await.unwrap();
         let off = add_dataset(&env, "关", &[("稻米饭(关)", RICE)]).await;
-        sqlx::query("UPDATE diet_food_sources SET enabled = 0 WHERE id = ?")
+        sqlx::query("UPDATE diet_food_sources SET enabled = 0 WHERE id = $1")
             .bind(&off)
             .execute(&env.ctx.db)
             .await
@@ -554,13 +554,14 @@ mod tests {
     async fn a_source_alias_is_searched_and_the_winner_row_is_returned() {
         let env = env().await;
         let id = add_dataset(&env, "表", &[("马铃薯(土豆)", RICE)]).await;
-        let (food_id,): (String,) = sqlx::query_as("SELECT id FROM diet_foods WHERE source_id = ?")
-            .bind(&id)
-            .fetch_one(&env.ctx.db)
-            .await
-            .unwrap();
+        let (food_id,): (String,) =
+            sqlx::query_as("SELECT id FROM diet_foods WHERE source_id = $1")
+                .bind(&id)
+                .fetch_one(&env.ctx.db)
+                .await
+                .unwrap();
         sqlx::query(
-            "INSERT INTO diet_food_aliases (source_id, alias_key, food_id) VALUES (?, '洋芋', ?)",
+            "INSERT INTO diet_food_aliases (source_id, alias_key, food_id) VALUES ($1, '洋芋', $2)",
         )
         .bind(&id)
         .bind(&food_id)

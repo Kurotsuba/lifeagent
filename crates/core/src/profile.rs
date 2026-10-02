@@ -6,7 +6,7 @@
 
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
-use sqlx::SqlitePool;
+use sqlx::PgPool;
 
 use crate::clock::Clock;
 use crate::error::{CoreError, ValidationRule};
@@ -85,12 +85,12 @@ pub fn validate(profile: &Profile, today: NaiveDate) -> Result<(), CoreError> {
 
 #[derive(Clone)]
 pub struct ProfileService {
-    db: SqlitePool,
+    db: PgPool,
     clock: std::sync::Arc<dyn Clock>,
 }
 
 impl ProfileService {
-    pub fn new(db: SqlitePool, clock: std::sync::Arc<dyn Clock>) -> Self {
+    pub fn new(db: PgPool, clock: std::sync::Arc<dyn Clock>) -> Self {
         Self { db, clock }
     }
 
@@ -117,7 +117,7 @@ impl ProfileService {
         let json = serde_json::to_string(profile)?;
         let now: DateTime<Utc> = self.clock.now();
         sqlx::query(
-            "INSERT INTO profile (id, data_json, updated_at) VALUES (1, ?, ?)
+            "INSERT INTO profile (id, data_json, updated_at) VALUES (1, $1, $2)
              ON CONFLICT(id) DO UPDATE SET data_json = excluded.data_json, updated_at = excluded.updated_at",
         )
         .bind(json)

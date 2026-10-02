@@ -263,7 +263,7 @@ async fn write_pick_alias(
     }
     sqlx::query(
         "INSERT INTO diet_dish_name_aliases (brand_key, alias_key, target_name_key, origin, created_at)
-         VALUES (?, ?, ?, 'pick', ?)
+         VALUES ($1, $2, $3, 'pick', $4)
          ON CONFLICT(brand_key, alias_key) DO UPDATE SET
             target_name_key = excluded.target_name_key, origin = excluded.origin,
             created_at = excluded.created_at",
@@ -402,7 +402,7 @@ mod tests {
         assert!(content.contains("regular size"));
 
         let alias: Option<(String,)> = sqlx::query_as(
-            "SELECT target_name_key FROM diet_dish_name_aliases WHERE brand_key = ? AND alias_key = ?",
+            "SELECT target_name_key FROM diet_dish_name_aliases WHERE brand_key = $1 AND alias_key = $2",
         )
         .bind(normalize("松屋"))
         .bind(normalize("牛肉饭 中碗"))
@@ -615,7 +615,7 @@ mod tests {
         let now = env.clock.now().to_rfc3339();
         sqlx::query(
             "INSERT INTO diet_food_sources (id, kind, name, priority, enabled, origin_json, created_at, updated_at)
-             VALUES (?, 'dataset', '数据集', 5, 1, '{}', ?, ?)",
+             VALUES ($1, 'dataset', '数据集', 5, 1, '{}', $2, $3)",
         )
         .bind(&dataset_id)
         .bind(&now)
@@ -627,7 +627,7 @@ mod tests {
             "INSERT INTO diet_dishes
                 (id, source_id, brand, brand_key, name, name_key, serving_g, kcal, protein_g,
                  carbs_g, fat_g, fiber_g, use_count, created_at, updated_at)
-             VALUES (?, ?, '松屋', '松屋', '牛めし（並盛）', ?, 350.0, 1.0, 1.0, 1.0, 1.0, 0, 0, ?, ?)",
+             VALUES ($1, $2, '松屋', '松屋', '牛めし（並盛）', $3, 350.0, 1.0, 1.0, 1.0, 1.0, 0, 0, $4, $5)",
         )
         .bind(uuid::Uuid::now_v7().to_string())
         .bind(&dataset_id)

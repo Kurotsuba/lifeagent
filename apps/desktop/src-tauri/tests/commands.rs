@@ -23,18 +23,18 @@ use tauri::{WebviewWindow, WebviewWindowBuilder};
 /// Always an in-memory `SecretStore`: the builder's default `KeyringSecretStore` is the real OS
 /// credential store, so `set_api_key` here would overwrite the developer's actual key (e.g.
 /// `provider:anthropic`) on every `cargo test` run.
-async fn core_app() -> (CoreApp, tempfile::TempDir) {
+async fn core_app() -> (CoreApp, lifeagent_core::db::TestDb) {
     build_core_app(None).await
 }
 
 /// `core_app` with every LLM role answered by `mock` — never a real provider (CLAUDE.md).
-async fn core_app_with_mock(mock: Arc<MockChatModel>) -> (CoreApp, tempfile::TempDir) {
+async fn core_app_with_mock(mock: Arc<MockChatModel>) -> (CoreApp, lifeagent_core::db::TestDb) {
     build_core_app(Some(mock)).await
 }
 
-async fn build_core_app(mock: Option<Arc<MockChatModel>>) -> (CoreApp, tempfile::TempDir) {
-    let dir = tempfile::tempdir().unwrap();
-    let mut builder = CoreAppBuilder::new(dir.path().to_path_buf())
+async fn build_core_app(mock: Option<Arc<MockChatModel>>) -> (CoreApp, lifeagent_core::db::TestDb) {
+    let dir = lifeagent_core::db::TestDb::new();
+    let mut builder = CoreAppBuilder::new(dir.config.clone())
         .secrets(Arc::new(MemorySecretStore::new()))
         .plugin(Arc::new(DietPlugin));
     if let Some(mock) = mock {
@@ -97,6 +97,10 @@ fn setup(core_app: CoreApp) -> (tauri::App<MockRuntime>, WebviewWindow<MockRunti
     (app, webview)
 }
 
+// Every test runs on a multi-thread runtime: `get_ipc_response` blocks the test thread until
+// the command finishes, and the command's Postgres connections are driven by the test's
+// runtime. On a current-thread runtime nothing would drive them and every query would hang
+// until the pool's acquire timeout.
 fn invoke(webview: &WebviewWindow<MockRuntime>, cmd: &str, args: Value) -> Result<Value, Value> {
     tauri::test::get_ipc_response(
         webview,
@@ -169,7 +173,7 @@ fn sample_profile() -> Value {
     })
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn get_app_state_before_onboarding() {
     let (core_app, _dir) = core_app().await;
     let (_app, webview) = setup(core_app);
@@ -181,7 +185,7 @@ async fn get_app_state_before_onboarding() {
     assert!(state["logical_date"].is_string());
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn save_profile_then_get_profile_round_trips_through_real_ipc() {
     let (core_app, _dir) = core_app().await;
     let (_app, webview) = setup(core_app);
@@ -197,7 +201,7 @@ async fn save_profile_then_get_profile_round_trips_through_real_ipc() {
     assert_eq!(got, sample_profile());
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn log_weight_then_get_today_reflects_it() {
     let (core_app, _dir) = core_app().await;
     let (_app, webview) = setup(core_app);
@@ -208,7 +212,7 @@ async fn log_weight_then_get_today_reflects_it() {
     assert_eq!(today["latest_weight"]["kg"], json!(62.5));
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn send_message_without_models_configured_returns_the_not_configured_error_code() {
     let (core_app, _dir) = core_app().await;
     let (_app, webview) = setup(core_app);
@@ -221,7 +225,7 @@ async fn send_message_without_models_configured_returns_the_not_configured_error
 
 /// Also the multi-word-argument case (`provider_id` → JS `providerId`), which single-word
 /// commands like the other tests here can't exercise.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn set_api_key_then_has_api_key_round_trips_with_camel_case_args() {
     let (core_app, _dir) = core_app().await;
     let (_app, webview) = setup(core_app);
@@ -248,7 +252,7 @@ async fn set_api_key_then_has_api_key_round_trips_with_camel_case_args() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn save_weight_goal_then_get_weight_goal_round_trips() {
     let (core_app, _dir) = core_app().await;
     let (_app, webview) = setup(core_app);
@@ -266,7 +270,7 @@ async fn save_weight_goal_then_get_weight_goal_round_trips() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn complete_onboarding_flips_get_app_state() {
     let (core_app, _dir) = core_app().await;
     let (_app, webview) = setup(core_app);
@@ -279,7 +283,7 @@ async fn complete_onboarding_flips_get_app_state() {
 
 /// The onboarding step-2 preview: a pure computation, so this is safe to run offline (no LLM
 /// call involved) unlike `test_model` below.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn preview_targets_returns_nutrition_targets_for_a_valid_profile() {
     let (core_app, _dir) = core_app().await;
     let (_app, webview) = setup(core_app);
@@ -299,7 +303,7 @@ async fn preview_targets_returns_nutrition_targets_for_a_valid_profile() {
 
 /// `test_model` must resolve with `{ ok: false, error: Some(...) }`, never reject the promise,
 /// even with no models configured at all — onboarding calls it before anything is saved.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_model_without_models_configured_resolves_ok_false() {
     let (core_app, _dir) = core_app().await;
     let (_app, webview) = setup(core_app);
@@ -315,7 +319,7 @@ async fn test_model_without_models_configured_resolves_ok_false() {
 /// grants read-only window permissions, so without it the call is silently rejected and the
 /// undecorated popup can't be dismissed. Also checks the window stays least-privilege: none of
 /// the main window's data commands are reachable from it.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn quick_entry_window_can_hide_itself_but_not_reach_data_commands() {
     let (core_app, _dir) = core_app().await;
     let (app, _main) = setup(core_app);
@@ -342,7 +346,7 @@ fn text_response(content: &str) -> ChatResponse {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn send_message_then_get_history_returns_both_sides_of_the_turn() {
     let mock = Arc::new(MockChatModel::new());
     mock.push_response(text_response("你好！"));
@@ -370,7 +374,7 @@ async fn send_message_then_get_history_returns_both_sides_of_the_turn() {
     assert!(history[0]["created_at"].is_string());
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn plan_commands_report_missing_plans_and_bad_dates_with_the_right_codes() {
     let (core_app, _dir) = core_app_with_mock(Arc::new(MockChatModel::new())).await;
     let (_app, webview) = setup(core_app);
@@ -391,7 +395,7 @@ async fn plan_commands_report_missing_plans_and_bad_dates_with_the_right_codes()
     assert_eq!(generate["code"], json!("invalid_input"));
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn get_settings_returns_the_defaults_in_the_dto_shape() {
     let (core_app, _dir) = core_app().await;
     let (_app, webview) = setup(core_app);
@@ -406,7 +410,7 @@ async fn get_settings_returns_the_defaults_in_the_dto_shape() {
 
 /// Also proves `save_models` reloads the router on the running app: `models_configured` flips
 /// without a restart, which onboarding's save-then-test flow depends on.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn save_models_then_get_models_round_trips_and_configures_the_running_app() {
     let (core_app, _dir) = core_app().await;
     let (_app, webview) = setup(core_app);
@@ -437,7 +441,7 @@ async fn save_models_then_get_models_round_trips_and_configures_the_running_app(
     assert_eq!(state["models_configured"], json!(true));
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn memory_and_usage_commands_work_on_an_empty_store() {
     let (core_app, _dir) = core_app().await;
     let (_app, webview) = setup(core_app);
@@ -456,7 +460,7 @@ async fn memory_and_usage_commands_work_on_an_empty_store() {
 
 // ---- Nutrition sources / batch import (`docs/NUTRITION_SOURCES.md` §8.2) --------------------
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn list_food_sources_starts_with_the_two_built_in_sources() {
     let (core_app, _dir) = core_app().await;
     let (_app, webview) = setup(core_app);
@@ -471,7 +475,7 @@ async fn list_food_sources_starts_with_the_two_built_in_sources() {
     assert_eq!(ids, vec!["manual", "llm_estimate"]);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn preview_then_commit_food_import_round_trips_through_raw_ipc() {
     let (core_app, _dir) = core_app().await;
     let (_app, webview) = setup(core_app);
@@ -499,7 +503,7 @@ async fn preview_then_commit_food_import_round_trips_through_raw_ipc() {
 
 /// `docs/DISH_NUTRITION.md` §8.2: `list_foods` gains `kind`/`brand`, and a source's dish count
 /// shows up alongside its food count.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn list_foods_with_kind_dish_returns_dishes_filtered_by_brand() {
     let (core_app, _dir) = core_app().await;
     let (_app, webview) = setup(core_app);
@@ -548,7 +552,7 @@ async fn list_foods_with_kind_dish_returns_dishes_filtered_by_brand() {
     assert_eq!(matsuya[0]["serving_g"], json!(350.0));
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn commit_food_import_consumes_the_token_once() {
     let (core_app, _dir) = core_app().await;
     let (_app, webview) = setup(core_app);
@@ -562,7 +566,7 @@ async fn commit_food_import_consumes_the_token_once() {
     assert_eq!(second["code"], json!("not_found"));
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn cancel_food_import_then_commit_reports_not_found() {
     let (core_app, _dir) = core_app().await;
     let (_app, webview) = setup(core_app);
@@ -576,7 +580,7 @@ async fn cancel_food_import_then_commit_reports_not_found() {
     assert_eq!(err["code"], json!("not_found"));
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn preview_food_import_reports_row_errors_with_a_zh_cn_message() {
     let (core_app, _dir) = core_app().await;
     let (_app, webview) = setup(core_app);
@@ -588,7 +592,7 @@ async fn preview_food_import_reports_row_errors_with_a_zh_cn_message() {
     assert!(err["message"].as_str().unwrap().contains("UTF-8"));
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn source_management_commands_reorder_rename_disable_and_delete() {
     let (core_app, _dir) = core_app().await;
     let (_app, webview) = setup(core_app);

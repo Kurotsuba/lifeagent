@@ -5,24 +5,6 @@
 
 use crate::model::Macros;
 
-/// Diet plugin migration 1 (`docs/PHASE1_SPEC.md` §5). Kept verbatim for installs that still
-/// need to apply it before migration 2 (`sources::MIGRATION_2`) rebuilds it.
-pub const MIGRATION_1: &str = "CREATE TABLE diet_foods (
-  id            TEXT PRIMARY KEY,
-  name          TEXT NOT NULL,
-  name_key      TEXT NOT NULL UNIQUE,
-  aliases_json  TEXT NOT NULL DEFAULT '[]',
-  kcal          REAL NOT NULL,
-  protein_g     REAL NOT NULL,
-  carbs_g       REAL NOT NULL,
-  fat_g         REAL NOT NULL,
-  fiber_g       REAL NOT NULL DEFAULT 0,
-  source        TEXT NOT NULL,
-  use_count     INTEGER NOT NULL DEFAULT 0,
-  created_at    TEXT NOT NULL,
-  updated_at    TEXT NOT NULL
-)";
-
 /// Punctuation stripped from the end of a name. Closing brackets are deliberately not in the
 /// list: names like "牛肉(熟)" end in one.
 const TRAILING_PUNCTUATION: &[char] = &[

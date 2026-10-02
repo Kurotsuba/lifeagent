@@ -68,14 +68,20 @@ cargo run -p lifeagent-cli -- today                      # TodayView as JSON
 cargo run -p lifeagent-cli -- plan generate
 ```
 
-By default both the desktop app and the CLI use the OS's standard app-data directory
-(`%APPDATA%\LifeAgent\data` on Windows) for `lifeagent.db` and `logs/`. The CLI accepts
-`--data-dir <path>` to point at a scratch directory instead — handy for trying things out
-without touching your real data:
+Data lives in Postgres. Both the desktop app and the CLI read `LIFEAGENT_DATABASE_URL`
+(default `postgres://lifeagent:lifeagent@localhost/lifeagent_dev`) and `LIFEAGENT_DB_SCHEMA`
+(default `public`); the schema is created and migrated on start. The CLI also accepts
+`--database-url` and `--schema`. A separate schema is handy for trying things out without
+touching your real data:
 
 ```
-cargo run -p lifeagent-cli -- --data-dir /tmp/lifeagent-scratch today
+cargo run -p lifeagent-cli -- --schema scratch today
 ```
+
+The desktop app still writes its logs to the OS's standard app-data directory
+(`%APPDATA%\LifeAgent\data\logs` on Windows). Setting up the local Postgres (PostgreSQL 17,
+role `lifeagent`, databases `lifeagent_dev` and `lifeagent_test`) is described in
+`docs/HACKATHON.md` §1 and the 2026-10-02 "Postgres port" entry in `docs/DECISIONS.md`.
 
 `--mock` swaps in a `MockChatModel` that just echoes input, for smoke-testing plumbing without
 an API key or network access — it will not produce a real reply, meal parse or plan.
@@ -128,6 +134,11 @@ cd apps/desktop/ui && npx tsc -b        # frontend typecheck; no frontend test r
 Run `fmt`, `clippy` and `cargo test --workspace` after finishing each milestone's work — see
 `CLAUDE.md`. All tests run offline: they never call a real LLM (`MockChatModel` from
 `lifeagent-llm` stands in) and never touch a real OS keyring (`MemorySecretStore` stands in).
+
+Database tests need a local Postgres: `LIFEAGENT_TEST_DATABASE_URL`, default
+`postgres://lifeagent:lifeagent@localhost/lifeagent_test`. Each test creates its own schema
+(`test_<uuid>`) and drops it afterwards, so tests run in parallel and leave nothing behind. If
+the server is down, start it with `sudo service postgresql start`.
 
 ## Repository layout
 

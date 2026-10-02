@@ -6,7 +6,6 @@
 
 mod mock;
 mod output;
-mod paths;
 
 use std::io::{self, BufRead, Write};
 use std::path::PathBuf;
@@ -16,6 +15,7 @@ use anyhow::{Context, Result};
 use chrono::{NaiveDate, Utc};
 use clap::{Parser, Subcommand};
 use lifeagent_core::app::{CoreApp, CoreAppBuilder};
+use lifeagent_core::db::DbConfig;
 use lifeagent_core::plan::PlanTrigger;
 use lifeagent_core::profile::Profile;
 use lifeagent_core::secrets::{KeyringSecretStore, SecretStore};
@@ -34,9 +34,15 @@ const DEFAULT_FOODS_LIMIT: u32 = 50;
 #[derive(Parser)]
 #[command(name = "lifeagent-cli", version, about)]
 struct Cli {
-    /// Override the data directory (used for development and tests).
+    /// Postgres connection URL. Falls back to `LIFEAGENT_DATABASE_URL`, then to the local
+    /// development database (see `DbConfig::from_env`).
     #[arg(long, global = true)]
-    data_dir: Option<PathBuf>,
+    database_url: Option<String>,
+
+    /// Postgres schema holding the app's tables. Falls back to `LIFEAGENT_DB_SCHEMA`, then
+    /// `public`.
+    #[arg(long, global = true)]
+    schema: Option<String>,
 
     /// Use a mock chat model that echoes input, for smoke-testing plumbing only.
     #[arg(long, global = true)]
@@ -204,7 +210,7 @@ async fn main() -> Result<()> {
     // `LlmRouter` as soon as `models set-json` has stored a provider, which fetches that
     // provider's key up front and fails if it isn't in the keyring yet — exactly the gap
     // `set-key` exists to fill. Keys live only in the OS credential store (never the
-    // database), so this needs no data dir and no app at all.
+    // database), so this needs no database and no app at all.
     if let Command::Models {
         action: ModelsAction::SetKey { provider_id },
     } = &cli.command
@@ -212,15 +218,18 @@ async fn main() -> Result<()> {
         return set_key(provider_id);
     }
 
-    let data_dir = match cli.data_dir {
-        Some(d) => d,
-        None => paths::default_data_dir()?,
-    };
+    let mut db = DbConfig::from_env();
+    if let Some(url) = cli.database_url.clone() {
+        db.url = url;
+    }
+    if let Some(schema) = cli.schema.clone() {
+        db.schema = schema;
+    }
 
     // Built up front, even when `--mock` is off, so its handle is available to `chat`/`say`
     // without threading an `Option<Arc<MockChatModel>>` through `CoreAppBuilder`.
     let mock = Arc::new(MockChatModel::new());
-    let mut builder = CoreAppBuilder::new(data_dir).plugin(Arc::new(DietPlugin));
+    let mut builder = CoreAppBuilder::new(db).plugin(Arc::new(DietPlugin));
     if cli.mock {
         builder = builder.chat_model_override(mock.clone());
     }

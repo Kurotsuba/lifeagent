@@ -2048,3 +2048,54 @@ differ between Gemini versions. Gemini models therefore run at their own default
 No real-model check yet: the round trip is covered by fixture tests
 (`openai_compat::tests::gemini_*`, `app::tests::tool_call_provider_extra_is_persisted_and_replayed`).
 Run a real chat turn that calls a tool (e.g. log a meal) against a Gemini 3 model to confirm.
+
+## 2026-10-02 — Postgres port (hackathon, `docs/HACKATHON.md` §1 step 1)
+
+All storage moved from SQLite to Postgres (sqlx `postgres` feature instead of `sqlite`), as the
+first step toward Cloud Run + Cloud SQL. Runtime queries (`sqlx::query`/`query_as`) stay, per
+`CLAUDE.md`.
+
+- **One schema per `CoreApp`.** `CoreAppBuilder::new` takes a `db::DbConfig { url, schema }`
+  instead of a data directory. `db::open` creates the schema if needed and gives every pooled
+  connection `search_path = <schema>` as a startup parameter, so all queries stay unqualified
+  and single-user. This is the mechanism the per-user schemas (§1 "Account management") build
+  on. Schema names must match `[a-z_][a-z0-9_]*` (≤ 63 bytes), because identifiers can't be bind
+  parameters in DDL. Composition roots use `DbConfig::from_env()`
+  (`LIFEAGENT_DATABASE_URL`, `LIFEAGENT_DB_SCHEMA`); the CLI's `--data-dir` became
+  `--database-url` / `--schema`.
+- **Types.** Same columns and meanings as the SQLite schema. Instants and dates stay RFC 3339 /
+  ISO `TEXT`, JSON stays `TEXT`. `INTEGER` → `BIGINT` (Rust `i64`), `REAL` → `DOUBLE PRECISION`
+  (`f64`). Flags (`active`, `enabled`, `ok`) stay `0`/`1` integers, so no query or row-mapping
+  logic changed; the two places that bound a Rust `bool` now bind `i64::from(..)`. Postgres has
+  no unsigned types, so `u32` limits/token counts are bound as `i64::from(..)`, and
+  `SUM(bigint)` (which Postgres returns as `NUMERIC`) is cast back to `BIGINT`.
+- **`seq` replaces `rowid`.** `events`, `memory_notes` and `messages` get a
+  `seq BIGINT GENERATED ALWAYS AS IDENTITY` column as the insertion-order tie-breaker that
+  SQLite's implicit `rowid` used to be.
+- **Migrations restart at 1.** Postgres databases start empty and there is no SQLite data to
+  carry over, so `0001_init.sql` was rewritten in place and the diet plugin's four SQLite
+  migrations (two of which rebuilt tables with `json_each`/`strftime`) are folded into one
+  (`sources::MIGRATION_1`) that creates the final schema. Their upgrade-path tests went with
+  them; the `ON DELETE CASCADE` tests stay, and a new test checks the seeded sources. Existing
+  SQLite databases are not migrated.
+- **Plugin migrations** run through `sqlx::raw_sql` (a migration may hold several statements,
+  which a prepared statement can't), inside a transaction that first takes
+  `pg_advisory_xact_lock` on the schema and re-checks `plugin_migrations`, so two instances
+  opening the same schema can't apply a migration twice.
+- **Daily backup removed.** `backup_if_due` used SQLite's `VACUUM INTO`; Cloud SQL's automated
+  backups replace it. The scheduler tick now only does plan generation.
+- **Tests** need a local Postgres (`LIFEAGENT_TEST_DATABASE_URL`, default
+  `postgres://lifeagent:lifeagent@localhost/lifeagent_test`). `db::TestDb` creates a
+  `test_<uuid v7>` schema per test and drops it on `Drop` (from a helper thread with its own
+  runtime, since `Drop` can't be async), replacing the temp-directory SQLite files. This is
+  still offline in the `CLAUDE.md` sense: no network service beyond localhost.
+- **Desktop IPC tests run on a multi-thread runtime.** `tauri::test::get_ipc_response` blocks
+  the test thread until the command returns, and the command's Postgres connections are driven
+  by the test's runtime. On `#[tokio::test]`'s default current-thread runtime nothing drives
+  them, so every query hung until the pool's 30 s acquire timeout. SQLite never showed this
+  because it runs queries on its own worker thread.
+- **Local setup:** PostgreSQL 17 from the PGDG apt repository (matching Cloud SQL), role
+  `lifeagent` (password `lifeagent`, `SUPERUSER`, local development only) owning databases
+  `lifeagent_dev` and `lifeagent_test`. Under WSL, start it with
+  `sudo service postgresql start`.
+

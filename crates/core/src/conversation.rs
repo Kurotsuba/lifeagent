@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use sqlx::SqlitePool;
+use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::clock::Clock;
@@ -76,7 +76,7 @@ pub struct StoredMessage {
 
 #[derive(Clone)]
 pub struct ConversationStore {
-    db: SqlitePool,
+    db: PgPool,
     clock: Arc<dyn Clock>,
 }
 
@@ -93,7 +93,7 @@ type MessageRow = (
 );
 
 impl ConversationStore {
-    pub fn new(db: SqlitePool, clock: Arc<dyn Clock>) -> Self {
+    pub fn new(db: PgPool, clock: Arc<dyn Clock>) -> Self {
         Self { db, clock }
     }
 
@@ -110,7 +110,7 @@ impl ConversationStore {
         let created_at = self.clock.now();
         sqlx::query(
             "INSERT INTO messages (id, role, content, tool_calls_json, tool_call_id, tool_name, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?)",
+             VALUES ($1, $2, $3, $4, $5, $6, $7)",
         )
         .bind(&id)
         .bind(msg.role.as_str())
@@ -135,15 +135,15 @@ impl ConversationStore {
 
     /// The most recent `limit` messages, oldest first.
     pub async fn recent(&self, limit: u32) -> Result<Vec<StoredMessage>, CoreError> {
-        // SQLite has no offset-from-end syntax, so take the last N by ROWID (SQLite's
-        // implicit insertion-order key) in a subquery, then re-sort ascending.
+        // Take the last N by `seq` (the insertion-order identity column) in a subquery, then
+        // re-sort ascending.
         let rows: Vec<MessageRow> = sqlx::query_as(
                 "SELECT id, role, content, tool_calls_json, tool_call_id, tool_name, created_at FROM (
-                     SELECT rowid, id, role, content, tool_calls_json, tool_call_id, tool_name, created_at
-                     FROM messages ORDER BY rowid DESC LIMIT ?
-                 ) ORDER BY rowid ASC",
+                     SELECT seq, id, role, content, tool_calls_json, tool_call_id, tool_name, created_at
+                     FROM messages ORDER BY seq DESC LIMIT $1
+                 ) recent ORDER BY seq ASC",
             )
-            .bind(limit)
+            .bind(i64::from(limit))
             .fetch_all(&self.db)
             .await?;
 
@@ -157,11 +157,11 @@ impl ConversationStore {
     pub async fn recent_visible(&self, limit: u32) -> Result<Vec<StoredMessage>, CoreError> {
         let rows: Vec<MessageRow> = sqlx::query_as(
                 "SELECT id, role, content, tool_calls_json, tool_call_id, tool_name, created_at FROM (
-                     SELECT rowid, id, role, content, tool_calls_json, tool_call_id, tool_name, created_at
-                     FROM messages WHERE role != 'tool' ORDER BY rowid DESC LIMIT ?
-                 ) ORDER BY rowid ASC",
+                     SELECT seq, id, role, content, tool_calls_json, tool_call_id, tool_name, created_at
+                     FROM messages WHERE role != 'tool' ORDER BY seq DESC LIMIT $1
+                 ) recent ORDER BY seq ASC",
             )
-            .bind(limit)
+            .bind(i64::from(limit))
             .fetch_all(&self.db)
             .await?;
 
@@ -241,7 +241,7 @@ mod tests {
         }
     }
 
-    async fn store() -> (ConversationStore, tempfile::TempDir) {
+    async fn store() -> (ConversationStore, crate::db::TestDb) {
         let (pool, dir) = crate::db::test_pool().await;
         (
             ConversationStore::new(pool, Arc::new(crate::clock::FixedClock::new(Utc::now()))),

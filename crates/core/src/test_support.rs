@@ -20,18 +20,18 @@ use crate::profile::ProfileService;
 use crate::settings::Settings;
 use crate::usage::DbUsageSink;
 
-/// A [`PluginContext`] on an isolated temp-dir database, with every LLM role bound to `mock`
-/// and "now" controlled by `clock`. Keep the value alive while the context is in use: dropping
-/// `dir` deletes the database.
+/// A [`PluginContext`] on an isolated test schema, with every LLM role bound to `mock` and
+/// "now" controlled by `clock`. Keep the value alive while the context is in use: dropping
+/// `db` drops the schema.
 pub struct TestEnv {
     pub ctx: PluginContext,
     pub mock: Arc<MockChatModel>,
     pub clock: Arc<FixedClock>,
-    pub dir: tempfile::TempDir,
+    pub db: crate::db::TestDb,
 }
 
 pub async fn env() -> TestEnv {
-    let (db, dir) = crate::db::test_pool().await;
+    let (db, test_db) = crate::db::test_pool().await;
     let clock = Arc::new(FixedClock::new(Utc::now()));
     let dyn_clock: Arc<dyn Clock> = clock.clone();
     let settings = Settings::new(db.clone());
@@ -77,12 +77,12 @@ pub async fn env() -> TestEnv {
         ctx,
         mock,
         clock,
-        dir,
+        db: test_db,
     }
 }
 
 /// Shorthand for tests that don't need to move the clock.
-pub async fn context() -> (PluginContext, Arc<MockChatModel>, tempfile::TempDir) {
+pub async fn context() -> (PluginContext, Arc<MockChatModel>, crate::db::TestDb) {
     let env = env().await;
-    (env.ctx, env.mock, env.dir)
+    (env.ctx, env.mock, env.db)
 }

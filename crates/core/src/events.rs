@@ -9,7 +9,7 @@ use std::sync::Arc;
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use sqlx::SqlitePool;
+use sqlx::PgPool;
 use tokio::sync::broadcast;
 use uuid::Uuid;
 
@@ -104,7 +104,7 @@ const BUS_CAPACITY: usize = 256;
 
 #[derive(Clone)]
 pub struct EventStore {
-    db: SqlitePool,
+    db: PgPool,
     clock: Arc<dyn Clock>,
     settings: Settings,
     bus: broadcast::Sender<AppEvent>,
@@ -112,7 +112,7 @@ pub struct EventStore {
 }
 
 impl EventStore {
-    pub fn new(db: SqlitePool, clock: Arc<dyn Clock>, settings: Settings) -> Self {
+    pub fn new(db: PgPool, clock: Arc<dyn Clock>, settings: Settings) -> Self {
         let (bus, _) = broadcast::channel(BUS_CAPACITY);
         let (changes, _) = broadcast::channel(BUS_CAPACITY);
         Self {
@@ -155,7 +155,7 @@ impl EventStore {
             "INSERT INTO events
                 (id, event_type, occurred_at, logical_date, payload_json, source,
                  created_at, updated_at, deleted_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)",
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULL)",
         )
         .bind(&id)
         .bind(event_type)
@@ -190,8 +190,8 @@ impl EventStore {
         let rows: Vec<(String, String, String, String, String, String)> = sqlx::query_as(
             "SELECT id, event_type, occurred_at, logical_date, payload_json, source
              FROM events
-             WHERE event_type = ? AND logical_date >= ? AND logical_date <= ? AND deleted_at IS NULL
-             ORDER BY occurred_at ASC, rowid ASC",
+             WHERE event_type = $1 AND logical_date >= $2 AND logical_date <= $3 AND deleted_at IS NULL
+             ORDER BY occurred_at ASC, seq ASC",
         )
         .bind(event_type)
         .bind(from.to_string())
@@ -206,8 +206,8 @@ impl EventStore {
         let row: Option<(String, String, String, String, String, String)> = sqlx::query_as(
             "SELECT id, event_type, occurred_at, logical_date, payload_json, source
              FROM events
-             WHERE event_type = ? AND deleted_at IS NULL
-             ORDER BY occurred_at DESC, rowid DESC LIMIT 1",
+             WHERE event_type = $1 AND deleted_at IS NULL
+             ORDER BY occurred_at DESC, seq DESC LIMIT 1",
         )
         .bind(event_type)
         .fetch_optional(&self.db)
@@ -220,7 +220,7 @@ impl EventStore {
     pub async fn get(&self, id: &str) -> Result<Option<Event>, CoreError> {
         let row: Option<(String, String, String, String, String, String)> = sqlx::query_as(
             "SELECT id, event_type, occurred_at, logical_date, payload_json, source
-             FROM events WHERE id = ? AND deleted_at IS NULL",
+             FROM events WHERE id = $1 AND deleted_at IS NULL",
         )
         .bind(id)
         .fetch_optional(&self.db)
@@ -232,7 +232,7 @@ impl EventStore {
     pub async fn soft_delete(&self, id: &str) -> Result<Event, CoreError> {
         let row: Option<(String, String, String, String, String, String)> = sqlx::query_as(
             "SELECT id, event_type, occurred_at, logical_date, payload_json, source
-             FROM events WHERE id = ? AND deleted_at IS NULL",
+             FROM events WHERE id = $1 AND deleted_at IS NULL",
         )
         .bind(id)
         .fetch_optional(&self.db)
@@ -247,7 +247,7 @@ impl EventStore {
         // event a `NotFound` instead of a second `Deleted` change.
         let now = self.clock.now().to_rfc3339();
         let result = sqlx::query(
-            "UPDATE events SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL",
+            "UPDATE events SET deleted_at = $1, updated_at = $2 WHERE id = $3 AND deleted_at IS NULL",
         )
         .bind(&now)
         .bind(&now)
@@ -286,7 +286,7 @@ mod tests {
     use super::*;
     use chrono::TimeZone;
 
-    async fn store() -> (EventStore, tempfile::TempDir) {
+    async fn store() -> (EventStore, crate::db::TestDb) {
         let (pool, dir) = crate::db::test_pool().await;
         let clock = Arc::new(crate::clock::FixedClock::new(Utc::now()));
         let settings = Settings::new(pool.clone());
