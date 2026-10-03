@@ -151,18 +151,19 @@ single-user. They never mention a user id and find their tables through `search_
 A schema alone only separates names: one DB role can still read every schema. To make the
 separation real:
 
-- Each user schema is owned by its own `NOLOGIN` role `u_<user id hex>`, with no grants to
-  anyone else.
-- The app logs in as one role that is a member of every user role with
-  `INHERIT FALSE, SET TRUE`, so it has no access to user data while acting as itself.
-- Every connection in a user's pool starts up acting as that user: `role` and `search_path` are
-  set as connection startup parameters (`DbConfig::tenant`). A startup role is also what
-  `RESET ROLE` returns to, so a stray `RESET` can't fall back to the app's role. A query bug or
-  a forged ID in a tool call then cannot read another user's data, because Postgres refuses it
-  ("permission denied"). This is worth showing for the security theme.
-- **Limit:** a connection that can run arbitrary SQL can `SET ROLE NONE` and switch into
-  another user. The app never runs model-written SQL, so this guards against application bugs,
-  not SQL injection. Closing that gap needs a separate `LOGIN` role (and password) per user.
+- Each user schema is owned by its own `LOGIN` role `u_<user id hex>`, with no grants to
+  anyone else, and every connection in that user's pool logs in as it (`DbConfig::tenant`).
+  The user role is a member of no other role, so even a connection running arbitrary SQL can't
+  `SET ROLE` or `SET SESSION AUTHORIZATION` into the app's role or another user: Postgres
+  refuses ("permission denied"), as it refuses any query naming another user's schema. This is
+  worth showing for the security theme.
+- The app's own login role creates every user role (so it holds `ADMIN` on them) but keeps no
+  `SET` membership, so it has no access to user data while acting as itself. It grants itself
+  `SET` only inside the provisioning and account-deletion transactions.
+- A user role's password is never stored: it is HMAC-SHA256 of the role name keyed by the
+  app's database URL (which carries the app's password), and Postgres receives only a SCRAM
+  verifier. No extra secret to deploy. `db::open` re-applies it on every open, which also
+  upgrades users created before this change (2026-10-03) and follows a rotated `db-password`.
 - Schema and role names come only from the generated user id, never from user input, and
   `db::open` rejects anything but `[a-z_][a-z0-9_]*`. Identifiers can't be bind parameters in
   DDL, so this is what keeps the `format!` safe.
@@ -183,8 +184,8 @@ nothing half-created):
 
 1. Validate the username and password (minimum length), insert into `auth.users`.
 2. Build the user's `CoreApp` from `DbConfig::tenant(url, "u_<id>")`. `db::open` creates the
-   role (`NOLOGIN`), grants the app role `SET` on it, creates the schema owned by it, and runs
-   core and plugin migrations as it. Idempotent, and serialized with an advisory lock.
+   role (`LOGIN`, derived password), creates the schema owned by it, and runs core and plugin
+   migrations logged in as it. Idempotent, and serialized with an advisory lock.
 3. Create a session and log the user in.
 
 `db::open` commits the role and schema in its own transaction, so a registration that fails
@@ -295,8 +296,7 @@ Menu names may differ slightly; the console search bar finds each page by name.
      goes through the Cloud SQL Auth Proxy.
    - Then create database `lifeagent` and user `lifeagent_app` with a strong password.
      Users created this way are in `cloudsqlsuperuser` and have `CREATEROLE`, which
-     registration needs. On Postgres 16+, registration must grant itself the new role
-     explicitly: `GRANT u_<id> TO lifeagent_app WITH INHERIT FALSE, SET TRUE`.
+     registration needs to create each user's own login role.
 8. **Secret Manager:** secret `db-password` with the `lifeagent_app` password, and
    `tick-token` with a long random string (e.g. `openssl rand -hex 32`) for the scheduler.
 9. **After the first deploy.**

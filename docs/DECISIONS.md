@@ -2124,8 +2124,8 @@ separation.
   (both tested). **What it doesn't:** a connection that can run arbitrary SQL can
   `SET ROLE NONE` and then `SET ROLE` into another tenant. The app never executes model-written
   SQL, so this protects against application bugs (wrong schema, forged IDs in tool calls), not
-  SQL injection. A `LOGIN` role per tenant, with a password derived from a server secret, would
-  close it; not done for the hackathon.
+  SQL injection. Closed on 2026-10-03 by a `LOGIN` role per tenant (see "Per-tenant login
+  roles" below).
 - **`db::destroy`** removes a tenant (account deletion, test cleanup): as the tenant
   (`SET LOCAL ROLE`, because the login role doesn't inherit ownership) it drops the schema with
   `CASCADE`, then drops the role using the `ADMIN` option from creation. Idempotent.
@@ -2437,3 +2437,35 @@ branch (it still exists on `phase1`).
   it; the migrated notes and dislikes stay open-ended.
 - **Error texts:** `note_empty`/`note_too_long` kept their kinds and now read as generic
   "content" messages; `preference_dates_reversed` is new.
+
+## 2026-10-03 — Per-tenant login roles
+
+Each tenant role now logs in itself, which closes the gap left on 2026-10-02: a tenant
+connection used to act as a tenant only by its startup `role`, so arbitrary SQL could
+`SET ROLE NONE` back to the shared login role and from there into any other tenant.
+
+- **Tenant connections log in as the tenant.** `db::open` connects the pool with the tenant
+  role as the user name. The tenant is a member of no role, so `SET ROLE` and
+  `SET SESSION AUTHORIZATION` to anything else get `42501` (tested against the login role and
+  another tenant). The `role` startup parameter is gone.
+- **The login role keeps no `SET` membership.** It holds `ADMIN` on every tenant it created
+  (Postgres 16+), and grants itself `SET` only inside a transaction where it needs it:
+  `CREATE SCHEMA ... AUTHORIZATION` in `provision`, and dropping the schema in `destroy`.
+  `provision` revokes the grant before committing; `destroy` drops it along with the role. The
+  revoke only removes grants made by the login role, so the `ADMIN` membership from creation,
+  whose grantor is the bootstrap superuser, stays.
+- **Passwords are derived, not stored**: hex HMAC-SHA256 of the role name keyed by the login
+  URL. Considered and rejected: a new server secret (one more Secret Manager entry and env var,
+  and no stronger, because whoever has the login credential already has `ADMIN` on every
+  tenant), and random passwords in `auth.users` (a column and plumbing for the same result).
+  If the URL has no password (local trust/peer auth), the derived password is guessable, but
+  then the login role is reachable without one anyway.
+- **Postgres gets a SCRAM-SHA-256 verifier, not the password**, so the plaintext never appears
+  in `CREATE`/`ALTER ROLE` text or in server logs (Cloud SQL logs statements on error). Built
+  from `hmac`/`sha2`/`base64`, the versions sqlx-postgres already uses, so no new crates. The
+  salt is derived too, so the verifier is deterministic. The login test runs against a server
+  that enforces passwords, so it checks the verifier.
+- **Applied on every open.** `provision` runs `ALTER ROLE ... WITH LOGIN PASSWORD` for an
+  existing role. That upgrades tenants created as `NOLOGIN` (tested from the old provisioning
+  statements) and follows a rotated `db-password`. With max instances 1, a rotation restarts
+  the only process, so no instance keeps pools using the old password.
