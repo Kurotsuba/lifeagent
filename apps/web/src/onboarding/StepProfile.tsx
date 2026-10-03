@@ -18,9 +18,11 @@ const dietaryPatterns: DietaryPattern[] = ["omnivore", "vegetarian", "vegan", "p
 interface StepProfileProps {
   draft: OnboardingDraft;
   update: (patch: Partial<OnboardingDraft>) => void;
+  /** Settings hides it: dislikes are preferences there, edited in their own section. */
+  showDislikes?: boolean;
 }
 
-export function StepProfile({ draft, update }: StepProfileProps) {
+export function StepProfile({ draft, update, showDislikes = true }: StepProfileProps) {
   return (
     <div className="space-y-5">
       <h2 className="text-lg font-semibold text-neutral-900 dark:text-neutral-50">{t.title}</h2>
@@ -121,14 +123,16 @@ export function StepProfile({ draft, update }: StepProfileProps) {
             onChange={(e) => update({ allergies: e.target.value })}
           />
         </Field>
-        <Field label={t.dislikes} hint={t.dislikesPlaceholder}>
-          <input
-            type="text"
-            className={inputClass}
-            value={draft.dislikes}
-            onChange={(e) => update({ dislikes: e.target.value })}
-          />
-        </Field>
+        {showDislikes ? (
+          <Field label={t.dislikes} hint={t.dislikesPlaceholder}>
+            <input
+              type="text"
+              className={inputClass}
+              value={draft.dislikes}
+              onChange={(e) => update({ dislikes: e.target.value })}
+            />
+          </Field>
+        ) : null}
       </div>
 
       <Field label={t.mealsPerDay}>

@@ -45,7 +45,6 @@ export function ProfileGoalSection() {
                 activityLevel: profile.activity_level,
                 dietaryPattern: profile.dietary_pattern,
                 allergies: profile.allergies.join(", "),
-                dislikes: profile.dislikes.join(", "),
                 mealsPerDay: profile.meals_per_day,
                 medicalNotes: profile.medical_notes ?? "",
               }
@@ -98,7 +97,7 @@ export function ProfileGoalSection() {
 
   return (
     <div className="space-y-8">
-      <StepProfile draft={draft} update={update} />
+      <StepProfile draft={draft} update={update} showDislikes={false} />
       <StepGoal draft={draft} update={update} />
       <div className="flex items-center gap-3">
         <button

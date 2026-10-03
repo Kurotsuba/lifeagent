@@ -25,9 +25,9 @@ use crate::db;
 use crate::error::{CoreError, ValidationRule};
 use crate::events::{AppEvent, EventChange, EventStore};
 use crate::goals::{self, GoalsService, WeightGoal};
-use crate::memory::MemoryService;
 use crate::plan::{PlanService, PlanStore, PlanTrigger, StoredPlan};
 use crate::plugin::{Plugin, PluginContext, PluginError};
+use crate::preferences::PreferenceService;
 use crate::profile::ProfileService;
 use crate::scheduler::{Scheduler, TICK_INTERVAL};
 use crate::secrets::{KeyringSecretStore, SecretKeyProvider, SecretStore};
@@ -140,7 +140,7 @@ impl CoreAppBuilder {
         let events = EventStore::new(db.clone(), self.clock.clone(), settings.clone());
         let profile = ProfileService::new(db.clone(), self.clock.clone());
         let goals = GoalsService::new(db.clone(), self.clock.clone());
-        let memory = MemoryService::new(db.clone(), self.clock.clone());
+        let preferences = PreferenceService::new(db.clone(), self.clock.clone());
         let conversation = ConversationStore::new(db.clone(), self.clock.clone());
         let plans = PlanStore::new(db.clone(), self.clock.clone());
 
@@ -165,7 +165,7 @@ impl CoreAppBuilder {
             events,
             profile,
             goals,
-            memory,
+            preferences,
             conversation,
             plans,
             planner,
@@ -298,7 +298,7 @@ struct CoreAppInner {
     events: EventStore,
     profile: ProfileService,
     goals: GoalsService,
-    memory: MemoryService,
+    preferences: PreferenceService,
     conversation: ConversationStore,
     plans: PlanStore,
     /// Shared with the tool registry, so chat, the scheduler and the shell all go through
@@ -356,8 +356,8 @@ impl CoreApp {
     pub fn secrets(&self) -> &Arc<dyn SecretStore> {
         &self.0.secrets
     }
-    pub fn memory(&self) -> &MemoryService {
-        &self.0.memory
+    pub fn preferences(&self) -> &PreferenceService {
+        &self.0.preferences
     }
     pub fn conversation(&self) -> &ConversationStore {
         &self.0.conversation
@@ -427,16 +427,18 @@ impl CoreApp {
         self.0.plans.current(date).await
     }
 
-    /// Generates a new plan version for `date` (§7.12).
+    /// Generates a new plan version for `date` (§7.12), with the user's optional `request`
+    /// for this plan only.
     pub async fn generate_plan(
         &self,
         date: NaiveDate,
         trigger: PlanTrigger,
+        request: Option<&str>,
     ) -> Result<StoredPlan, CoreError> {
         self.require_models()?;
         self.0
             .planner
-            .generate(&self.plugin_context(), date, trigger)
+            .generate(&self.plugin_context(), date, trigger, request)
             .await
     }
 
@@ -555,7 +557,7 @@ impl CoreApp {
             settings: self.0.settings.clone(),
             profile: self.0.profile.clone(),
             goals: self.0.goals.clone(),
-            memory: self.0.memory.clone(),
+            preferences: self.0.preferences.clone(),
             plans: self.0.plans.clone(),
         }
     }
@@ -1275,8 +1277,8 @@ mod tests {
             None,
             vec![ToolCall {
                 id: "call_1".into(),
-                name: "core_remember".into(),
-                arguments: serde_json::json!({"note": "不吃香菜"}),
+                name: "core_add_preference".into(),
+                arguments: serde_json::json!({"kind": "dislike", "text": "香菜", "permanent": true}),
                 provider_extra: None,
             }],
         ));
@@ -1285,8 +1287,8 @@ mod tests {
 
         let turn = app.send_message("我不吃香菜，记住").await.unwrap();
         assert_eq!(turn.reply, "记住啦");
-        assert_eq!(turn.activities, vec!["已记住：不吃香菜"]);
-        assert_eq!(app.memory().list(10).await.unwrap().len(), 1);
+        assert_eq!(turn.activities, vec!["已记住不喜欢：香菜"]);
+        assert_eq!(app.preferences().list(10).await.unwrap().len(), 1);
     }
 
     #[tokio::test]
@@ -1298,8 +1300,8 @@ mod tests {
             None,
             vec![ToolCall {
                 id: "call_1".into(),
-                name: "core_remember".into(),
-                arguments: serde_json::json!({"note": "不吃香菜"}),
+                name: "core_add_preference".into(),
+                arguments: serde_json::json!({"kind": "dislike", "text": "香菜", "permanent": true}),
                 provider_extra: Some(extra.clone()),
             }],
         ));

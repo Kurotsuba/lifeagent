@@ -8,6 +8,7 @@ use crate::context::render_plan_compact;
 use crate::events::EventSource;
 use crate::plan::{PlanService, PlanTrigger, StoredPlan};
 use crate::plugin::{PluginContext, PluginError, ToolOutput};
+use crate::preferences::{NewPreference, PreferenceKind};
 use crate::time::parse_local_datetime;
 
 pub fn specs() -> Vec<lifeagent_llm::types::ToolSpec> {
@@ -32,24 +33,53 @@ pub fn specs() -> Vec<lifeagent_llm::types::ToolSpec> {
             }),
         },
         ToolSpec {
-            name: "core_remember".into(),
-            description: "Save a durable preference or fact about the user that should \
-                influence future plans (e.g. 'no cilantro', 'weekday lunch is at the company \
-                canteen'). Do not use for one-off events."
+            name: "core_update_allergies".into(),
+            description: "Add or remove foods the user is allergic to. Use whenever the user \
+                reports an allergy (or that one is gone). Allergies are permanent hard \
+                constraints; use core_add_preference for foods they merely dislike."
                 .into(),
             parameters: json!({
                 "type": "object",
-                "required": ["note"],
-                "properties": { "note": {"type": "string"} }
+                "properties": {
+                    "add": {"type": "array", "items": {"type": "string"}},
+                    "remove": {"type": "array", "items": {"type": "string"}}
+                }
             }),
         },
         ToolSpec {
-            name: "core_forget".into(),
-            description: "Delete a previously saved memory note by its id.".into(),
+            name: "core_add_preference".into(),
+            description: "Save a preference that should shape future plans. kind \"dislike\" \
+                is one food the user doesn't want (text is the food's name, e.g. 'cilantro'); \
+                kind \"general\" is anything else (e.g. 'weekday lunch is at the company \
+                canteen', 'only convenience-store food'). valid_from/valid_until are logical \
+                dates YYYY-MM-DD, both inclusive. If the user says how long it applies \
+                (e.g. 'this week I work late'), set valid_until to match. Without valid_until \
+                it lasts one month from valid_from (default today). Set permanent: true only \
+                when the user says it always applies (e.g. 'I never eat cilantro'). Text at \
+                most 300 characters. Not for allergies (core_update_allergies) or one-off changes to \
+                a single plan (core_revise_plan)."
+                .into(),
             parameters: json!({
                 "type": "object",
-                "required": ["note_id"],
-                "properties": { "note_id": {"type": "string"} }
+                "required": ["kind", "text"],
+                "properties": {
+                    "kind": {"type": "string", "enum": ["dislike", "general"]},
+                    "text": {"type": "string"},
+                    "valid_from": {"type": "string"},
+                    "valid_until": {"type": "string"},
+                    "permanent": {"type": "boolean"}
+                }
+            }),
+        },
+        ToolSpec {
+            name: "core_remove_preference".into(),
+            description: "Delete a saved preference by its id, e.g. when the user says it no \
+                longer applies. To change one, remove it and add the new version."
+                .into(),
+            parameters: json!({
+                "type": "object",
+                "required": ["preference_id"],
+                "properties": { "preference_id": {"type": "string"} }
             }),
         },
         ToolSpec {
@@ -66,12 +96,16 @@ pub fn specs() -> Vec<lifeagent_llm::types::ToolSpec> {
         ToolSpec {
             name: "core_generate_plan".into(),
             description: "Generate a new plan for a day (`date` YYYY-MM-DD, default \
-                tomorrow). Only when the user asks for a plan; it takes a while. To change \
-                an existing plan, use core_revise_plan instead."
+                tomorrow). Only when the user asks for a plan; it takes a while. Pass any \
+                wishes for this plan only as `request`. To change an existing plan, use \
+                core_revise_plan instead."
                 .into(),
             parameters: json!({
                 "type": "object",
-                "properties": { "date": {"type": "string"} }
+                "properties": {
+                    "date": {"type": "string"},
+                    "request": {"type": "string"}
+                }
             }),
         },
         ToolSpec {
@@ -117,8 +151,9 @@ pub async fn call(
 ) -> Result<ToolOutput, PluginError> {
     match name {
         "core_log_weight" => log_weight(ctx, args).await,
-        "core_remember" => remember(ctx, args).await,
-        "core_forget" => forget(ctx, args).await,
+        "core_update_allergies" => update_allergies(ctx, args).await,
+        "core_add_preference" => add_preference(ctx, args).await,
+        "core_remove_preference" => remove_preference(ctx, args).await,
         "core_get_plan" => get_plan(ctx, args).await,
         "core_generate_plan" => generate_plan(ctx, planner, args).await,
         "core_revise_plan" => revise_plan(ctx, planner, args).await,
@@ -185,12 +220,18 @@ async fn get_plan(ctx: &PluginContext, args: Value) -> Result<ToolOutput, Plugin
     })
 }
 
+#[derive(Deserialize)]
+struct GenerateArgs {
+    date: Option<String>,
+    request: Option<String>,
+}
+
 async fn generate_plan(
     ctx: &PluginContext,
     planner: &PlanService,
     args: Value,
 ) -> Result<ToolOutput, PluginError> {
-    let args: DateArgs =
+    let args: GenerateArgs =
         serde_json::from_value(args).map_err(|e| PluginError::InvalidArgs(e.to_string()))?;
     let date = match args.date.as_deref() {
         Some(s) => parse_date(s)?,
@@ -200,7 +241,9 @@ async fn generate_plan(
             .succ_opt()
             .ok_or_else(|| PluginError::Other("date out of range".into()))?,
     };
-    let plan = planner.generate(ctx, date, PlanTrigger::Manual).await?;
+    let plan = planner
+        .generate(ctx, date, PlanTrigger::Manual, args.request.as_deref())
+        .await?;
     Ok(ToolOutput {
         content: plan_json(&plan),
         summary: format!("已生成 {date} 的计划（第 {} 版）", plan.version),
@@ -267,32 +310,100 @@ async fn log_weight(ctx: &PluginContext, args: Value) -> Result<ToolOutput, Plug
 }
 
 #[derive(Deserialize)]
-struct RememberArgs {
-    note: String,
+struct UpdateAllergiesArgs {
+    #[serde(default)]
+    add: Vec<String>,
+    #[serde(default)]
+    remove: Vec<String>,
 }
 
-async fn remember(ctx: &PluginContext, args: Value) -> Result<ToolOutput, PluginError> {
-    let args: RememberArgs =
+/// Case-insensitive, so "Peanut" and "peanut" are one allergy.
+fn same_term(a: &str, b: &str) -> bool {
+    a.trim().to_lowercase() == b.trim().to_lowercase()
+}
+
+async fn update_allergies(ctx: &PluginContext, args: Value) -> Result<ToolOutput, PluginError> {
+    let args: UpdateAllergiesArgs =
         serde_json::from_value(args).map_err(|e| PluginError::InvalidArgs(e.to_string()))?;
-    let note = ctx.memory.add(&args.note).await?;
+    let Some(mut profile) = ctx.profile.get().await? else {
+        return Err(PluginError::NotFound(
+            "profile (the user hasn't set one up yet)".into(),
+        ));
+    };
+
+    let mut not_found = Vec::new();
+    for term in &args.remove {
+        let before = profile.allergies.len();
+        profile.allergies.retain(|a| !same_term(a, term));
+        if profile.allergies.len() == before {
+            not_found.push(term.trim().to_string());
+        }
+    }
+    for term in &args.add {
+        let term = term.trim();
+        if !term.is_empty() && !profile.allergies.iter().any(|a| same_term(a, term)) {
+            profile.allergies.push(term.to_string());
+        }
+    }
+    ctx.profile.set(&profile).await?;
+
     Ok(ToolOutput {
-        content: json!({"note_id": note.id}),
-        summary: format!("已记住：{}", note.note),
+        content: json!({"allergies": profile.allergies, "not_found": not_found}),
+        summary: if profile.allergies.is_empty() {
+            "已更新过敏食物：无".to_string()
+        } else {
+            format!("已更新过敏食物：{}", profile.allergies.join("、"))
+        },
     })
 }
 
 #[derive(Deserialize)]
-struct ForgetArgs {
-    note_id: String,
+struct AddPreferenceArgs {
+    kind: PreferenceKind,
+    text: String,
+    valid_from: Option<String>,
+    valid_until: Option<String>,
+    #[serde(default)]
+    permanent: bool,
 }
 
-async fn forget(ctx: &PluginContext, args: Value) -> Result<ToolOutput, PluginError> {
-    let args: ForgetArgs =
+async fn add_preference(ctx: &PluginContext, args: Value) -> Result<ToolOutput, PluginError> {
+    let args: AddPreferenceArgs =
         serde_json::from_value(args).map_err(|e| PluginError::InvalidArgs(e.to_string()))?;
-    ctx.memory.forget(&args.note_id).await?;
+    let new = NewPreference {
+        kind: args.kind,
+        text: args.text,
+        valid_from: args.valid_from.as_deref().map(parse_date).transpose()?,
+        valid_until: args.valid_until.as_deref().map(parse_date).transpose()?,
+        permanent: args.permanent,
+    };
+    let preference = ctx.preferences.add(&new, ctx.today().await?).await?;
+    let kind = match preference.kind {
+        PreferenceKind::Dislike => "不喜欢",
+        PreferenceKind::General => "偏好",
+    };
     Ok(ToolOutput {
-        content: json!({"note_id": args.note_id}),
-        summary: "已忘记该记忆".to_string(),
+        content: json!({"preference_id": preference.id}),
+        summary: format!(
+            "已记住{kind}：{}{}",
+            preference.text,
+            preference.validity_label()
+        ),
+    })
+}
+
+#[derive(Deserialize)]
+struct RemovePreferenceArgs {
+    preference_id: String,
+}
+
+async fn remove_preference(ctx: &PluginContext, args: Value) -> Result<ToolOutput, PluginError> {
+    let args: RemovePreferenceArgs =
+        serde_json::from_value(args).map_err(|e| PluginError::InvalidArgs(e.to_string()))?;
+    ctx.preferences.remove(&args.preference_id).await?;
+    Ok(ToolOutput {
+        content: json!({"preference_id": args.preference_id}),
+        summary: "已删除该偏好".to_string(),
     })
 }
 
@@ -466,27 +577,146 @@ mod tests {
         ));
     }
 
-    #[tokio::test]
-    async fn remember_then_forget_round_trips() {
-        let (ctx, _mock, _dir) = crate::test_support::context().await;
-        let out = call(&ctx, "core_remember", json!({"note": "不吃香菜"}))
-            .await
-            .unwrap();
-        let note_id = out.content["note_id"].as_str().unwrap().to_string();
-
-        assert_eq!(ctx.memory.list(50).await.unwrap().len(), 1);
-
-        call(&ctx, "core_forget", json!({"note_id": note_id}))
-            .await
-            .unwrap();
-        assert_eq!(ctx.memory.list(50).await.unwrap().len(), 0);
+    async fn set_profile(ctx: &PluginContext, allergies: &[&str]) {
+        use crate::profile::{ActivityLevel, DietaryPattern, Profile, Sex};
+        let profile = Profile {
+            display_name: None,
+            sex: Sex::Female,
+            birth_date: NaiveDate::from_ymd_opt(1996, 5, 1).unwrap(),
+            height_cm: 165.0,
+            activity_level: ActivityLevel::Moderate,
+            dietary_pattern: DietaryPattern::Omnivore,
+            allergies: allergies.iter().map(|a| a.to_string()).collect(),
+            medical_notes: None,
+            meals_per_day: 3,
+        };
+        ctx.profile.set(&profile).await.unwrap();
     }
 
     #[tokio::test]
-    async fn forget_of_unknown_note_is_not_found() {
+    async fn update_allergies_adds_without_duplicates_and_removes() {
+        let (ctx, _mock, _dir) = crate::test_support::context().await;
+        set_profile(&ctx, &["Peanut"]).await;
+
+        let out = call(
+            &ctx,
+            "core_update_allergies",
+            json!({"add": ["虾", "peanut", " "], "remove": ["牛奶"]}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(out.content["allergies"], json!(["Peanut", "虾"]));
+        assert_eq!(out.content["not_found"], json!(["牛奶"]));
+
+        call(&ctx, "core_update_allergies", json!({"remove": ["PEANUT"]}))
+            .await
+            .unwrap();
+        let profile = ctx.profile.get().await.unwrap().unwrap();
+        assert_eq!(profile.allergies, vec!["虾"]);
+    }
+
+    #[tokio::test]
+    async fn update_allergies_without_a_profile_is_not_found() {
         let (ctx, _mock, _dir) = crate::test_support::context().await;
         assert!(matches!(
-            call(&ctx, "core_forget", json!({"note_id": "nope"})).await,
+            call(&ctx, "core_update_allergies", json!({"add": ["虾"]})).await,
+            Err(PluginError::NotFound(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn add_then_remove_preference_round_trips() {
+        let (ctx, _mock, _dir) = crate::test_support::context().await;
+        let out = call(
+            &ctx,
+            "core_add_preference",
+            json!({
+                "kind": "general",
+                "text": "这周只能吃便利店",
+                "valid_until": "2026-10-09"
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            out.summary,
+            "已记住偏好：这周只能吃便利店 (until 2026-10-09)"
+        );
+        let id = out.content["preference_id"].as_str().unwrap().to_string();
+
+        let saved = ctx.preferences.list(50).await.unwrap();
+        assert_eq!(saved.len(), 1);
+        assert_eq!(saved[0].valid_until, NaiveDate::from_ymd_opt(2026, 10, 9));
+
+        call(&ctx, "core_remove_preference", json!({"preference_id": id}))
+            .await
+            .unwrap();
+        assert!(ctx.preferences.list(50).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn add_preference_defaults_to_one_month_unless_permanent() {
+        let (ctx, _mock, _dir) = crate::test_support::context().await;
+        let today = ctx.today().await.unwrap();
+
+        call(
+            &ctx,
+            "core_add_preference",
+            json!({"kind": "general", "text": "多吃鱼"}),
+        )
+        .await
+        .unwrap();
+        call(
+            &ctx,
+            "core_add_preference",
+            json!({"kind": "dislike", "text": "香菜", "permanent": true}),
+        )
+        .await
+        .unwrap();
+
+        let saved = ctx.preferences.list(50).await.unwrap();
+        assert_eq!(saved[0].text, "香菜");
+        assert_eq!(saved[0].valid_until, None);
+        assert_eq!(saved[1].text, "多吃鱼");
+        assert_eq!(
+            saved[1].valid_until,
+            crate::preferences::default_valid_until(today)
+        );
+    }
+
+    #[tokio::test]
+    async fn add_preference_rejects_bad_kinds_and_dates() {
+        let (ctx, _mock, _dir) = crate::test_support::context().await;
+        assert!(matches!(
+            call(
+                &ctx,
+                "core_add_preference",
+                json!({"kind": "allergy", "text": "虾"})
+            )
+            .await,
+            Err(PluginError::InvalidArgs(_))
+        ));
+        assert!(matches!(
+            call(
+                &ctx,
+                "core_add_preference",
+                json!({"kind": "dislike", "text": "香菜", "valid_until": "下周"})
+            )
+            .await,
+            Err(PluginError::InvalidArgs(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn remove_of_unknown_preference_is_not_found() {
+        let (ctx, _mock, _dir) = crate::test_support::context().await;
+        assert!(matches!(
+            call(
+                &ctx,
+                "core_remove_preference",
+                json!({"preference_id": "nope"})
+            )
+            .await,
             Err(PluginError::NotFound(_))
         ));
     }

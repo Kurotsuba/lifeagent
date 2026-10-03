@@ -1,10 +1,16 @@
 import { useState } from "react";
-import { completeOnboarding, logWeight, saveProfile, saveWeightGoal } from "../api/commands";
+import {
+  addPreference,
+  completeOnboarding,
+  logWeight,
+  saveProfile,
+  saveWeightGoal,
+} from "../api/commands";
 import { commandErrorMessage } from "../api/types";
 import { primaryButtonClass, secondaryButtonClass } from "../components/buttonStyles";
 import { LanguageSelect } from "../components/LanguageSelect";
 import { strings } from "../i18n";
-import { buildGoal, buildProfile, defaultDraft, type OnboardingDraft } from "./draft";
+import { buildGoal, buildProfile, defaultDraft, splitList, type OnboardingDraft } from "./draft";
 import { isStepProfileValid, StepProfile } from "./StepProfile";
 import { StepGoal } from "./StepGoal";
 
@@ -27,6 +33,8 @@ export function Onboarding({ onComplete }: OnboardingProps) {
   // The weight already logged by an earlier, partly-failed 完成 attempt — so retrying (e.g.
   // after `save_weight_goal` rejected the goal) doesn't log the same weight a second time.
   const [loggedWeightKg, setLoggedWeightKg] = useState<number | null>(null);
+  // Likewise for the dislikes, saved as preferences: a retry must not add them twice.
+  const [dislikesSaved, setDislikesSaved] = useState(false);
 
   const update = (patch: Partial<OnboardingDraft>) => setDraft((d) => ({ ...d, ...patch }));
 
@@ -39,6 +47,19 @@ export function Onboarding({ onComplete }: OnboardingProps) {
       if (weightKg !== loggedWeightKg) {
         await logWeight(weightKg);
         setLoggedWeightKg(weightKg);
+      }
+      if (!dislikesSaved) {
+        for (const text of splitList(draft.dislikes)) {
+          // Dislikes asked for at sign-up are lasting, unlike the one-month default.
+          await addPreference({
+            kind: "dislike",
+            text,
+            valid_from: null,
+            valid_until: null,
+            permanent: true,
+          });
+        }
+        setDislikesSaved(true);
       }
       await saveWeightGoal(buildGoal(draft));
       await completeOnboarding();

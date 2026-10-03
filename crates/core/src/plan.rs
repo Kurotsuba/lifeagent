@@ -16,6 +16,7 @@ use crate::clock::Clock;
 use crate::error::{CoreError, ValidationRule};
 use crate::events::AppEvent;
 use crate::plugin::{PlanInput, PlanSection, Plugin, PluginContext};
+use crate::preferences::PreferenceKind;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -218,13 +219,13 @@ impl PlanStore {
 }
 
 /// §9.4, up to the per-section parts. Placeholders: `{user_language}`, `{plan_date}`,
-/// `{weekday}`, `{profile_summary}`, `{memory_notes}`.
+/// `{weekday}`, `{profile_summary}`, `{preferences}`.
 const PLANNER_HEADER: &str = r#"You create tomorrow's plan for the user. The plan has one section per domain below. Each
 section must satisfy its targets and constraints and match its output schema exactly.
 
 General rules:
-- Propose realistic, easy-to-prepare meals that fit the user's habits, preferences and memory
-  notes. Prefer common foods available in ordinary supermarkets and canteens.
+- Propose realistic, easy-to-prepare meals that fit the user's habits and preferences. Prefer
+  common foods available in ordinary supermarkets and canteens.
 - Use generic food names in the user's language, with grams for every item as eaten.
 - Hit the numeric targets; the app recomputes nutrition with its own food table and will
   reject plans that miss them.
@@ -242,8 +243,8 @@ Date: {plan_date} ({weekday})
 ## User profile
 {profile_summary}
 
-## Memory notes
-{memory_notes}"#;
+## Preferences in effect on {plan_date}
+{preferences}"#;
 
 /// §9.4, once per section. Placeholders: `{section}`, `{targets_json}`, `{brief}`,
 /// `{output_schema_json}`.
@@ -259,6 +260,12 @@ const PLANNER_REVISION: &str = r#"## Current plan (version {version})
 ## User's change request
 {instruction}
 Keep everything not affected by the request as close to the current plan as possible."#;
+
+/// The user's optional wishes for a newly generated plan (the Today tab's request box).
+/// Placeholder: `{request}`.
+const PLANNER_REQUEST: &str = r#"## User's request for this plan
+{request}
+Follow it as long as allergies stay excluded and the targets are met."#;
 
 /// §7.12 step 6: prefix for violations still unmet after the retry, moved into warnings.
 const UNMET_PREFIX: &str = "未完全满足：";
@@ -289,14 +296,17 @@ impl PlanService {
         }
     }
 
-    /// Generates a new plan version for `date` (§7.12).
+    /// Generates a new plan version for `date` (§7.12). `request` is the user's optional
+    /// wish for this plan only; it is stored as the version's `instruction`.
     pub async fn generate(
         &self,
         ctx: &PluginContext,
         date: NaiveDate,
         trigger: PlanTrigger,
+        request: Option<&str>,
     ) -> Result<StoredPlan, CoreError> {
-        self.run(ctx, date, trigger, None).await
+        let request = request.map(str::trim).filter(|r| !r.is_empty());
+        self.run(ctx, date, trigger, None, request).await
     }
 
     /// Revises the current plan for `date` following the user's `instruction`. Stored as a
@@ -311,7 +321,7 @@ impl PlanService {
         if instruction.is_empty() {
             return Err(CoreError::InvalidInput(ValidationRule::InstructionEmpty));
         }
-        self.run(ctx, date, PlanTrigger::Revision, Some(instruction))
+        self.run(ctx, date, PlanTrigger::Revision, Some(instruction), None)
             .await
     }
 
@@ -321,6 +331,7 @@ impl PlanService {
         date: NaiveDate,
         trigger: PlanTrigger,
         instruction: Option<&str>,
+        request: Option<&str>,
     ) -> Result<StoredPlan, CoreError> {
         let _guard = self.lock.lock().await;
 
@@ -348,7 +359,14 @@ impl PlanService {
             return Err(CoreError::NothingToPlan);
         }
 
-        let prompt = planner_prompt(ctx, date, &inputs, previous.as_ref().zip(instruction)).await?;
+        let prompt = planner_prompt(
+            ctx,
+            date,
+            &inputs,
+            previous.as_ref().zip(instruction),
+            request,
+        )
+        .await?;
         let mut messages = vec![Message::User { content: prompt }];
         let mut output: PlannerOutput =
             complete_json(&ctx.llm, Role::Planner, messages.clone()).await?;
@@ -392,7 +410,7 @@ impl PlanService {
 
         let plan = ctx
             .plans
-            .insert(date, trigger, instruction, &content, &warnings)
+            .insert(date, trigger, instruction.or(request), &content, &warnings)
             .await?;
         ctx.events.publish(AppEvent::PlanReady {
             date,
@@ -408,19 +426,23 @@ async fn planner_prompt(
     date: NaiveDate,
     inputs: &[(Arc<dyn Plugin>, PlanInput)],
     revision: Option<(&StoredPlan, &str)>,
+    request: Option<&str>,
 ) -> Result<String, CoreError> {
     let profile = ctx.profile.get().await?;
     let latest_weight = ctx.events.latest("body.weight_logged").await?;
     let profile_summary =
         crate::context::render_profile_summary(profile.as_ref(), latest_weight.as_ref(), date);
     let language = ctx.settings.language().await?;
-    let notes = ctx.memory.list(50).await?;
-    let memory_notes = if notes.is_empty() {
+    let preferences = ctx.preferences.active_on(date, 50).await?;
+    let preferences = if preferences.is_empty() {
         "(none)".to_string()
     } else {
-        notes
+        preferences
             .iter()
-            .map(|n| format!("- {}", n.note))
+            .map(|p| match p.kind {
+                PreferenceKind::Dislike => format!("- dislikes {}", p.text),
+                PreferenceKind::General => format!("- {}", p.text),
+            })
             .collect::<Vec<_>>()
             .join("\n")
     };
@@ -432,7 +454,7 @@ async fn planner_prompt(
         .replace("{plan_date}", &date.to_string())
         .replace("{weekday}", &date.format("%A").to_string())
         .replace("{profile_summary}", &profile_summary)
-        .replace("{memory_notes}", &memory_notes)];
+        .replace("{preferences}", &preferences)];
     for (_, input) in inputs {
         parts.push(
             PLANNER_SECTION
@@ -452,6 +474,9 @@ async fn planner_prompt(
                 )
                 .replace("{instruction}", instruction),
         );
+    }
+    if let Some(request) = request {
+        parts.push(PLANNER_REQUEST.replace("{request}", request));
     }
     Ok(parts.join("\n\n"))
 }
@@ -607,7 +632,7 @@ mod tests {
         ));
 
         let plan = service()
-            .generate(&ctx, DAY, PlanTrigger::Manual)
+            .generate(&ctx, DAY, PlanTrigger::Manual, None)
             .await
             .unwrap();
 
@@ -644,7 +669,7 @@ mod tests {
         }
 
         let plan = service()
-            .generate(&ctx, DAY, PlanTrigger::Schedule)
+            .generate(&ctx, DAY, PlanTrigger::Schedule, None)
             .await
             .unwrap();
 
@@ -662,7 +687,7 @@ mod tests {
         ));
 
         service()
-            .generate(&ctx, DAY, PlanTrigger::Manual)
+            .generate(&ctx, DAY, PlanTrigger::Manual, None)
             .await
             .unwrap();
 
@@ -674,7 +699,7 @@ mod tests {
     async fn no_plan_inputs_is_nothing_to_plan() {
         let (ctx, mock, _dir) = crate::test_support::context().await;
         let err = PlanService::new(vec![])
-            .generate(&ctx, DAY, PlanTrigger::Manual)
+            .generate(&ctx, DAY, PlanTrigger::Manual, None)
             .await
             .unwrap_err();
         assert!(matches!(err, CoreError::NothingToPlan));
@@ -690,7 +715,7 @@ mod tests {
         ));
 
         service()
-            .generate(&ctx, DAY, PlanTrigger::Manual)
+            .generate(&ctx, DAY, PlanTrigger::Manual, None)
             .await
             .unwrap();
 
@@ -699,6 +724,81 @@ mod tests {
         assert!(prompt.contains("Date: 2026-09-25 (Friday)"));
         assert!(prompt.contains("## Section \"test\"\nTargets: {\"x\":1}\nBrief:\ntest brief"));
         assert!(!prompt.contains("## Current plan"));
+    }
+
+    #[tokio::test]
+    async fn request_reaches_the_prompt_and_is_stored_as_the_instruction() {
+        let (ctx, mock, _dir) = crate::test_support::context().await;
+        mock.push_response(planner_reply(
+            "s",
+            serde_json::json!({"test": {"ok": true}}),
+        ));
+
+        let plan = service()
+            .generate(
+                &ctx,
+                DAY,
+                PlanTrigger::Manual,
+                Some("  明天加班，只能吃便利店  "),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(plan.instruction.as_deref(), Some("明天加班，只能吃便利店"));
+        let prompt = last_user_message(&mock.received_requests()[0]);
+        assert!(prompt.contains("## User's request for this plan\n明天加班，只能吃便利店"));
+    }
+
+    #[tokio::test]
+    async fn a_blank_request_is_ignored() {
+        let (ctx, mock, _dir) = crate::test_support::context().await;
+        mock.push_response(planner_reply(
+            "s",
+            serde_json::json!({"test": {"ok": true}}),
+        ));
+
+        let plan = service()
+            .generate(&ctx, DAY, PlanTrigger::Manual, Some("   "))
+            .await
+            .unwrap();
+
+        assert_eq!(plan.instruction, None);
+        let prompt = last_user_message(&mock.received_requests()[0]);
+        assert!(!prompt.contains("## User's request"));
+    }
+
+    #[tokio::test]
+    async fn prompt_lists_only_preferences_in_effect_on_the_plan_date() {
+        use crate::preferences::NewPreference;
+        let (ctx, mock, _dir) = crate::test_support::context().await;
+        let add = |kind, text: &str, until: Option<NaiveDate>| NewPreference {
+            kind,
+            text: text.into(),
+            valid_from: None,
+            valid_until: until,
+            permanent: until.is_none(),
+        };
+        for new in [
+            add(PreferenceKind::Dislike, "香菜", None),
+            add(PreferenceKind::General, "只能吃便利店", DAY.succ_opt()),
+            add(PreferenceKind::General, "已过期", DAY.pred_opt()),
+        ] {
+            ctx.preferences.add(&new, DAY).await.unwrap();
+        }
+        mock.push_response(planner_reply(
+            "s",
+            serde_json::json!({"test": {"ok": true}}),
+        ));
+
+        service()
+            .generate(&ctx, DAY, PlanTrigger::Manual, None)
+            .await
+            .unwrap();
+
+        let prompt = last_user_message(&mock.received_requests()[0]);
+        assert!(prompt
+            .contains("## Preferences in effect on 2026-09-25\n- 只能吃便利店\n- dislikes 香菜"));
+        assert!(!prompt.contains("已过期"));
     }
 
     #[tokio::test]
@@ -714,7 +814,7 @@ mod tests {
         ));
         let service = service();
         service
-            .generate(&ctx, DAY, PlanTrigger::Manual)
+            .generate(&ctx, DAY, PlanTrigger::Manual, None)
             .await
             .unwrap();
 
@@ -749,7 +849,6 @@ mod tests {
                 activity_level: crate::profile::ActivityLevel::Light,
                 dietary_pattern: crate::profile::DietaryPattern::Omnivore,
                 allergies: vec![],
-                dislikes: vec![],
                 medical_notes: Some("2 型糖尿病".into()),
                 meals_per_day: 3,
             })
@@ -761,7 +860,7 @@ mod tests {
         ));
 
         let plan = service()
-            .generate(&ctx, DAY, PlanTrigger::Manual)
+            .generate(&ctx, DAY, PlanTrigger::Manual, None)
             .await
             .unwrap();
 

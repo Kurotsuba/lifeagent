@@ -144,7 +144,6 @@ mod tests {
             activity_level,
             dietary_pattern: DietaryPattern::Omnivore,
             allergies: vec![],
-            dislikes: vec![],
             medical_notes: None,
             meals_per_day: 3,
         }

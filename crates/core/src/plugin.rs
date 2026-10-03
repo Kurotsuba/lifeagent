@@ -17,8 +17,8 @@ use crate::clock::Clock;
 use crate::error::CoreError;
 use crate::events::{Event, EventStore};
 use crate::goals::GoalsService;
-use crate::memory::MemoryService;
 use crate::plan::PlanStore;
+use crate::preferences::PreferenceService;
 use crate::profile::ProfileService;
 use crate::settings::Settings;
 
@@ -54,7 +54,7 @@ pub struct PluginContext {
     /// this one field.
     pub profile: ProfileService,
     pub goals: GoalsService,
-    pub memory: MemoryService,
+    pub preferences: PreferenceService,
     /// Read access to stored plans (plan-vs-actual, context snippets). Not in §7.6's field
     /// list; see M4 in `docs/DECISIONS.md`.
     pub plans: PlanStore,
@@ -342,7 +342,7 @@ mod tests {
             PluginError::from(CoreError::Validation("x".into())),
             PluginError::InvalidArgs(_)
         ));
-        // A named rule (e.g. `core_remember`/`core_revise_plan`'s empty-string checks) must stay
+        // A named rule (e.g. `core_add_preference`/`core_revise_plan`'s empty-string checks) must stay
         // in the same `InvalidArgs` bucket as `Validation`, not fall into `Other`'s generic
         // "internal error" — the model needs the detail to retry or explain itself to the user.
         assert!(matches!(

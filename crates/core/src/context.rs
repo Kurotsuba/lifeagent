@@ -9,9 +9,9 @@ use crate::error::CoreError;
 use crate::events::Event;
 use crate::goals::{GoalDirection, WeightGoal};
 use crate::i18n::Language;
-use crate::memory::MemoryNote;
 use crate::plan::StoredPlan;
 use crate::plugin::{Plugin, PluginContext};
+use crate::preferences::{Preference, PreferenceKind};
 use crate::profile::Profile;
 use crate::time::age_years;
 
@@ -34,7 +34,12 @@ Rules:
   and tool results from an earlier logical date describe that day, not today. A report about
   today is new, not a correction of an earlier day's entry, unless the user explicitly says
   they are correcting that day. Do not repeat the tag in your replies.
-- Save durable preferences with core_remember; do not save one-off events.
+- When the user tells you about an allergy, update it with core_update_allergies. Save foods
+  they dislike and other wishes that should shape future plans with core_add_preference. If
+  the user says how long it lasts (\"this week\", \"until the 15th\"), set valid_until (and
+  valid_from if it starts later) as logical dates; otherwise it lasts one month, or set
+  permanent if the user says it always applies. When one stops applying, remove it with
+  core_remove_preference. Do not save one-off events.
 - To change a plan, call core_revise_plan with the user's request as the instruction.
 - Be brief and warm. Always reply in {user_language}, the language of the user's app, even
   when the user writes in another language.
@@ -55,10 +60,10 @@ Current time: {now_local} ({weekday}). Logical date: {logical_date}.
 ## Plans
 {plans}
 
-## Memory notes
-{memory_notes}";
+## Preferences
+{preferences}";
 
-/// Target size for the built prompt (§7.9); memory notes are truncated first if exceeded.
+/// Target size for the built prompt (§7.9); preferences are truncated first if exceeded.
 const TARGET_TOKENS: usize = 2500;
 
 const NO_PLANS: &str = "No plan for today or tomorrow yet.";
@@ -115,8 +120,8 @@ pub async fn build_system_prompt(
         plans.join("\n\n")
     };
 
-    let mut notes = ctx.memory.list(50).await?;
-    let render = |notes: &[MemoryNote]| -> String {
+    let mut notes = ctx.preferences.current(today, 50).await?;
+    let render = |notes: &[Preference]| -> String {
         render_template(
             now_local,
             today,
@@ -131,7 +136,7 @@ pub async fn build_system_prompt(
 
     let mut prompt = render(&notes);
     while estimate_tokens(&prompt) > TARGET_TOKENS && !notes.is_empty() {
-        // Notes are newest-first; drop the oldest (last) one first.
+        // Preferences are newest-first; drop the oldest (last) one first.
         notes.pop();
         prompt = render(&notes);
     }
@@ -149,14 +154,20 @@ fn render_template(
     goals_text: &str,
     plugin_snippets: &str,
     plans: &str,
-    notes: &[MemoryNote],
+    notes: &[Preference],
 ) -> String {
-    let memory_notes = if notes.is_empty() {
+    let preferences = if notes.is_empty() {
         "(none)".to_string()
     } else {
         notes
             .iter()
-            .map(|n| format!("- [{}] {}", n.id, n.note))
+            .map(|p| {
+                let kind = match p.kind {
+                    PreferenceKind::Dislike => "dislikes ",
+                    PreferenceKind::General => "",
+                };
+                format!("- [{}] {kind}{}{}", p.id, p.text, p.validity_label())
+            })
             .collect::<Vec<_>>()
             .join("\n")
     };
@@ -173,7 +184,7 @@ fn render_template(
         .replace("{goals}", goals_text)
         .replace("{plugin_snippets}", plugin_snippets)
         .replace("{plans}", plans)
-        .replace("{memory_notes}", &memory_notes)
+        .replace("{preferences}", &preferences)
 }
 
 /// A plan in compact form (§7.9): summary, then each meal's title and items. Core doesn't
@@ -257,15 +268,10 @@ pub(crate) fn render_profile_summary(
     } else {
         profile.allergies.join(", ")
     };
-    let dislikes = if profile.dislikes.is_empty() {
-        "none".to_string()
-    } else {
-        profile.dislikes.join(", ")
-    };
 
     let mut summary = format!(
         "Age {age}, {sex}, height {:.0} cm; {weight_part}; activity level: {activity}; \
-         dietary pattern: {dietary}; allergies: {allergies}; dislikes: {dislikes}.",
+         dietary pattern: {dietary}; allergies: {allergies}.",
         profile.height_cm
     );
     if let Some(name) = &profile.display_name {
@@ -308,6 +314,7 @@ mod tests {
     use super::*;
     use crate::events::EventSource;
     use crate::plugin::{PluginError, PluginManifest, ToolOutput};
+    use crate::preferences::NewPreference;
     use crate::profile::{ActivityLevel, DietaryPattern, Sex};
     use async_trait::async_trait;
     use lifeagent_llm::types::ToolSpec;
@@ -355,7 +362,6 @@ mod tests {
             activity_level: ActivityLevel::Moderate,
             dietary_pattern: DietaryPattern::Omnivore,
             allergies: vec!["虾".into()],
-            dislikes: vec!["香菜".into()],
             medical_notes: None,
             meals_per_day: 3,
         }
@@ -497,22 +503,65 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn includes_memory_notes_with_their_ids() {
+    async fn includes_current_preferences_with_their_ids_and_dates() {
         let (ctx, _mock, _dir) = crate::test_support::context().await;
-        let note = ctx.memory.add("不吃香菜").await.unwrap();
+        let today = ctx.today().await.unwrap();
+        let add = |kind, text: &str, until: Option<NaiveDate>| NewPreference {
+            kind,
+            text: text.into(),
+            valid_from: None,
+            valid_until: until,
+            permanent: until.is_none(),
+        };
+        let dislike = ctx
+            .preferences
+            .add(&add(PreferenceKind::Dislike, "香菜", None), today)
+            .await
+            .unwrap();
+        let week = ctx
+            .preferences
+            .add(
+                &add(PreferenceKind::General, "只能吃便利店", Some(today)),
+                today,
+            )
+            .await
+            .unwrap();
+        ctx.preferences
+            .add(
+                &add(PreferenceKind::General, "已过期", today.pred_opt()),
+                today,
+            )
+            .await
+            .unwrap();
 
         let prompt = build_system_prompt(&ctx, &[]).await.unwrap();
-        assert!(prompt.contains(&format!("[{}] 不吃香菜", note.id)));
+        assert!(prompt.contains(&format!("[{}] dislikes 香菜", dislike.id)));
+        assert!(prompt.contains(&format!("[{}] 只能吃便利店 (until {today})", week.id)));
+        assert!(!prompt.contains("已过期"));
     }
 
     #[tokio::test]
-    async fn truncates_oldest_memory_notes_first_when_over_budget() {
+    async fn truncates_oldest_preferences_first_when_over_budget() {
         let (ctx, _mock, _dir) = crate::test_support::context().await;
+        let today = ctx.today().await.unwrap();
         // 40 notes near the 300-char cap: comfortably over the 2,500-token budget on their
         // own, forcing truncation.
         let mut ids = Vec::new();
         for i in 0..40 {
-            let note = ctx.memory.add(&"记".repeat(290)).await.unwrap();
+            let note = ctx
+                .preferences
+                .add(
+                    &NewPreference {
+                        kind: PreferenceKind::General,
+                        text: "记".repeat(290),
+                        valid_from: None,
+                        valid_until: None,
+                        permanent: true,
+                    },
+                    today,
+                )
+                .await
+                .unwrap();
             ids.push((i, note.id));
         }
 

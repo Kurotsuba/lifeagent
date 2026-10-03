@@ -4,7 +4,7 @@ import { strings } from "../i18n";
 import { AccountSection } from "./AccountSection";
 import { FoodDataSection } from "./FoodDataSection";
 import { GeneralSection } from "./GeneralSection";
-import { MemorySection } from "./MemorySection";
+import { PreferencesSection } from "./PreferencesSection";
 import { ProfileGoalSection } from "./ProfileGoalSection";
 
 const t = strings.settings;
@@ -47,8 +47,8 @@ export function Settings() {
           </div>
         </SectionCard>
 
-        <SectionCard title={t.sections.memory}>
-          <MemorySection />
+        <SectionCard title={t.sections.preferences}>
+          <PreferencesSection />
         </SectionCard>
 
         <SectionCard title={t.sections.account}>

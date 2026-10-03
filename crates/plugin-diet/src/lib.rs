@@ -251,7 +251,6 @@ pub(crate) mod testutil {
                 activity_level: ActivityLevel::Light,
                 dietary_pattern: DietaryPattern::Omnivore,
                 allergies: vec![],
-                dislikes: vec![],
                 medical_notes: None,
                 meals_per_day: 3,
             })

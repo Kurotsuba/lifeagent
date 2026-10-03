@@ -2400,3 +2400,40 @@ branch (it still exists on `phase1`).
   stays in `localStorage`, because the login screen needs it before there is an account.
 - **Not changed:** the diet plugin's parser and matcher prompts. They name foods to match the
   food table, not to talk to the user.
+
+## 2026-10-03 — Preferences replace memory notes; a request box for plan generation
+
+- **What chat saves where:** allergies go to the profile's `allergies` (`core_update_allergies`,
+  add/remove, case-insensitive). Dislikes and every other wish that should shape plans become
+  **preferences** (`core_add_preference`, `core_remove_preference`). `core_remember`,
+  `core_forget` and the free-text memory notes are gone: a note like "no cilantro" was invisible
+  to the plan validator and couldn't expire.
+- **Preferences:** table `preferences` (migration `0002`), each with a `kind` (`dislike`: `text`
+  is one food's name, so the validator can match it; `general`: anything else) and optional
+  `valid_from`/`valid_until`, inclusive logical dates. Example: "convenience-store food only"
+  until the end of a busy week. Allergies stay permanent on the profile; they're a hard
+  constraint, and a time limit on one would be a risk, not a feature.
+- **Dislikes left the profile** (`Profile.dislikes` removed). The migration copies each into an
+  open-ended `dislike` preference (random v4 ids: Postgres 17 has no v7 generator, and nothing
+  orders by id), turns memory notes into open-ended `general` ones (ids and soft deletes kept),
+  strips `dislikes` from the stored profile JSON and drops `memory_notes`. Onboarding still asks
+  for dislikes and saves them as preferences; Settings edits them in the Preferences section
+  (which replaced Memory) instead of the profile form.
+- **Which ones each prompt sees:** the planner prompt, the diet brief and the validator's dislike
+  warnings use the preferences **in effect on the plan date**. The chat prompt lists those **not
+  yet expired** (including future ones), with ids and dates, so the model can remove them.
+  Settings lists all of them and dims expired ones.
+- **Plan request:** the Today tab has an optional text box above generate/regenerate.
+  `generate_plan` (command and `core_generate_plan` tool) takes `request`, which goes into the
+  planner prompt for that generation only and is stored as the version's `instruction`. It is
+  not saved as a preference. It is meant to save tokens: one generation with the wish instead of
+  a generation and then a revision.
+- **Default period: one month.** A new preference without `valid_until` ends one month after
+  its start (`valid_from`, else the logical date of the day it's added), minus a day:
+  2026-10-03 gives 2026-11-02, inclusive. Month ends clamp (01-31 gives 02-27/28). So stale
+  wishes drop out of prompts on their own. `permanent: true` opts out, for chat ("I never eat
+  cilantro"), the Settings form's "No end date" box, and onboarding's dislikes, which are
+  lasting by nature. Applied in `PreferenceService::add`, so chat, Settings and onboarding share
+  it; the migrated notes and dislikes stay open-ended.
+- **Error texts:** `note_empty`/`note_too_long` kept their kinds and now read as generic
+  "content" messages; `preference_dates_reversed` is new.

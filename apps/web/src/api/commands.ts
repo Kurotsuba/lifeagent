@@ -17,7 +17,8 @@ import type {
   HistoryMessage,
   ImportPreview,
   ImportReport,
-  MemoryNote,
+  NewPreference,
+  Preference,
   NutritionTargets,
   Profile,
   SettingsDto,
@@ -87,9 +88,10 @@ export function getPlan(date: string): Promise<StoredPlan | null> {
   return call("get_plan", { date });
 }
 
-/** `date` omitted means tomorrow (§10.2's own default). */
-export function generatePlan(date?: string): Promise<StoredPlan> {
-  return call("generate_plan", { date: date ?? null });
+/** `date` omitted means tomorrow (§10.2's own default). `request` is the user's optional wish
+ * for this plan only. */
+export function generatePlan(date?: string, request?: string): Promise<StoredPlan> {
+  return call("generate_plan", { date: date ?? null, request: request ?? null });
 }
 
 export function acceptPlan(date: string): Promise<void> {
@@ -110,14 +112,18 @@ export function setLanguage(language: Locale): Promise<void> {
   return call("set_language", { language });
 }
 
-// ---- Memory --------------------------------------------------------------------------------
+// ---- Preferences ---------------------------------------------------------------------------
 
-export function getMemory(limit: number): Promise<MemoryNote[]> {
-  return call("get_memory", { limit });
+export function getPreferences(limit: number): Promise<Preference[]> {
+  return call("get_preferences", { limit });
 }
 
-export function deleteMemory(id: string): Promise<void> {
-  return call("delete_memory", { id });
+export function addPreference(preference: NewPreference): Promise<Preference> {
+  return call("add_preference", { preference });
+}
+
+export function deletePreference(id: string): Promise<void> {
+  return call("delete_preference", { id });
 }
 
 // ---- Nutrition sources / batch import (`docs/NUTRITION_SOURCES.md` §8.2) -------------------

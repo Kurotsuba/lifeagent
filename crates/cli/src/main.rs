@@ -286,7 +286,7 @@ async fn plan(app: &CoreApp, action: PlanAction) -> Result<()> {
     match action {
         PlanAction::Generate { date } => {
             let date = resolve_date(app, date).await?;
-            print_json(&app.generate_plan(date, PlanTrigger::Manual).await?)
+            print_json(&app.generate_plan(date, PlanTrigger::Manual, None).await?)
         }
         PlanAction::Show { date } => {
             let date = resolve_date(app, date).await?;

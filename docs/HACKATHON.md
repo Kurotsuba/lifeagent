@@ -139,7 +139,7 @@ schema auth                 shared, owned by the app
   sessions   (token_hash, user_id, created_at, expires_at)
 
 schema u_<user id hex>      one per user, created at registration
-  settings, profile, goals, events, plans, memory_notes, messages, llm_usage,
+  settings, profile, goals, events, plans, preferences, messages, llm_usage,
   plugin_migrations, diet plugin tables, _sqlx_migrations
 ```
 
@@ -452,7 +452,7 @@ To make that visible:
 
 - **Audit trail UI:** show every tool call, with its arguments, result and who triggered it
   (chat or scheduler).
-- **Human approval for risky actions:** past-day deletes and memory writes go through a
+- **Human approval for risky actions:** past-day deletes and preference/allergy writes go through a
   confirmation step instead of only a flag the model sets.
 - **Prompt-injection defense:** treat imported food tables and dish names as untrusted data.
 - **Per-tool permissions and cost/token budgets**, built on the existing usage sink.

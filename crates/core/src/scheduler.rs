@@ -86,7 +86,7 @@ impl Scheduler {
 
         match self
             .app
-            .generate_plan(tomorrow, PlanTrigger::Schedule)
+            .generate_plan(tomorrow, PlanTrigger::Schedule, None)
             .await
         {
             Ok(_) => {

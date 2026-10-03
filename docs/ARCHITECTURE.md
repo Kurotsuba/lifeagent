@@ -65,7 +65,7 @@ The user interacts mainly by talking to it in natural language ("午饭吃了一
 - **Event bus** — plugins publish domain events (e.g. `diet.meal_logged`) and subscribe to
   others' events. Plugins never call each other directly.
 - **Context builder / memory** — assembles the system prompt: time, profile, goals, today's
-  status (contributed by each plugin), current plan, and long-term memory notes.
+  status (contributed by each plugin), current plan, and the user's preferences.
 - **Plan service** — gathers plan inputs from all plugins, makes one planner LLM call so the
   plan is coherent across domains, hands each section back to its plugin for resolution and
   validation, retries on violations, stores the result.
@@ -98,10 +98,10 @@ MCP servers and plugins written in any language can be attached without recompil
 | Entity | Purpose |
 |---|---|
 | Event | Every user record: time, logical date, type (`plugin.name`), JSON payload |
-| Profile | Body data, activity level, allergies, dislikes, injuries |
+| Profile | Body data, activity level, allergies, injuries |
 | Goal | Domain goals with JSON parameters (weight target, weekly alcohol units, cigarettes/day taper) |
 | Plan | One per date, versioned; sections keyed by plugin id; warnings |
-| Memory note | Durable preferences and facts the agent should remember |
+| Preference | A dislike or other wish that shapes plans, optionally limited to a date range |
 | Conversation | Chat messages including tool calls |
 | LLM usage | Tokens per call, role, model |
 

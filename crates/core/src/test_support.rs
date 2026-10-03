@@ -13,9 +13,9 @@ use lifeagent_llm::types::ChatModel;
 use crate::clock::{Clock, FixedClock};
 use crate::events::EventStore;
 use crate::goals::GoalsService;
-use crate::memory::MemoryService;
 use crate::plan::PlanStore;
 use crate::plugin::PluginContext;
+use crate::preferences::PreferenceService;
 use crate::profile::ProfileService;
 use crate::settings::Settings;
 use crate::usage::DbUsageSink;
@@ -71,7 +71,7 @@ pub async fn env() -> TestEnv {
         settings,
         profile: ProfileService::new(db.clone(), dyn_clock.clone()),
         goals: GoalsService::new(db.clone(), dyn_clock.clone()),
-        memory: MemoryService::new(db.clone(), dyn_clock.clone()),
+        preferences: PreferenceService::new(db.clone(), dyn_clock.clone()),
         plans: PlanStore::new(db, dyn_clock),
     };
     TestEnv {

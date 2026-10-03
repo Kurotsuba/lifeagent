@@ -81,6 +81,11 @@ pub enum ErrorDetail {
         day_boundary: String,
     },
     InstructionEmpty,
+    /// Both as `YYYY-MM-DD`.
+    PreferenceDatesReversed {
+        valid_from: String,
+        valid_until: String,
+    },
     // ---- Food data import (`FoodDataError`) ----
     FoodData {
         detail: ImportMessage,
@@ -131,8 +136,8 @@ impl std::fmt::Display for ErrorDetail {
             WeightOutOfRange { got } => {
                 write!(f, "体重需在 30–300 千克之间，当前填写的是 {got:.1} 千克。")
             }
-            NoteEmpty => write!(f, "备忘内容不能为空。"),
-            NoteTooLong { got, max } => write!(f, "备忘内容最多 {max} 字，当前是 {got} 字。"),
+            NoteEmpty => write!(f, "内容不能为空。"),
+            NoteTooLong { got, max } => write!(f, "内容最多 {max} 字，当前是 {got} 字。"),
             PlanTimeBeforeDayBoundary {
                 plan_time,
                 day_boundary,
@@ -141,6 +146,13 @@ impl std::fmt::Display for ErrorDetail {
                 "生成时间（{plan_time}）不能早于日界时间（{day_boundary}），请调整其中一项。"
             ),
             InstructionEmpty => write!(f, "调整要求不能为空，请描述需要怎么调整。"),
+            PreferenceDatesReversed {
+                valid_from,
+                valid_until,
+            } => write!(
+                f,
+                "开始日期（{valid_from}）不能晚于结束日期（{valid_until}）。"
+            ),
             FoodData { detail } => write!(f, "{detail}"),
             Unauthorized => write!(f, "请先登录。"),
             InvalidUsername => write!(f, "用户名需为 3–32 位英文字母、数字或 _ - . 组成。"),
@@ -203,6 +215,13 @@ fn invalid_input_detail(rule: ValidationRule) -> ErrorDetail {
             day_boundary: format_hhmm(day_boundary),
         },
         ValidationRule::InstructionEmpty => ErrorDetail::InstructionEmpty,
+        ValidationRule::PreferenceDatesReversed {
+            valid_from,
+            valid_until,
+        } => ErrorDetail::PreferenceDatesReversed {
+            valid_from: valid_from.to_string(),
+            valid_until: valid_until.to_string(),
+        },
     }
 }
 
@@ -341,6 +360,10 @@ mod tests {
                 day_boundary: NaiveTime::from_hms_opt(4, 0, 0).unwrap(),
             },
             ValidationRule::InstructionEmpty,
+            ValidationRule::PreferenceDatesReversed {
+                valid_from: chrono::NaiveDate::from_ymd_opt(2026, 10, 9).unwrap(),
+                valid_until: chrono::NaiveDate::from_ymd_opt(2026, 10, 3).unwrap(),
+            },
         ];
 
         let messages: Vec<String> = cases

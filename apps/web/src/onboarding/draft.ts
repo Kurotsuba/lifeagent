@@ -20,6 +20,7 @@ export interface OnboardingDraft {
   activityLevel: ActivityLevel;
   dietaryPattern: DietaryPattern;
   allergies: string;
+  /** Onboarding only: saved as `dislike` preferences, not on the profile. */
   dislikes: string;
   mealsPerDay: number;
   medicalNotes: string;
@@ -66,7 +67,6 @@ export function buildProfile(draft: OnboardingDraft): Profile {
     activity_level: draft.activityLevel,
     dietary_pattern: draft.dietaryPattern,
     allergies: splitList(draft.allergies),
-    dislikes: splitList(draft.dislikes),
     medical_notes: draft.medicalNotes.trim() === "" ? null : draft.medicalNotes.trim(),
     meals_per_day: draft.mealsPerDay,
   };

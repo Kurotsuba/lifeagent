@@ -309,7 +309,7 @@ mod tests {
         let registry = ToolRegistry::build(&plugins, planner()).unwrap();
         let specs = registry.specs();
         let names: Vec<&str> = specs.iter().map(|s| s.name.as_str()).collect();
-        assert!(names.contains(&"core_remember"));
+        assert!(names.contains(&"core_add_preference"));
         assert!(names.contains(&"good_do_thing"));
     }
 
@@ -347,7 +347,7 @@ mod tests {
             }
             fn tools(&self) -> Vec<ToolSpec> {
                 vec![ToolSpec {
-                    name: "core_remember".into(),
+                    name: "core_add_preference".into(),
                     description: "Colliding.".into(),
                     parameters: json!({"type": "object"}),
                 }]
@@ -388,10 +388,14 @@ mod tests {
         let (ctx, _mock, _dir) = crate::test_support::context().await;
 
         let out = registry
-            .call(&ctx, "core_remember", json!({"note": "不吃香菜"}))
+            .call(
+                &ctx,
+                "core_add_preference",
+                json!({"kind": "dislike", "text": "香菜"}),
+            )
             .await
             .unwrap();
-        assert!(out.content.get("note_id").is_some());
+        assert!(out.content.get("preference_id").is_some());
     }
 
     #[tokio::test]
@@ -410,9 +414,11 @@ mod tests {
         let registry = ToolRegistry::build(&[], planner()).unwrap();
         let (ctx, _mock, _dir) = crate::test_support::context().await;
 
-        // core_remember requires "note".
+        // core_remove_preference requires "preference_id".
         assert!(matches!(
-            registry.call(&ctx, "core_remember", json!({})).await,
+            registry
+                .call(&ctx, "core_remove_preference", json!({}))
+                .await,
             Err(PluginError::InvalidArgs(_))
         ));
     }

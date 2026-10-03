@@ -27,7 +27,7 @@ pub enum CoreError {
     Validation(String),
 
     /// A named validation rule broken by input a user actually typed into a form or chat message
-    /// (profile, goal, memory note, settings, weight, plan revision). Distinct from `Validation`
+    /// (profile, goal, preference, settings, weight, plan revision). Distinct from `Validation`
     /// so a shell (M7's `CommandError`) can give each rule its own zh-CN wording instead of one
     /// generic message for all of them (§14 M8: "Error messages in zh-CN for every
     /// `CommandError`").
@@ -119,4 +119,10 @@ pub enum ValidationRule {
 
     #[error("instruction must not be empty")]
     InstructionEmpty,
+
+    #[error("valid_from {valid_from} must not be later than valid_until {valid_until}")]
+    PreferenceDatesReversed {
+        valid_from: NaiveDate,
+        valid_until: NaiveDate,
+    },
 }

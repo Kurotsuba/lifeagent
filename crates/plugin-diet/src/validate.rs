@@ -86,6 +86,7 @@ pub async fn finalize(
         .get()
         .await?
         .ok_or_else(|| PluginError::Other("no profile".into()))?;
+    let dislikes = ctx.preferences.dislikes_on(date).await?;
 
     let names: Vec<FoodQuery> = planned
         .meals
@@ -124,7 +125,7 @@ pub async fn finalize(
                     ));
                 }
             }
-            for dislike in &profile.dislikes {
+            for dislike in &dislikes {
                 if names.iter().any(|n| matches_term(n, dislike)) {
                     warnings.push(format!("“{planned_name}”含不喜欢的“{dislike}”"));
                 }
@@ -226,6 +227,7 @@ mod tests {
     use super::*;
     use crate::sources::upsert_manual_food;
     use crate::testutil::{env, seed_person, RICE};
+    use lifeagent_core::preferences::{NewPreference, PreferenceKind};
     use lifeagent_core::profile::Profile;
     use lifeagent_core::test_support::TestEnv;
 
@@ -394,7 +396,20 @@ mod tests {
     #[tokio::test]
     async fn disliked_food_is_a_warning_not_a_violation() {
         let (env, date) = setup().await;
-        set_profile(&env, |p| p.dislikes = vec!["香菜".into()]).await;
+        env.ctx
+            .preferences
+            .add(
+                &NewPreference {
+                    kind: PreferenceKind::Dislike,
+                    text: "香菜".into(),
+                    valid_from: None,
+                    valid_until: None,
+                    permanent: true,
+                },
+                date,
+            )
+            .await
+            .unwrap();
         upsert_manual_food(&env.ctx, "香菜", RICE).await.unwrap();
         let mut plan = on_target();
         plan["meals"][1]["items"]

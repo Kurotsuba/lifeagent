@@ -69,7 +69,6 @@ async fn app(mock: Arc<MockChatModel>) -> (CoreApp, lifeagent_core::db::TestDb) 
             activity_level: ActivityLevel::Moderate,
             dietary_pattern: DietaryPattern::Omnivore,
             allergies: vec![],
-            dislikes: vec![],
             medical_notes: None,
             meals_per_day: 3,
         })

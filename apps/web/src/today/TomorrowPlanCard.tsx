@@ -2,6 +2,7 @@ import { useState } from "react";
 import { acceptPlan, generatePlan } from "../api/commands";
 import { commandErrorMessage, dietPlanSection, type StoredPlan } from "../api/types";
 import { primaryButtonClass, secondaryButtonClass } from "../components/buttonStyles";
+import { inputClass } from "../components/Field";
 import { strings } from "../i18n";
 
 const t = strings.today.tomorrowPlan;
@@ -19,12 +20,16 @@ interface TomorrowPlanCardProps {
 export function TomorrowPlanCard({ plan, planTime, onAdjust, onChanged }: TomorrowPlanCardProps) {
   const [busy, setBusy] = useState<"generate" | "accept" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Optional wishes for the next generation only ("working late, convenience-store food").
+  // Saying them up front saves a revision round trip, and its tokens.
+  const [request, setRequest] = useState("");
 
   async function handleGenerate(date?: string) {
     setBusy("generate");
     setError(null);
     try {
-      await generatePlan(date);
+      await generatePlan(date, request.trim() || undefined);
+      setRequest("");
       onChanged();
     } catch (e) {
       setError(commandErrorMessage(e));
@@ -46,6 +51,18 @@ export function TomorrowPlanCard({ plan, planTime, onAdjust, onChanged }: Tomorr
     }
   }
 
+  const requestBox = (
+    <textarea
+      className={inputClass + " mb-3 resize-y"}
+      rows={2}
+      value={request}
+      placeholder={t.requestPlaceholder}
+      aria-label={t.requestLabel}
+      disabled={busy !== null}
+      onChange={(e) => setRequest(e.target.value)}
+    />
+  );
+
   if (!plan) {
     return (
       <div>
@@ -56,6 +73,7 @@ export function TomorrowPlanCard({ plan, planTime, onAdjust, onChanged }: Tomorr
           {t.noPlanYet(planTime)}
         </p>
         {error ? <p className="mb-2 text-sm text-red-600 dark:text-red-400">{error}</p> : null}
+        {requestBox}
         <button
           type="button"
           className={primaryButtonClass}
@@ -130,6 +148,7 @@ export function TomorrowPlanCard({ plan, planTime, onAdjust, onChanged }: Tomorr
 
       {error ? <p className="mb-2 text-sm text-red-600 dark:text-red-400">{error}</p> : null}
 
+      {requestBox}
       <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"

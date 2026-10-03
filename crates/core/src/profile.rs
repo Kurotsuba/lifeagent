@@ -1,4 +1,5 @@
-//! `Profile` and `ProfileService`, per `docs/PHASE1_SPEC.md` §7.4.
+//! `Profile` and `ProfileService`, per `docs/PHASE1_SPEC.md` §7.4. Dislikes moved out of the
+//! profile into `preferences` so they can be time-limited.
 //!
 //! Weight is deliberately not part of the profile — it is the latest `body.weight_logged`
 //! event (added by the diet plugin's tools in M3/M4), so it changes without rewriting the
@@ -48,8 +49,6 @@ pub struct Profile {
     pub dietary_pattern: DietaryPattern,
     #[serde(default)]
     pub allergies: Vec<String>,
-    #[serde(default)]
-    pub dislikes: Vec<String>,
     pub medical_notes: Option<String>,
     pub meals_per_day: u8,
 }
@@ -142,7 +141,6 @@ mod tests {
             activity_level: ActivityLevel::Moderate,
             dietary_pattern: DietaryPattern::Omnivore,
             allergies: vec!["虾".into()],
-            dislikes: vec!["香菜".into()],
             medical_notes: None,
             meals_per_day,
         }

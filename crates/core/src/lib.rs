@@ -4,7 +4,8 @@
 //! `CLAUDE.md`). Plugins are registered by the composition root (`cli`, `desktop`) via
 //! `CoreAppBuilder::plugin`. Modules are filled in milestone by milestone per
 //! `docs/PHASE1_SPEC.md` §7: foundations (`clock`, `time`, `db`, `error`, `settings`,
-//! `secrets`, `profile`, `goals`, `events`, `memory`, `conversation`) landed in M1; the
+//! `secrets`, `profile`, `goals`, `events`, `memory`, `conversation`) landed in M1 (`memory` later became
+//! `preferences`); the
 //! plugin API, tool registry and orchestrator (`plugin`, `tools`, `core_tools`, `context`,
 //! `app`) landed in M3, along with `usage` (needed as soon as an `LlmRouter` can be built —
 //! see `usage.rs`'s doc comment). M4 added the plan types and `PlanStore`, the event
@@ -21,9 +22,9 @@ pub mod error;
 pub mod events;
 pub mod goals;
 pub mod i18n;
-pub mod memory;
 pub mod plan;
 pub mod plugin;
+pub mod preferences;
 pub mod profile;
 pub mod scheduler;
 pub mod secrets;

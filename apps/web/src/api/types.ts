@@ -26,7 +26,6 @@ export interface Profile {
   activity_level: ActivityLevel;
   dietary_pattern: DietaryPattern;
   allergies: string[];
-  dislikes: string[];
   medical_notes: string | null;
   meals_per_day: number;
 }
@@ -350,10 +349,26 @@ export interface ImportReport {
   skipped: number;
 }
 
-export interface MemoryNote {
+/** `dislike`: one food to avoid (`text` is its name); `general`: any other wish. */
+export type PreferenceKind = "dislike" | "general";
+
+/** `valid_from`/`valid_until` are inclusive logical dates ("YYYY-MM-DD"); `null` is open. */
+export interface Preference {
   id: string;
-  note: string;
+  kind: PreferenceKind;
+  text: string;
+  valid_from: string | null;
+  valid_until: string | null;
   created_at: string;
+}
+
+/** Without `valid_until` the backend ends it one month after its start, unless `permanent`. */
+export interface NewPreference {
+  kind: PreferenceKind;
+  text: string;
+  valid_from: string | null;
+  valid_until: string | null;
+  permanent: boolean;
 }
 
 export type CommandErrorCode =
@@ -391,6 +406,7 @@ export type ErrorDetail =
   | { kind: "note_too_long"; got: number; max: number }
   | { kind: "plan_time_before_day_boundary"; plan_time: string; day_boundary: string }
   | { kind: "instruction_empty" }
+  | { kind: "preference_dates_reversed"; valid_from: string; valid_until: string }
   | { kind: "food_data"; detail: ImportMessage }
   | { kind: "unauthorized" }
   | { kind: "invalid_username" }

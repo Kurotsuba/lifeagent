@@ -32,7 +32,6 @@ fn profile() -> Profile {
         activity_level: ActivityLevel::Moderate,
         dietary_pattern: DietaryPattern::Omnivore,
         allergies: vec![],
-        dislikes: vec![],
         medical_notes: None,
         meals_per_day: 3,
     }
@@ -193,7 +192,7 @@ async fn kcal_violation_is_retried_with_the_violation_then_stored_as_version_1()
 
     let plan = env
         .app
-        .generate_plan(tomorrow, PlanTrigger::Manual)
+        .generate_plan(tomorrow, PlanTrigger::Manual, None)
         .await
         .unwrap();
 
@@ -232,7 +231,7 @@ async fn revision_creates_version_2_with_trigger_revision_and_the_instruction() 
     env.mock.push_closure(estimate_for(tomorrow));
     env.mock.push_response(planner_reply("v2", 300.0));
     env.app
-        .generate_plan(tomorrow, PlanTrigger::Manual)
+        .generate_plan(tomorrow, PlanTrigger::Manual, None)
         .await
         .unwrap();
 

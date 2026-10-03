@@ -13,8 +13,8 @@ use lifeagent_core::app::{ChatTurn, CoreApp, HistoryMessage, TodayView};
 use lifeagent_core::error::CoreError;
 use lifeagent_core::goals::WeightGoal;
 use lifeagent_core::i18n::Language;
-use lifeagent_core::memory::MemoryNote;
 use lifeagent_core::plan::{PlanTrigger, StoredPlan};
+use lifeagent_core::preferences::{NewPreference, Preference};
 use lifeagent_core::profile::Profile;
 use lifeagent_core::time::{age_years, format_hhmm, parse_hhmm};
 use lifeagent_core::usage::RoleUsage;
@@ -91,12 +91,16 @@ pub async fn get_plan(app: &CoreApp, date: &str) -> Result<Option<StoredPlan>, C
     Ok(app.get_plan(date).await?)
 }
 
+/// `request` is the user's optional wish for this plan only (the Today tab's request box).
 pub async fn generate_plan(
     app: &CoreApp,
     date: Option<String>,
+    request: Option<String>,
 ) -> Result<StoredPlan, CommandError> {
     let date = resolve_plan_date(app, date).await?;
-    Ok(app.generate_plan(date, PlanTrigger::Manual).await?)
+    Ok(app
+        .generate_plan(date, PlanTrigger::Manual, request.as_deref())
+        .await?)
 }
 
 pub async fn accept_plan(app: &CoreApp, date: &str) -> Result<(), CommandError> {
@@ -181,14 +185,22 @@ pub async fn set_language(app: &CoreApp, language: Language) -> Result<(), Comma
     Ok(())
 }
 
-// ---- Memory ---------------------------------------------------------------------------------
+// ---- Preferences ----------------------------------------------------------------------------
 
-pub async fn get_memory(app: &CoreApp, limit: u32) -> Result<Vec<MemoryNote>, CommandError> {
-    Ok(app.memory().list(limit).await?)
+pub async fn get_preferences(app: &CoreApp, limit: u32) -> Result<Vec<Preference>, CommandError> {
+    Ok(app.preferences().list(limit).await?)
 }
 
-pub async fn delete_memory(app: &CoreApp, id: &str) -> Result<(), CommandError> {
-    Ok(app.memory().forget(id).await?)
+pub async fn add_preference(
+    app: &CoreApp,
+    preference: &NewPreference,
+) -> Result<Preference, CommandError> {
+    let today = app.plugin_context().today().await?;
+    Ok(app.preferences().add(preference, today).await?)
+}
+
+pub async fn delete_preference(app: &CoreApp, id: &str) -> Result<(), CommandError> {
+    Ok(app.preferences().remove(id).await?)
 }
 
 // ---- Usage ----------------------------------------------------------------------------------

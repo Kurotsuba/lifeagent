@@ -65,7 +65,10 @@ pub async fn plan_input(
             "Allergies (hard constraint, never include): {}.",
             list_or_none(&profile.allergies)
         ),
-        format!("Dislikes (avoid): {}.", list_or_none(&profile.dislikes)),
+        format!(
+            "Dislikes (avoid): {}.",
+            list_or_none(&ctx.preferences.dislikes_on(date).await?)
+        ),
     ];
 
     let mut adherence_lines = Vec::new();

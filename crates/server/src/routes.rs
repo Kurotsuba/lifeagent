@@ -60,9 +60,15 @@ struct Date {
     date: String,
 }
 #[derive(Deserialize)]
-struct OptionalDate {
+struct GeneratePlanArg {
     #[serde(default)]
     date: Option<String>,
+    #[serde(default)]
+    request: Option<String>,
+}
+#[derive(Deserialize)]
+struct PreferenceArg {
+    preference: lifeagent_core::preferences::NewPreference,
 }
 #[derive(Deserialize)]
 struct Id {
@@ -147,8 +153,8 @@ pub async fn command(
             reply(ops::get_plan(app, &a.date).await)
         }
         "generate_plan" => {
-            let a: OptionalDate = args(&body)?;
-            reply(ops::generate_plan(app, a.date).await)
+            let a: GeneratePlanArg = args(&body)?;
+            reply(ops::generate_plan(app, a.date, a.request).await)
         }
         "accept_plan" => {
             let a: Date = args(&body)?;
@@ -185,13 +191,17 @@ pub async fn command(
             let a: LanguageArg = args(&body)?;
             reply(ops::set_language(app, a.language).await)
         }
-        "get_memory" => {
+        "get_preferences" => {
             let a: Limit = args(&body)?;
-            reply(ops::get_memory(app, a.limit).await)
+            reply(ops::get_preferences(app, a.limit).await)
         }
-        "delete_memory" => {
+        "add_preference" => {
+            let a: PreferenceArg = args(&body)?;
+            reply(ops::add_preference(app, &a.preference).await)
+        }
+        "delete_preference" => {
             let a: Id = args(&body)?;
-            reply(ops::delete_memory(app, &a.id).await)
+            reply(ops::delete_preference(app, &a.id).await)
         }
         "get_usage_summary" => reply(ops::get_usage_summary(app).await),
         "list_food_sources" => reply(ops::list_food_sources(app).await),
@@ -389,8 +399,8 @@ mod tests {
 
     #[test]
     fn empty_bodies_parse_as_empty_argument_objects() {
-        let a: OptionalDate = args(&Bytes::new()).unwrap();
-        assert_eq!(a.date, None);
+        let a: GeneratePlanArg = args(&Bytes::new()).unwrap();
+        assert_eq!((a.date, a.request), (None, None));
         assert!(args::<Text>(&Bytes::from_static(b"{}")).is_err());
         assert!(args::<Text>(&Bytes::from_static(b"not json")).is_err());
     }
