@@ -74,7 +74,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex-1 overflow-y-auto px-6 py-8">
+      <div className="flex-1 overflow-y-auto px-4 py-6 md:px-6 md:py-8">
         <div className="mx-auto max-w-2xl">
           <div className="mb-4 flex items-center justify-between">
             <p className="text-xs font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
@@ -92,7 +92,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
         </div>
       </div>
 
-      <div className="border-t border-neutral-200 px-6 py-4 dark:border-neutral-700">
+      <div className="border-t border-neutral-200 px-4 py-4 pb-[max(1rem,env(safe-area-inset-bottom))] md:px-6 dark:border-neutral-700">
         <div className="mx-auto flex max-w-2xl justify-between">
           <button
             type="button"

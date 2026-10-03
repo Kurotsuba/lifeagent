@@ -55,8 +55,10 @@ export function AuthScreen({ notice, onSignedIn }: AuthScreenProps) {
   }
 
   return (
-    <div className="flex h-full items-center justify-center px-6">
-      <form className="w-full max-w-sm space-y-4" onSubmit={(e) => void handleSubmit(e)}>
+    // `m-auto` rather than centering the flex items: when the form is taller than the screen
+    // (phone keyboard open), it scrolls instead of losing its top.
+    <div className="flex h-full overflow-y-auto px-6 py-8">
+      <form className="m-auto w-full max-w-sm space-y-4" onSubmit={(e) => void handleSubmit(e)}>
         <div>
           <div className="flex items-center justify-between">
             <p className="text-sm font-semibold text-neutral-500 dark:text-neutral-400">

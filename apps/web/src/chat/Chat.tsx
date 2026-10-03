@@ -102,7 +102,7 @@ export function Chat({ draftText, onDraftConsumed }: ChatProps) {
 
   return (
     <div className="flex h-full flex-col">
-      <div ref={listRef} className="flex-1 overflow-y-auto px-6 py-4">
+      <div ref={listRef} className="flex-1 overflow-y-auto px-4 py-4 md:px-6">
         <div className="mx-auto flex max-w-2xl flex-col gap-3">
           {!loaded ? (
             <p className="text-sm text-neutral-500 dark:text-neutral-400">
@@ -136,7 +136,7 @@ export function Chat({ draftText, onDraftConsumed }: ChatProps) {
                       {strings.chat.thinking}
                     </p>
                   ) : (
-                    <p className="whitespace-pre-wrap">{m.content}</p>
+                    <p className="whitespace-pre-wrap [overflow-wrap:anywhere]">{m.content}</p>
                   )}
                   {chips.length > 0 ? (
                     <div className="mt-2 flex flex-wrap gap-1">
@@ -165,7 +165,7 @@ export function Chat({ draftText, onDraftConsumed }: ChatProps) {
       </div>
 
       {error ? (
-        <div className="mx-auto flex w-full max-w-2xl flex-wrap items-center gap-3 px-6 pb-2 text-sm text-red-600 dark:text-red-400">
+        <div className="mx-auto flex w-full max-w-2xl flex-wrap items-center gap-3 px-4 pb-2 md:px-6 text-sm text-red-600 dark:text-red-400">
           <span>
             {strings.common.labelled(strings.chat.sendFailed, error)}
           </span>
@@ -175,10 +175,10 @@ export function Chat({ draftText, onDraftConsumed }: ChatProps) {
         </div>
       ) : null}
 
-      <div className="border-t border-neutral-200 px-6 py-3 dark:border-neutral-700">
+      <div className="border-t border-neutral-200 px-4 py-3 md:px-6 dark:border-neutral-700">
         <div className="mx-auto flex max-w-2xl items-end gap-2">
           <textarea
-            className={`${inputClass} mt-0 min-h-[2.5rem] resize-none`}
+            className={`${inputClass} mt-0 min-h-[2.5rem] resize-none placeholder:truncate`}
             rows={1}
             placeholder={strings.chat.inputPlaceholder}
             value={text}
@@ -188,7 +188,7 @@ export function Chat({ draftText, onDraftConsumed }: ChatProps) {
           />
           <button
             type="button"
-            className={primaryButtonClass}
+            className={`${primaryButtonClass} shrink-0 whitespace-nowrap`}
             disabled={sending || text.trim() === ""}
             onClick={() => void handleSend()}
           >

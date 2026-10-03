@@ -118,7 +118,7 @@ export function FoodDataSection() {
         className="hidden"
         onChange={handleFileChosen}
       />
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
         <p className="text-xs text-neutral-500 dark:text-neutral-400">
           {t.hint}{" "}
           <span
@@ -212,8 +212,9 @@ function SourceRow({
   onDelete,
 }: SourceRowProps) {
   return (
-    <div className="flex items-center justify-between gap-3 rounded-md border border-neutral-200 px-3 py-2 text-sm dark:border-neutral-700">
-      <div className="min-w-0">
+    // The controls wrap under the name when the row is too narrow for both (phones).
+    <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 rounded-md border border-neutral-200 px-3 py-2 text-sm dark:border-neutral-700">
+      <div className="min-w-0 flex-1 basis-48">
         <p className="truncate text-neutral-900 dark:text-neutral-50">{source.name}</p>
         <p className="text-xs text-neutral-500 dark:text-neutral-400">
           {label} ·{" "}
@@ -222,7 +223,7 @@ function SourceRow({
             : t.foodCount(source.food_count)}
         </p>
       </div>
-      <div className="flex shrink-0 items-center gap-1">
+      <div className="ml-auto flex shrink-0 items-center gap-1">
         {locked ? (
           <span className="text-sm" title={t.locked} aria-label={t.locked}>
             🔒

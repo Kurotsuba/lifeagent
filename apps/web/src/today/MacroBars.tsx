@@ -18,14 +18,14 @@ interface MacroBarsProps {
 
 export function MacroBars({ eaten, target }: MacroBarsProps) {
   return (
-    <div className="flex flex-1 flex-col justify-center gap-2">
+    <div className="flex w-full flex-1 flex-col justify-center gap-2">
       {ROWS.map((row) => {
         const value = eaten[row.key];
         const goal = target ? target[row.key] : null;
         const ratio = goal ? Math.max(0, Math.min(1, value / goal)) : 0;
         return (
           <div key={row.key} className="flex items-center gap-2 text-xs">
-            <span className="w-10 shrink-0 text-neutral-500 dark:text-neutral-400">
+            <span className="w-16 shrink-0 text-neutral-500 dark:text-neutral-400">
               {row.label}
             </span>
             <div className="h-2 flex-1 overflow-hidden rounded-full bg-neutral-200 dark:bg-neutral-700">

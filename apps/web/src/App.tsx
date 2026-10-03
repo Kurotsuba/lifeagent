@@ -79,7 +79,7 @@ export default function App() {
 
   if (screen === "auth") {
     return (
-      <div className="h-screen bg-neutral-50 text-neutral-900 dark:bg-neutral-900 dark:text-neutral-50">
+      <div className="h-dvh bg-neutral-50 text-neutral-900 dark:bg-neutral-900 dark:text-neutral-50">
         <AuthScreen
           notice={authNotice}
           onSignedIn={() => {
@@ -94,7 +94,7 @@ export default function App() {
 
   if (screen === "onboarding") {
     return (
-      <div className="h-screen bg-neutral-50 text-neutral-900 dark:bg-neutral-900 dark:text-neutral-50">
+      <div className="h-dvh bg-neutral-50 text-neutral-900 dark:bg-neutral-900 dark:text-neutral-50">
         <Onboarding onComplete={() => setScreen("main")} />
       </div>
     );
@@ -105,7 +105,7 @@ export default function App() {
   }
 
   return (
-    <div className="flex h-screen items-center justify-center bg-neutral-50 text-neutral-900 dark:bg-neutral-900 dark:text-neutral-50">
+    <div className="flex h-dvh items-center justify-center bg-neutral-50 text-neutral-900 dark:bg-neutral-900 dark:text-neutral-50">
       <p className="text-lg">{strings.common.loading}</p>
     </div>
   );
@@ -121,9 +121,9 @@ function MainShell({ username }: { username: string | null }) {
   }
 
   return (
-    <div className="flex h-screen bg-neutral-50 text-neutral-900 dark:bg-neutral-900 dark:text-neutral-50">
+    <div className="flex h-dvh flex-col bg-neutral-50 text-neutral-900 dark:bg-neutral-900 dark:text-neutral-50 md:flex-row">
       <Sidebar tab={tab} onChange={setTab} username={username} />
-      <main className="flex-1 overflow-hidden">
+      <main className="min-h-0 flex-1 overflow-hidden">
         {tab === "today" ? <Today onAdjustPlan={openChatWithDraft} /> : null}
         {tab === "chat" ? (
           <Chat draftText={chatDraft} onDraftConsumed={() => setChatDraft(null)} />

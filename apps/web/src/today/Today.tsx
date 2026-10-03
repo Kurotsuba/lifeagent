@@ -40,7 +40,7 @@ export function Today({ onAdjustPlan }: TodayProps) {
 
   if (error && !view) {
     return (
-      <div className="p-6">
+      <div className="p-4 md:p-6">
         <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
       </div>
     );
@@ -48,7 +48,7 @@ export function Today({ onAdjustPlan }: TodayProps) {
 
   if (!view) {
     return (
-      <div className="p-6">
+      <div className="p-4 md:p-6">
         <p className="text-sm text-neutral-500 dark:text-neutral-400">{strings.common.loading}</p>
       </div>
     );
@@ -58,16 +58,16 @@ export function Today({ onAdjustPlan }: TodayProps) {
   const loggedMealTypes = new Set<MealType>((card?.meals ?? []).map((m) => m.meal_type));
 
   return (
-    <div className="h-full overflow-y-auto p-6">
+    <div className="h-full overflow-y-auto p-4 md:p-6">
       <div className="mx-auto flex max-w-2xl flex-col gap-6">
-        <header className="relative flex items-center justify-between">
-          <h1 className="text-lg font-semibold text-neutral-900 dark:text-neutral-50">
+        <header className="relative flex items-center justify-between gap-3">
+          <h1 className="shrink-0 text-lg font-semibold text-neutral-900 dark:text-neutral-50">
             {view.logical_date}
           </h1>
           <div className="relative">
             <button
               type="button"
-              className="text-sm text-neutral-600 underline-offset-2 hover:underline dark:text-neutral-400"
+              className="text-right text-sm text-neutral-600 underline-offset-2 hover:underline dark:text-neutral-400"
               onClick={() => setShowWeightDialog((v) => !v)}
             >
               {view.latest_weight
@@ -88,7 +88,7 @@ export function Today({ onAdjustPlan }: TodayProps) {
           <h2 className="mb-3 text-sm font-semibold text-neutral-900 dark:text-neutral-50">
             {strings.today.diet.title}
           </h2>
-          <div className="flex items-center gap-6">
+          <div className="flex flex-col items-center gap-4 sm:flex-row sm:gap-6">
             <KcalRing
               eatenKcal={card?.total?.kcal ?? 0}
               targetKcal={card?.target?.kcal ?? null}

@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
-import { deleteAccount, me, SIGNED_OUT_EVENT } from "../api/auth";
+import { deleteAccount, me, SIGNED_OUT_EVENT, signOut } from "../api/auth";
 import { commandErrorMessage } from "../api/types";
 import { Field, inputClass } from "../components/Field";
-import { primaryButtonClass } from "../components/buttonStyles";
+import { primaryButtonClass, secondaryButtonClass } from "../components/buttonStyles";
 import { strings } from "../i18n";
 
 const t = strings.settings.account;
@@ -14,6 +14,7 @@ export function AccountSection() {
   const [password, setPassword] = useState("");
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [loggingOut, setLoggingOut] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -41,9 +42,25 @@ export function AccountSection() {
 
   return (
     <div className="space-y-5">
-      {username ? (
-        <p className="text-sm text-neutral-700 dark:text-neutral-300">{t.loggedInAs(username)}</p>
-      ) : null}
+      <div className="flex items-center justify-between gap-3">
+        {username ? (
+          <p className="min-w-0 truncate text-sm text-neutral-700 dark:text-neutral-300">
+            {t.loggedInAs(username)}
+          </p>
+        ) : null}
+        {/* Phones only: there the sidebar, with its logout button, is a bottom tab bar. */}
+        <button
+          type="button"
+          className={`${secondaryButtonClass} ml-auto shrink-0 !px-3 !py-1.5 text-xs md:hidden`}
+          disabled={loggingOut}
+          onClick={() => {
+            setLoggingOut(true);
+            void signOut();
+          }}
+        >
+          {strings.common.logout}
+        </button>
+      </div>
 
       <div className="space-y-3">
         <h3 className="text-sm font-medium text-neutral-900 dark:text-neutral-50">
@@ -59,7 +76,7 @@ export function AccountSection() {
             onChange={(e) => setPassword(e.target.value)}
           />
         </Field>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <button
             type="button"
             className={`${primaryButtonClass} !bg-red-600 hover:!bg-red-700 dark:!text-white`}

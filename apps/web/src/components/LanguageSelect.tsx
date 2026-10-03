@@ -6,7 +6,7 @@ export function LanguageSelect({ className = "" }: { className?: string }) {
     <select
       aria-label={strings.settings.sections.language}
       className={
-        "rounded-md border border-neutral-300 bg-white px-2 py-1 text-sm text-neutral-900 " +
+        "rounded-md border border-neutral-300 bg-white px-2 py-1 text-base text-neutral-900 md:text-sm " +
         "dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100 " +
         className
       }

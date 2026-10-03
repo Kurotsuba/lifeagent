@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 /** Tailwind classes shared by every text/number/select/textarea input in the app, so form
  * controls look consistent without a component wrapper around every native element. */
 export const inputClass =
-  "mt-1 block w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm " +
+  "mt-1 block w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-base md:text-sm " +
   "text-neutral-900 shadow-sm focus:border-neutral-500 focus:outline-none focus:ring-1 " +
   "focus:ring-neutral-500 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100";
 

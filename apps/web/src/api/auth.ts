@@ -38,6 +38,17 @@ export function logout(): Promise<void> {
   return post("logout", {});
 }
 
+/** Logs out and announces `SIGNED_OUT_EVENT`. The session is gone for this tab either way, so a
+ * failed request is ignored: the server forgets the session on expiry. */
+export async function signOut(): Promise<void> {
+  try {
+    await logout();
+  } catch {
+    // See above.
+  }
+  window.dispatchEvent(new Event(SIGNED_OUT_EVENT));
+}
+
 /** Deletes the account and all of its data. Asks for the password again. */
 export function deleteAccount(password: string): Promise<void> {
   return post("delete_account", { password });

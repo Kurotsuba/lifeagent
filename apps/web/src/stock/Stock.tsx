@@ -74,7 +74,7 @@ export function Stock() {
 
   if (!view) {
     return (
-      <div className="p-6">
+      <div className="p-4 md:p-6">
         <p
           className={
             error ? "text-sm text-red-600 dark:text-red-400" : "text-sm text-neutral-500 dark:text-neutral-400"
@@ -87,7 +87,7 @@ export function Stock() {
   }
 
   return (
-    <div className="h-full overflow-y-auto p-6">
+    <div className="h-full overflow-y-auto p-4 md:p-6">
       <div className="mx-auto flex max-w-2xl flex-col gap-6">
         <header className="space-y-3">
           <h1 className="text-lg font-semibold text-neutral-900 dark:text-neutral-50">
@@ -242,7 +242,7 @@ function StockRow({
   return (
     <div className="flex items-center justify-between gap-3 rounded-md border border-neutral-200 px-3 py-2 text-sm dark:border-neutral-700">
       <div className="min-w-0">
-        <p className="truncate text-neutral-900 dark:text-neutral-50">{item.name}</p>
+        <p className="break-words text-neutral-900 dark:text-neutral-50">{item.name}</p>
         {item.expires_on ? (
           <p
             className={
@@ -263,7 +263,7 @@ function StockRow({
             step="any"
             inputMode="decimal"
             aria-label={t.quantityLabel(item.name)}
-            className="w-20 rounded-md border border-neutral-300 bg-white px-2 py-1 text-right text-sm tabular-nums dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100"
+            className="w-20 rounded-md border border-neutral-300 bg-white px-2 py-1 text-right text-base tabular-nums md:text-sm dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100"
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onBlur={commit}
@@ -351,16 +351,18 @@ function AddForm({ onAdd }: { onAdd: (item: NewStockItem) => Promise<void> }) {
         if (valid && !adding) void handleAdd();
       }}
     >
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_6rem_6rem]">
-        <Field label={t.name}>
-          <input
-            type="text"
-            className={inputClass}
-            value={name}
-            placeholder={t.namePlaceholder}
-            onChange={(e) => setName(e.target.value)}
-          />
-        </Field>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-[1fr_6rem_6rem]">
+        <div className="col-span-2 sm:col-span-1">
+          <Field label={t.name}>
+            <input
+              type="text"
+              className={inputClass}
+              value={name}
+              placeholder={t.namePlaceholder}
+              onChange={(e) => setName(e.target.value)}
+            />
+          </Field>
+        </div>
         <Field label={t.quantity}>
           <input
             type="number"
