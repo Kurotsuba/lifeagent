@@ -64,6 +64,8 @@ schedule() {
     --schedule "*/5 * * * *" --time-zone "Asia/Tokyo"
     --uri "$url/api/internal/tick" --http-method POST
     --attempt-deadline 600s
+    # Otherwise gcloud prints the job, headers included, which puts the tick token in the log.
+    --format none
   )
   if gcloud scheduler jobs describe lifeagent-tick --project "$PROJECT" --location "$REGION" \
     >/dev/null 2>&1; then

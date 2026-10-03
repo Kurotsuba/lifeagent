@@ -246,6 +246,13 @@ $10/month). New GCP accounts get trial credit. Stop or delete the instance after
    Cloud Run with `lifeagent-run`, the Cloud SQL socket, `db-password`/`tick-token` secrets,
    `deploy/env.yaml`, one instance; `schedule`: the Cloud Scheduler job every 5 minutes).
    Redeploy after a change with `deploy/deploy.sh` from a clean checkout.
+6. **CI** (2026-10-03): `.github/workflows/ci.yml` runs on every push to `g-hackathon` only.
+   `verify` runs fmt, clippy and the tests against a `postgres:17` service container, then
+   `npm ci && npm run build` for the UI. If it passes, `deploy` runs `deploy/deploy.sh build`
+   and `deploy` (not `schedule`). It authenticates through Workload Identity Federation as
+   `lifeagent-ci`, with no key; `deploy/setup-ci.sh` creates both once. The provider only
+   accepts pushes to `g-hackathon` of `Kurotsuba/lifeagent`. `deploy/deploy.sh` stays the way
+   to deploy by hand.
 
 #### Google Cloud console checklist
 

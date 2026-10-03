@@ -2367,3 +2367,22 @@ branch (it still exists on `phase1`).
   simply ignored.
 - **Kept:** `lifeagent-cli` and the keyring-backed `SecretStore`, which the CLI's
   `models set-key` still uses; the server's `get_usage_summary` endpoint.
+
+## 2026-10-03 — CI and automatic deploys on `g-hackathon` (`docs/HACKATHON.md` §1 step 6)
+
+- **Trigger:** pushes to `g-hackathon` only; no pull request runs, since nothing else deploys
+  from this branch. One run at a time (`concurrency`, not cancelled), so two quick pushes deploy
+  in order.
+- **Verify before deploy:** the same checks as `CLAUDE.md` (fmt, clippy `-D warnings`, tests)
+  plus the UI build, whose `tsc -b` type-checks the locale tables. The database tests use a
+  `postgres:17` service container with the `lifeagent` superuser `TestDb` expects.
+- **Keyless Google Cloud access:** Workload Identity Federation instead of a service account
+  key in GitHub secrets. The provider's attribute condition pins the repository and the
+  `refs/heads/g-hackathon` ref, so other branches or forks can't get credentials even with an
+  edited workflow. The deployer `lifeagent-ci` gets what `deploy.sh build`/`deploy` need, plus
+  `roles/viewer`, which `gcloud builds submit` requires to stream logs from the default logs
+  bucket.
+- **No `schedule` in CI:** the Scheduler job's URL doesn't change between deploys, and leaving
+  it out means CI never reads `tick-token`. `deploy.sh schedule` now passes `--format none`,
+  because gcloud printed the job, tick token header included.
+

@@ -1,0 +1,68 @@
+# Verify every push to g-hackathon, then deploy it to Cloud Run (docs/HACKATHON.md §1 step 6).
+# Google Cloud access is keyless: deploy/setup-ci.sh creates the Workload Identity Federation
+# provider, which only accepts tokens for pushes to g-hackathon of this repository.
+name: CI
+
+on:
+  push:
+    branches: [g-hackathon]
+
+# One run at a time; a newer push waits for the running deploy instead of racing it.
+concurrency:
+  group: g-hackathon
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      # The database tests' superuser (crates/core/src/db.rs, TestDb). Same major as Cloud SQL.
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: lifeagent
+          POSTGRES_PASSWORD: lifeagent
+          POSTGRES_DB: lifeagent_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U lifeagent"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - run: cargo test --workspace --locked
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      # tsc -b type-checks the UI, including the locale tables against zh-CN.ts.
+      - run: npm ci && npm run build
+        working-directory: apps/web
+
+  deploy:
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # the OIDC token exchanged for Google Cloud credentials
+    steps:
+      - uses: actions/checkout@v5
+      - uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: projects/519106969791/locations/global/workloadIdentityPools/github/providers/github
+          service_account: lifeagent-ci@human-health-handler.iam.gserviceaccount.com
+      - uses: google-github-actions/setup-gcloud@v3
+      # Not `schedule`: the Cloud Scheduler job keeps pointing at the same URL, and leaving it
+      # out keeps the tick token away from CI.
+      - run: deploy/deploy.sh build && deploy/deploy.sh deploy
