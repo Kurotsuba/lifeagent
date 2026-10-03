@@ -80,6 +80,29 @@ impl ToolRegistry {
         self.specs.clone()
     }
 
+    /// Core tools plus the tools of the plugins in `plugins` (the enabled ones), in
+    /// registration order.
+    pub fn specs_for(&self, plugins: &[Arc<dyn Plugin>]) -> Vec<ToolSpec> {
+        self.specs
+            .iter()
+            .filter(|spec| self.is_available(&spec.name, plugins))
+            .cloned()
+            .collect()
+    }
+
+    /// Whether `name` is a core tool or belongs to one of `plugins`. A tool of a disabled
+    /// plugin isn't offered to the model; this also refuses a call to one from stale history.
+    pub fn is_available(&self, name: &str, plugins: &[Arc<dyn Plugin>]) -> bool {
+        match self.owners.get(name) {
+            Some(ToolOwner::Core) => true,
+            Some(ToolOwner::Plugin(owner)) => {
+                let id = owner.manifest().id;
+                plugins.iter().any(|p| p.manifest().id == id)
+            }
+            None => false,
+        }
+    }
+
     /// Validates `args` against the tool's JSON Schema, then routes to core or the owning
     /// plugin.
     pub async fn call(

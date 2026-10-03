@@ -4,7 +4,7 @@
 //! warnings; warnings are only shown. Both are therefore written in zh-CN.
 
 use chrono::NaiveDate;
-use lifeagent_core::plugin::{PlanSection, PluginContext, PluginError};
+use lifeagent_core::plugin::{PlanDraft, PlanSection, PluginContext, PluginError};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
@@ -61,10 +61,13 @@ fn outside(actual: f64, target: f64, tolerance: f64) -> bool {
     (actual - target).abs() > tolerance * target
 }
 
+/// `prior` is the day's already-planned training, if any: the targets checked against are
+/// raised for it exactly as `plan::plan_input` raised the ones the planner was given.
 pub async fn finalize(
     ctx: &PluginContext,
     date: NaiveDate,
     raw: Value,
+    prior: &PlanDraft,
 ) -> Result<PlanSection, PluginError> {
     let planned: PlannedSection = match serde_json::from_value(raw) {
         Ok(p) => p,
@@ -78,7 +81,8 @@ pub async fn finalize(
     {
         return Ok(invalid("有食物没有名称".into()));
     }
-    let targets = intake::targets_for(ctx, date)
+    let exercise_kcal = intake::planned_exercise_kcal(prior);
+    let targets = intake::targets_with_exercise(ctx, date, exercise_kcal)
         .await?
         .ok_or_else(|| PluginError::Other("no diet targets: profile or weight missing".into()))?;
     let profile = ctx
@@ -213,6 +217,7 @@ pub async fn finalize(
     Ok(PlanSection {
         data: json!({
             "targets": t.as_macros().to_json(),
+            "exercise_kcal_added": crate::targets::exercise_credit(exercise_kcal),
             "total": day_total.to_json(),
             "meals": meals_json,
             "tips": planned.tips,
@@ -286,7 +291,9 @@ mod tests {
     async fn on_target_plan_has_no_violations_or_warnings() {
         let (env, date) = setup().await;
 
-        let section = finalize(&env.ctx, date, on_target()).await.unwrap();
+        let section = finalize(&env.ctx, date, on_target(), &PlanDraft::new())
+            .await
+            .unwrap();
 
         assert_eq!(section.violations, Vec::<String>::new());
         assert_eq!(section.warnings, Vec::<String>::new());
@@ -301,11 +308,33 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn planned_training_raises_the_kcal_target_checked_against() {
+        let (env, date) = setup().await;
+        let prior = PlanDraft::from([(
+            "training".to_string(),
+            json!({"rest_day": false, "exercise_kcal": 1000.0}),
+        )]);
+
+        // On target for the base day is now ~20% short of the raised target.
+        let section = finalize(&env.ctx, date, on_target(), &prior).await.unwrap();
+
+        assert_eq!(section.data["exercise_kcal_added"], 500.0);
+        let base = intake::targets_for(&env.ctx, date).await.unwrap().unwrap();
+        assert_eq!(section.data["targets"]["kcal"], base.kcal + 500.0);
+        assert!(section.violations.iter().any(|v| v.starts_with("全天热量")));
+    }
+
+    #[tokio::test]
     async fn invalid_structure_is_a_violation() {
         let (env, date) = setup().await;
-        let section = finalize(&env.ctx, date, json!({"meals": "不是数组"}))
-            .await
-            .unwrap();
+        let section = finalize(
+            &env.ctx,
+            date,
+            json!({"meals": "不是数组"}),
+            &PlanDraft::new(),
+        )
+        .await
+        .unwrap();
         assert!(section.violations[0].starts_with("结构无效："));
         assert_eq!(section.data, Value::Null);
     }
@@ -317,7 +346,9 @@ mod tests {
         // 1,000 g → 800 g: 80% of target.
         plan["meals"][2]["items"][0]["grams"] = json!(100);
 
-        let section = finalize(&env.ctx, date, plan).await.unwrap();
+        let section = finalize(&env.ctx, date, plan, &PlanDraft::new())
+            .await
+            .unwrap();
 
         assert!(section.violations.iter().any(|v| v.starts_with("全天热量")));
     }
@@ -331,7 +362,9 @@ mod tests {
         let rice_grams = (t.kcal * 0.3) / RICE.kcal * 100.0;
         plan["meals"][2]["items"] = json!([{"name": "熟米饭", "grams": rice_grams}]);
 
-        let section = finalize(&env.ctx, date, plan).await.unwrap();
+        let section = finalize(&env.ctx, date, plan, &PlanDraft::new())
+            .await
+            .unwrap();
 
         assert!(!section.violations.iter().any(|v| v.starts_with("全天热量")));
         assert!(section.violations.iter().any(|v| v.starts_with("蛋白质")));
@@ -344,7 +377,9 @@ mod tests {
         // Dinner becomes a snack: 2 main meals.
         plan["meals"][2]["meal_type"] = json!("snack");
 
-        let section = finalize(&env.ctx, date, plan).await.unwrap();
+        let section = finalize(&env.ctx, date, plan, &PlanDraft::new())
+            .await
+            .unwrap();
 
         assert!(section.violations.iter().any(|v| v.starts_with("正餐")));
 
@@ -355,7 +390,9 @@ mod tests {
             .as_array_mut()
             .unwrap()
             .extend([snack.clone(), snack]);
-        let section = finalize(&env.ctx, date, plan).await.unwrap();
+        let section = finalize(&env.ctx, date, plan, &PlanDraft::new())
+            .await
+            .unwrap();
         assert!(section.violations.iter().any(|v| v.starts_with("总餐数")));
     }
 
@@ -370,7 +407,9 @@ mod tests {
             .unwrap()
             .push(json!({"name": "虾仁", "grams": 1}));
 
-        let section = finalize(&env.ctx, date, plan).await.unwrap();
+        let section = finalize(&env.ctx, date, plan, &PlanDraft::new())
+            .await
+            .unwrap();
 
         assert!(section
             .violations
@@ -388,7 +427,9 @@ mod tests {
         let mut plan = on_target();
         plan["meals"][1]["items"][0]["grams"] = json!(1600);
 
-        let section = finalize(&env.ctx, date, plan).await.unwrap();
+        let section = finalize(&env.ctx, date, plan, &PlanDraft::new())
+            .await
+            .unwrap();
 
         assert!(section.violations.iter().any(|v| v.contains("1600 g 超出")));
     }
@@ -417,7 +458,9 @@ mod tests {
             .unwrap()
             .push(json!({"name": "香菜", "grams": 1}));
 
-        let section = finalize(&env.ctx, date, plan).await.unwrap();
+        let section = finalize(&env.ctx, date, plan, &PlanDraft::new())
+            .await
+            .unwrap();
 
         assert!(section.violations.is_empty());
         assert_eq!(section.warnings, vec!["“香菜”含不喜欢的“香菜”"]);
@@ -431,7 +474,9 @@ mod tests {
             plan["meals"][i]["items"][0]["name"] = json!("低纤维均衡餐");
         }
 
-        let section = finalize(&env.ctx, date, plan).await.unwrap();
+        let section = finalize(&env.ctx, date, plan, &PlanDraft::new())
+            .await
+            .unwrap();
 
         assert!(section.violations.is_empty());
         assert_eq!(section.warnings.len(), 1);
@@ -462,7 +507,9 @@ mod tests {
             plan["meals"][i]["items"][0]["name"] = json!("高脂餐");
         }
 
-        let section = finalize(&env.ctx, date, plan).await.unwrap();
+        let section = finalize(&env.ctx, date, plan, &PlanDraft::new())
+            .await
+            .unwrap();
 
         assert!(section.violations.is_empty());
         assert!(section.warnings.iter().any(|w| w.starts_with("脂肪")));
@@ -479,7 +526,9 @@ mod tests {
             .unwrap()
             .push(json!({"name": "鸡蛋", "grams": 1}));
 
-        let section = finalize(&env.ctx, date, plan).await.unwrap();
+        let section = finalize(&env.ctx, date, plan, &PlanDraft::new())
+            .await
+            .unwrap();
 
         assert_eq!(section.data["meals"][0]["items"][1]["estimated"], true);
         assert!(section.warnings.is_empty());
@@ -498,7 +547,9 @@ mod tests {
             .unwrap()
             .push(json!({"name": "鸡蛋", "grams": 1}));
 
-        let section = finalize(&env.ctx, date, plan).await.unwrap();
+        let section = finalize(&env.ctx, date, plan, &PlanDraft::new())
+            .await
+            .unwrap();
 
         assert_eq!(section.data["meals"][0]["items"][1]["estimated"], false);
         // One match call and no estimate.

@@ -1,0 +1,19 @@
+[package]
+name = "lifeagent-plugin-training"
+version = "0.1.0"
+edition = "2021"
+description = "Training plugin: workout logging, training preferences, training plan section."
+
+[dependencies]
+lifeagent-core = { workspace = true }
+lifeagent-llm = { workspace = true }
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sqlx = { workspace = true }
+chrono = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+lifeagent-core = { workspace = true, features = ["test-support"] }
+tokio = { workspace = true }

@@ -5,6 +5,7 @@ import type { Tab } from "../App";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "today", label: strings.nav.today },
+  { id: "training", label: strings.nav.training },
   { id: "chat", label: strings.nav.chat },
   { id: "stock", label: strings.nav.stock },
   { id: "settings", label: strings.nav.settings },
@@ -17,9 +18,11 @@ interface SidebarProps {
   username: string | null;
   /** Reopens the usage guide (the ? button). */
   onShowGuide: () => void;
+  /** The optional training plugin is on, so its tab is shown. */
+  showTraining: boolean;
 }
 
-export function Sidebar({ tab, onChange, username, onShowGuide }: SidebarProps) {
+export function Sidebar({ tab, onChange, username, onShowGuide, showTraining }: SidebarProps) {
   const [loggingOut, setLoggingOut] = useState(false);
 
   async function handleLogout() {
@@ -34,7 +37,7 @@ export function Sidebar({ tab, onChange, username, onShowGuide }: SidebarProps) 
       <p className="mb-2 hidden px-2 text-sm font-semibold text-neutral-900 md:block dark:text-neutral-50">
         {strings.app.name}
       </p>
-      {TABS.map((item) => (
+      {TABS.filter((item) => item.id !== "training" || showTraining).map((item) => (
         <button
           key={item.id}
           type="button"

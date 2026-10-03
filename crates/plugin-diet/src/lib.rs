@@ -24,8 +24,8 @@ pub mod validate;
 use async_trait::async_trait;
 use chrono::NaiveDate;
 use lifeagent_core::plugin::{
-    PlanInput, PlanSection, Plugin, PluginContext, PluginError, PluginManifest, PluginMigration,
-    ToolOutput,
+    PlanDraft, PlanInput, PlanSection, Plugin, PluginContext, PluginError, PluginManifest,
+    PluginMigration, ToolOutput,
 };
 use lifeagent_llm::types::ToolSpec;
 use serde_json::Value;
@@ -76,12 +76,18 @@ impl Plugin for DietPlugin {
         Ok(Some(intake::today_card(ctx, date).await?))
     }
 
+    /// Diet is planned after the day's training, so meals can fuel and follow the session.
+    fn plan_after(&self) -> &'static [&'static str] {
+        &[intake::TRAINING_SECTION]
+    }
+
     async fn plan_input(
         &self,
         ctx: &PluginContext,
         date: NaiveDate,
+        prior: &PlanDraft,
     ) -> Result<Option<PlanInput>, PluginError> {
-        plan::plan_input(ctx, date).await
+        plan::plan_input(ctx, date, prior).await
     }
 
     async fn finalize_plan_section(
@@ -89,8 +95,9 @@ impl Plugin for DietPlugin {
         ctx: &PluginContext,
         date: NaiveDate,
         raw: Value,
+        prior: &PlanDraft,
     ) -> Result<PlanSection, PluginError> {
-        validate::finalize(ctx, date, raw).await
+        validate::finalize(ctx, date, raw, prior).await
     }
 }
 

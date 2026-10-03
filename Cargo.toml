@@ -5,6 +5,7 @@ members = [
     "crates/core",
     "crates/plugin-diet",
     "crates/plugin-stock",
+    "crates/plugin-training",
     "crates/api",
     "crates/cli",
     "crates/server",
@@ -39,4 +40,5 @@ lifeagent-llm = { path = "crates/llm" }
 lifeagent-core = { path = "crates/core" }
 lifeagent-plugin-diet = { path = "crates/plugin-diet" }
 lifeagent-plugin-stock = { path = "crates/plugin-stock" }
+lifeagent-plugin-training = { path = "crates/plugin-training" }
 lifeagent-api = { path = "crates/api" }

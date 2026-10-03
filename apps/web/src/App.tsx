@@ -12,14 +12,15 @@ import { Onboarding } from "./onboarding/Onboarding";
 import { Settings } from "./settings/Settings";
 import { Stock } from "./stock/Stock";
 import { Today } from "./today/Today";
+import { Training } from "./training/Training";
 
 /**
  * Thin view layer: all state comes from commands, no business logic here (see CLAUDE.md).
  * A login comes first; then, on the first run, onboarding; afterwards, the
- * main shell with its 今日 / 对话 / 库存 / 设置 tabs.
+ * main shell with its 今日 / 对话 / 库存 / 设置 tabs, plus 训练 when that optional plugin is on.
  */
 type Screen = "loading" | "auth" | "onboarding" | "main";
-export type Tab = "today" | "chat" | "stock" | "settings";
+export type Tab = "today" | "training" | "chat" | "stock" | "settings";
 
 export default function App() {
   const [screen, setScreen] = useState<Screen>("loading");
@@ -117,6 +118,19 @@ function MainShell({ username }: { username: string | null }) {
   const [chatDraft, setChatDraft] = useState<string | null>(null);
   // The tour opens by itself the first time this account reaches the shell on this browser.
   const [showGuide, setShowGuide] = useState(() => !guideSeen(username));
+  const [enabledPlugins, setEnabledPlugins] = useState<string[]>([]);
+
+  async function refreshPlugins() {
+    try {
+      setEnabledPlugins((await getAppState()).enabled_plugins);
+    } catch {
+      // Keep the current tabs; Settings shows its own error for a failed switch.
+    }
+  }
+
+  useEffect(() => {
+    void refreshPlugins();
+  }, []);
 
   function openChatWithDraft(prefillText: string) {
     setChatDraft(prefillText);
@@ -130,14 +144,16 @@ function MainShell({ username }: { username: string | null }) {
         onChange={setTab}
         username={username}
         onShowGuide={() => setShowGuide(true)}
+        showTraining={enabledPlugins.includes("training")}
       />
       <main className="min-h-0 flex-1 overflow-hidden">
         {tab === "today" ? <Today onAdjustPlan={openChatWithDraft} /> : null}
+        {tab === "training" ? <Training /> : null}
         {tab === "chat" ? (
           <Chat draftText={chatDraft} onDraftConsumed={() => setChatDraft(null)} />
         ) : null}
         {tab === "stock" ? <Stock /> : null}
-        {tab === "settings" ? <Settings /> : null}
+        {tab === "settings" ? <Settings onPluginsChanged={() => void refreshPlugins()} /> : null}
       </main>
       {showGuide ? <Guide username={username} onClose={() => setShowGuide(false)} /> : null}
     </div>

@@ -15,7 +15,7 @@ use tokio::sync::Mutex;
 use crate::clock::Clock;
 use crate::error::{CoreError, ValidationRule};
 use crate::events::AppEvent;
-use crate::plugin::{PlanInput, PlanSection, Plugin, PluginContext};
+use crate::plugin::{enabled_plugins, PlanDraft, PlanInput, PlanSection, Plugin, PluginContext};
 use crate::preferences::PreferenceKind;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -254,6 +254,12 @@ Brief:
 {brief}
 Output schema: {output_schema_json}"#;
 
+/// Later planning stages only: the sections earlier stages already finalized, followed by
+/// their JSON.
+const PLANNER_ALREADY_PLANNED: &str = r#"## Already planned
+These sections were planned first and are final. Build the sections below on them, and do
+not return them. The "summary" covers the whole plan, including these sections."#;
+
 /// §9.4, revisions only. Placeholders: `{version}`, `{previous_content_json}`, `{instruction}`.
 const PLANNER_REVISION: &str = r#"## Current plan (version {version})
 {previous_content_json}
@@ -345,44 +351,37 @@ impl PlanService {
             None => None,
         };
 
-        let mut inputs: Vec<(Arc<dyn Plugin>, PlanInput)> = Vec::new();
-        for plugin in &self.plugins {
-            let input = plugin
-                .plan_input(ctx, date)
-                .await
-                .map_err(|e| CoreError::Plugin(format!("{}: {e}", plugin.manifest().id)))?;
-            if let Some(input) = input {
-                inputs.push((plugin.clone(), input));
+        let plugins = enabled_plugins(&ctx.settings, &self.plugins).await?;
+        let revision = previous.as_ref().zip(instruction);
+        let mut draft = PlanDraft::new();
+        let mut sections: Vec<(String, PlanSection)> = Vec::new();
+        let mut summary = None;
+        for stage in plan_stages(&plugins) {
+            let mut inputs: Vec<(Arc<dyn Plugin>, PlanInput)> = Vec::new();
+            for plugin in stage {
+                let input = plugin
+                    .plan_input(ctx, date, &draft)
+                    .await
+                    .map_err(|e| CoreError::Plugin(format!("{}: {e}", plugin.manifest().id)))?;
+                if let Some(input) = input {
+                    inputs.push((plugin, input));
+                }
             }
+            if inputs.is_empty() {
+                continue;
+            }
+            let (output, stage_sections) =
+                plan_stage(ctx, date, &inputs, &draft, revision, request).await?;
+            for (id, section) in &stage_sections {
+                draft.insert(id.clone(), section.data.clone());
+            }
+            sections.extend(stage_sections);
+            // Later stages see the earlier sections, so their summary covers the whole plan.
+            summary = Some(output.summary);
         }
-        if inputs.is_empty() {
+        let Some(summary) = summary else {
             return Err(CoreError::NothingToPlan);
-        }
-
-        let prompt = planner_prompt(
-            ctx,
-            date,
-            &inputs,
-            previous.as_ref().zip(instruction),
-            request,
-        )
-        .await?;
-        let mut messages = vec![Message::User { content: prompt }];
-        let mut output: PlannerOutput =
-            complete_json(&ctx.llm, Role::Planner, messages.clone()).await?;
-        let mut sections = finalize_all(ctx, date, &inputs, &output).await?;
-
-        if sections.iter().any(|(_, s)| !s.violations.is_empty()) {
-            messages.push(Message::Assistant {
-                content: Some(serde_json::to_string(&output)?),
-                tool_calls: vec![],
-            });
-            messages.push(Message::User {
-                content: violations_message(&sections),
-            });
-            output = complete_json(&ctx.llm, Role::Planner, messages).await?;
-            sections = finalize_all(ctx, date, &inputs, &output).await?;
-        }
+        };
 
         let mut content_sections = BTreeMap::new();
         let mut warnings = Vec::new();
@@ -403,7 +402,7 @@ impl PlanService {
             .and_then(|p| p.medical_notes)
             .is_some_and(|n| !n.trim().is_empty());
         let content = PlanContent {
-            summary: output.summary,
+            summary,
             sections: content_sections,
             disclaimer: has_medical_notes.then(|| MEDICAL_DISCLAIMER.to_string()),
         };
@@ -421,10 +420,77 @@ impl PlanService {
     }
 }
 
+/// Groups `plugins` into planning stages (§7.12 as extended in `docs/DECISIONS.md`, "Staged
+/// planning"): a plugin goes one stage after the latest stage of any enabled plugin named in its
+/// `plan_after`, so each stage can build on the finalized sections of the ones before it.
+/// Registration order is kept within a stage. A dependency cycle can't loop forever: stages are
+/// settled in at most `plugins.len()` passes.
+fn plan_stages(plugins: &[Arc<dyn Plugin>]) -> Vec<Vec<Arc<dyn Plugin>>> {
+    let ids: Vec<&str> = plugins.iter().map(|p| p.manifest().id).collect();
+    let mut stage = vec![0usize; plugins.len()];
+    for _ in 0..plugins.len() {
+        let mut changed = false;
+        for (i, plugin) in plugins.iter().enumerate() {
+            let wanted = plugin
+                .plan_after()
+                .iter()
+                .filter_map(|dep| ids.iter().position(|id| id == dep))
+                .filter(|&j| j != i)
+                .map(|j| stage[j] + 1)
+                .max()
+                .unwrap_or(0);
+            if wanted > stage[i] {
+                stage[i] = wanted;
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    let count = stage.iter().max().map_or(0, |m| m + 1);
+    let mut stages = vec![Vec::new(); count];
+    for (plugin, s) in plugins.iter().zip(stage) {
+        stages[s].push(plugin.clone());
+    }
+    stages
+}
+
+/// One planner call for one stage's sections (§7.12 steps 2–5): prompt, finalize, and one
+/// guided retry if any section has violations.
+async fn plan_stage(
+    ctx: &PluginContext,
+    date: NaiveDate,
+    inputs: &[(Arc<dyn Plugin>, PlanInput)],
+    draft: &PlanDraft,
+    revision: Option<(&StoredPlan, &str)>,
+    request: Option<&str>,
+) -> Result<(PlannerOutput, Vec<(String, PlanSection)>), CoreError> {
+    let prompt = planner_prompt(ctx, date, inputs, draft, revision, request).await?;
+    let mut messages = vec![Message::User { content: prompt }];
+    let mut output: PlannerOutput =
+        complete_json(&ctx.llm, Role::Planner, messages.clone()).await?;
+    let mut sections = finalize_all(ctx, date, inputs, &output, draft).await?;
+
+    if sections.iter().any(|(_, s)| !s.violations.is_empty()) {
+        messages.push(Message::Assistant {
+            content: Some(serde_json::to_string(&output)?),
+            tool_calls: vec![],
+        });
+        messages.push(Message::User {
+            content: violations_message(&sections),
+        });
+        output = complete_json(&ctx.llm, Role::Planner, messages).await?;
+        sections = finalize_all(ctx, date, inputs, &output, draft).await?;
+    }
+    Ok((output, sections))
+}
+
 async fn planner_prompt(
     ctx: &PluginContext,
     date: NaiveDate,
     inputs: &[(Arc<dyn Plugin>, PlanInput)],
+    draft: &PlanDraft,
     revision: Option<(&StoredPlan, &str)>,
     request: Option<&str>,
 ) -> Result<String, CoreError> {
@@ -455,6 +521,12 @@ async fn planner_prompt(
         .replace("{weekday}", &date.format("%A").to_string())
         .replace("{profile_summary}", &profile_summary)
         .replace("{preferences}", &preferences)];
+    if !draft.is_empty() {
+        parts.push(format!(
+            "{PLANNER_ALREADY_PLANNED}\n{}",
+            serde_json::to_string(draft)?
+        ));
+    }
     for (_, input) in inputs {
         parts.push(
             PLANNER_SECTION
@@ -488,12 +560,13 @@ async fn finalize_all(
     date: NaiveDate,
     inputs: &[(Arc<dyn Plugin>, PlanInput)],
     output: &PlannerOutput,
+    draft: &PlanDraft,
 ) -> Result<Vec<(String, PlanSection)>, CoreError> {
     let mut sections = Vec::with_capacity(inputs.len());
     for (plugin, input) in inputs {
         let section = match output.sections.get(&input.section) {
             Some(raw) => plugin
-                .finalize_plan_section(ctx, date, raw.clone())
+                .finalize_plan_section(ctx, date, raw.clone(), draft)
                 .await
                 .map_err(|e| CoreError::Plugin(format!("{}: {e}", plugin.manifest().id)))?,
             None => PlanSection {
@@ -573,6 +646,7 @@ mod tests {
             &self,
             _ctx: &PluginContext,
             _date: NaiveDate,
+            _prior: &PlanDraft,
         ) -> Result<Option<PlanInput>, crate::plugin::PluginError> {
             Ok(Some(PlanInput {
                 section: "test".into(),
@@ -586,6 +660,7 @@ mod tests {
             _ctx: &PluginContext,
             _date: NaiveDate,
             raw: Value,
+            _prior: &PlanDraft,
         ) -> Result<PlanSection, crate::plugin::PluginError> {
             let ok = raw.get("ok") == Some(&Value::Bool(true));
             Ok(PlanSection {
@@ -616,6 +691,166 @@ mod tests {
             Some(Message::User { content }) => content.clone(),
             other => panic!("expected a user message, got {other:?}"),
         }
+    }
+
+    /// Section `id` after the sections in `after`. Its brief and finalized data record the
+    /// draft it was given, so a test can see what each stage received. `optional` plugins
+    /// start disabled.
+    struct StagedPlugin {
+        id: &'static str,
+        after: &'static [&'static str],
+        optional: bool,
+    }
+
+    #[async_trait::async_trait]
+    impl Plugin for StagedPlugin {
+        fn manifest(&self) -> crate::plugin::PluginManifest {
+            crate::plugin::PluginManifest {
+                id: self.id,
+                name: self.id,
+                version: "0.1.0",
+                event_types: vec![],
+                migrations: vec![],
+            }
+        }
+        fn tools(&self) -> Vec<lifeagent_llm::types::ToolSpec> {
+            vec![]
+        }
+        async fn call_tool(
+            &self,
+            _ctx: &PluginContext,
+            _name: &str,
+            _args: Value,
+        ) -> Result<crate::plugin::ToolOutput, crate::plugin::PluginError> {
+            unreachable!()
+        }
+        fn optional(&self) -> bool {
+            self.optional
+        }
+        fn plan_after(&self) -> &'static [&'static str] {
+            self.after
+        }
+        async fn plan_input(
+            &self,
+            _ctx: &PluginContext,
+            _date: NaiveDate,
+            prior: &PlanDraft,
+        ) -> Result<Option<PlanInput>, crate::plugin::PluginError> {
+            Ok(Some(PlanInput {
+                section: self.id.into(),
+                brief: format!("{} sees {:?}", self.id, prior.keys().collect::<Vec<_>>()),
+                targets: serde_json::json!({}),
+                output_schema: serde_json::json!({"type": "object"}),
+            }))
+        }
+        async fn finalize_plan_section(
+            &self,
+            _ctx: &PluginContext,
+            _date: NaiveDate,
+            raw: Value,
+            prior: &PlanDraft,
+        ) -> Result<PlanSection, crate::plugin::PluginError> {
+            Ok(PlanSection {
+                data: serde_json::json!({"raw": raw, "prior": prior}),
+                warnings: vec![],
+                violations: vec![],
+            })
+        }
+    }
+
+    fn staged(id: &'static str, after: &'static [&'static str], optional: bool) -> Arc<dyn Plugin> {
+        Arc::new(StagedPlugin {
+            id,
+            after,
+            optional,
+        })
+    }
+
+    #[test]
+    fn stages_follow_plan_after_and_ignore_unknown_and_cyclic_dependencies() {
+        let ids = |plugins: &[Arc<dyn Plugin>]| -> Vec<Vec<&'static str>> {
+            plan_stages(plugins)
+                .iter()
+                .map(|s| s.iter().map(|p| p.manifest().id).collect())
+                .collect()
+        };
+        let plugins = vec![
+            staged("diet", &["training"], false),
+            staged("training", &["missing"], false),
+            staged("sleep", &[], false),
+        ];
+        assert_eq!(ids(&plugins), vec![vec!["training", "sleep"], vec!["diet"]]);
+
+        // A cycle still terminates, with every plugin in some stage.
+        let cyclic = vec![staged("a", &["b"], false), staged("b", &["a"], false)];
+        assert_eq!(plan_stages(&cyclic).iter().map(Vec::len).sum::<usize>(), 2);
+    }
+
+    #[tokio::test]
+    async fn a_later_stage_gets_the_earlier_sections_in_its_prompt_and_draft() {
+        let (ctx, mock, _dir) = crate::test_support::context().await;
+        ctx.settings
+            .set_plugin_enabled("training", true, Utc::now())
+            .await
+            .unwrap();
+        mock.push_response(planner_reply(
+            "first",
+            serde_json::json!({"training": {"kind": "run"}}),
+        ));
+        mock.push_response(planner_reply(
+            "whole plan",
+            serde_json::json!({"diet": {"meals": []}}),
+        ));
+
+        let plan = PlanService::new(vec![
+            staged("diet", &["training"], false),
+            staged("training", &[], true),
+        ])
+        .generate(&ctx, DAY, PlanTrigger::Manual, None)
+        .await
+        .unwrap();
+
+        assert_eq!(plan.content.summary, "whole plan");
+        let training = &plan.content.sections["training"];
+        assert_eq!(training["raw"], serde_json::json!({"kind": "run"}));
+        let diet = &plan.content.sections["diet"];
+        assert_eq!(diet["prior"]["training"], *training);
+
+        let requests = mock.received_requests();
+        assert_eq!(requests.len(), 2);
+        let first = last_user_message(&requests[0]);
+        assert!(first.contains("training sees []"));
+        assert!(!first.contains("## Section \"diet\""));
+        assert!(!first.contains("## Already planned"));
+        let second = last_user_message(&requests[1]);
+        assert!(second.contains("diet sees [\"training\"]"));
+        assert!(second.contains("## Already planned"));
+        assert!(second.contains(r#"{"training":{"prior":{},"raw":{"kind":"run"}}}"#));
+        assert!(!second.contains("## Section \"training\""));
+    }
+
+    #[tokio::test]
+    async fn a_disabled_optional_plugin_is_left_out_of_the_plan() {
+        let (ctx, mock, _dir) = crate::test_support::context().await;
+        mock.push_response(planner_reply(
+            "s",
+            serde_json::json!({"diet": {"meals": []}}),
+        ));
+
+        let plan = PlanService::new(vec![
+            staged("diet", &["training"], false),
+            staged("training", &[], true),
+        ])
+        .generate(&ctx, DAY, PlanTrigger::Manual, None)
+        .await
+        .unwrap();
+
+        assert_eq!(mock.received_requests().len(), 1);
+        assert!(!plan.content.sections.contains_key("training"));
+        assert_eq!(
+            plan.content.sections["diet"]["prior"],
+            serde_json::json!({})
+        );
     }
 
     #[tokio::test]

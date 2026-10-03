@@ -9,7 +9,7 @@
 use std::sync::{Mutex, PoisonError};
 
 use chrono::{DateTime, NaiveDate, Utc};
-use lifeagent_core::app::{ChatTurn, CoreApp, HistoryMessage, TodayView};
+use lifeagent_core::app::{ChatTurn, CoreApp, HistoryMessage, PluginInfo, TodayView};
 use lifeagent_core::error::CoreError;
 use lifeagent_core::goals::WeightGoal;
 use lifeagent_core::i18n::Language;
@@ -28,6 +28,8 @@ use lifeagent_plugin_stock::model::{StockItem, Unit};
 use lifeagent_plugin_stock::settings::StockSettings;
 use lifeagent_plugin_stock::store::{self as stock_store, NewStock};
 use lifeagent_plugin_stock::view::{self as stock_view, StockView};
+use lifeagent_plugin_training::prefs::{self as training_prefs, TrainingPreferences};
+use lifeagent_plugin_training::view::{self as training_view, TrainingView};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -57,6 +59,8 @@ pub struct AppState {
     pub onboarding_complete: bool,
     pub models_configured: bool,
     pub logical_date: NaiveDate,
+    /// Ids of the plugins switched on, so the shell shows only their pages.
+    pub enabled_plugins: Vec<String>,
 }
 
 pub async fn get_app_state(app: &CoreApp) -> Result<AppState, CommandError> {
@@ -64,7 +68,50 @@ pub async fn get_app_state(app: &CoreApp) -> Result<AppState, CommandError> {
         onboarding_complete: app.settings().onboarding_complete().await?,
         models_configured: app.models_configured(),
         logical_date: app.logical_today().await?,
+        enabled_plugins: app
+            .enabled_plugins()
+            .await?
+            .iter()
+            .map(|p| p.manifest().id.to_string())
+            .collect(),
     })
+}
+
+// ---- Plugins --------------------------------------------------------------------------------
+
+pub async fn get_plugins(app: &CoreApp) -> Result<Vec<PluginInfo>, CommandError> {
+    Ok(app.plugins().await?)
+}
+
+pub async fn set_plugin_enabled(
+    app: &CoreApp,
+    id: &str,
+    enabled: bool,
+) -> Result<(), CommandError> {
+    Ok(app.set_plugin_enabled(id, enabled).await?)
+}
+
+// ---- Training (`lifeagent-plugin-training`) -------------------------------------------------
+
+pub async fn get_training_view(app: &CoreApp) -> Result<TrainingView, CommandError> {
+    Ok(training_view::training_view(&app.plugin_context()).await?)
+}
+
+pub async fn save_training_preferences(
+    app: &CoreApp,
+    preferences: &TrainingPreferences,
+) -> Result<(), CommandError> {
+    Ok(training_prefs::save(&app.plugin_context(), preferences).await?)
+}
+
+/// `date` defaults to tomorrow, like `generate_plan`'s. Blank `text` clears the request.
+pub async fn save_training_day_preference(
+    app: &CoreApp,
+    date: Option<String>,
+    text: &str,
+) -> Result<(), CommandError> {
+    let date = resolve_plan_date(app, date).await?;
+    Ok(training_prefs::set_day_preference(&app.plugin_context(), date, text).await?)
 }
 
 pub async fn complete_onboarding(app: &CoreApp) -> Result<(), CommandError> {

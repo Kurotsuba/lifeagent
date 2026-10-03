@@ -13,6 +13,7 @@ lifeagent-core = { workspace = true }
 lifeagent-llm = { workspace = true }
 lifeagent-plugin-diet = { workspace = true }
 lifeagent-plugin-stock = { workspace = true }
+lifeagent-plugin-training = { workspace = true }
 tokio = { workspace = true }
 clap = { workspace = true }
 anyhow = { workspace = true }

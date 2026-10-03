@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { LanguageSelect } from "../components/LanguageSelect";
 import { strings } from "../i18n";
 import { AccountSection } from "./AccountSection";
+import { FeaturesSection } from "./FeaturesSection";
 import { FoodDataSection } from "./FoodDataSection";
 import { GeneralSection } from "./GeneralSection";
 import { PreferencesSection } from "./PreferencesSection";
@@ -20,7 +21,12 @@ function SectionCard({ title, children }: { title: string; children: ReactNode }
   );
 }
 
-export function Settings() {
+interface SettingsProps {
+  /** An optional plugin was switched on or off. */
+  onPluginsChanged: () => void;
+}
+
+export function Settings({ onPluginsChanged }: SettingsProps) {
   return (
     <div className="h-full overflow-y-auto p-4 md:p-6">
       <div className="mx-auto flex max-w-2xl flex-col gap-6">
@@ -30,6 +36,10 @@ export function Settings() {
 
         <SectionCard title={t.sections.profileGoal}>
           <ProfileGoalSection />
+        </SectionCard>
+
+        <SectionCard title={t.sections.features}>
+          <FeaturesSection onChanged={onPluginsChanged} />
         </SectionCard>
 
         <SectionCard title={t.sections.foodData}>

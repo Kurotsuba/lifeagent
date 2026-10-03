@@ -1,6 +1,11 @@
 import { useState } from "react";
 import { acceptPlan, generatePlan } from "../api/commands";
-import { commandErrorMessage, dietPlanSection, type StoredPlan } from "../api/types";
+import {
+  commandErrorMessage,
+  dietPlanSection,
+  trainingPlanSection,
+  type StoredPlan,
+} from "../api/types";
 import { primaryButtonClass, secondaryButtonClass } from "../components/buttonStyles";
 import { inputClass } from "../components/Field";
 import { strings } from "../i18n";
@@ -87,6 +92,8 @@ export function TomorrowPlanCard({ plan, planTime, onAdjust, onChanged }: Tomorr
   }
 
   const section = dietPlanSection(plan);
+  const training = trainingPlanSection(plan);
+  const kcalAdded = section?.exercise_kcal_added ?? 0;
 
   return (
     <div>
@@ -96,6 +103,14 @@ export function TomorrowPlanCard({ plan, planTime, onAdjust, onChanged }: Tomorr
       <p className="mb-3 text-sm text-neutral-700 dark:text-neutral-300">
         {plan.content.summary}
       </p>
+
+      {training ? (
+        <p className="mb-3 text-sm font-medium text-neutral-700 dark:text-neutral-300">
+          {training.rest_day
+            ? t.trainingRest
+            : t.trainingLine(training.title, Math.round(training.duration_min))}
+        </p>
+      ) : null}
 
       {section ? (
         <div className="mb-3 flex flex-col gap-2">
@@ -125,6 +140,11 @@ export function TomorrowPlanCard({ plan, planTime, onAdjust, onChanged }: Tomorr
           ))}
           <p className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
             {t.dayTotal(Math.round(section.total.kcal), Math.round(section.targets.kcal))}
+            {kcalAdded > 0 ? (
+              <span className="ml-2 text-xs font-normal text-neutral-500 dark:text-neutral-400">
+                {t.trainingKcalAdded(Math.round(kcalAdded))}
+              </span>
+            ) : null}
           </p>
         </div>
       ) : null}

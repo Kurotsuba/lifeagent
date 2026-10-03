@@ -4,7 +4,7 @@
 use std::collections::HashSet;
 
 use chrono::{DateTime, Local, NaiveDate, Utc};
-use lifeagent_core::plugin::{PluginContext, PluginError};
+use lifeagent_core::plugin::{PlanDraft, PluginContext, PluginError};
 use lifeagent_core::time::age_years;
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -13,6 +13,12 @@ use crate::model::{round1, Macros, MealItem, MealLogged, MealType};
 use crate::targets::{self, NutritionTargets};
 
 pub const MEAL_EVENT: &str = "diet.meal_logged";
+
+/// The training plugin's plan section, which the diet section is planned after
+/// (`DietPlugin::plan_after`). Diet reads it by name only — plugins never depend on each other's
+/// crates — through the fields `rest_day`, `title`, `time_of_day`, `duration_min` and
+/// `exercise_kcal` (`docs/DECISIONS.md`, "Training plugin").
+pub const TRAINING_SECTION: &str = "training";
 
 /// A logged meal: the stored `MealLogged` payload plus its event metadata.
 #[derive(Debug, Clone, PartialEq)]
@@ -74,9 +80,44 @@ pub fn total(meals: &[LoggedMeal]) -> Macros {
     meals.iter().map(|m| m.meal.total).sum()
 }
 
-/// Targets for `date` from the profile, latest weight and active goal, or `None` if the
-/// profile or a weight is missing (§8.6).
+/// Targets for `date` (§8.6), raised for the training in the current plan for `date` if it has
+/// any (`targets::with_exercise`), so the today card shows the target the plan was built for.
+/// `None` if the profile or a weight is missing.
 pub async fn targets_for(
+    ctx: &PluginContext,
+    date: NaiveDate,
+) -> Result<Option<NutritionTargets>, PluginError> {
+    let exercise_kcal = match ctx.plans.current(date).await? {
+        Some(plan) => planned_exercise_kcal(&plan.content.sections),
+        None => 0.0,
+    };
+    targets_with_exercise(ctx, date, exercise_kcal).await
+}
+
+/// The planned session's net exercise energy (`exercise_kcal`) in a plan's training section,
+/// or 0 without one (no training plugin, a rest day, or no weight to compute it from).
+pub fn planned_exercise_kcal(sections: &PlanDraft) -> f64 {
+    sections
+        .get(TRAINING_SECTION)
+        .and_then(|s| s.get("exercise_kcal"))
+        .and_then(Value::as_f64)
+        .unwrap_or(0.0)
+}
+
+/// [`base_targets`] raised for `exercise_kcal` of planned training.
+pub async fn targets_with_exercise(
+    ctx: &PluginContext,
+    date: NaiveDate,
+    exercise_kcal: f64,
+) -> Result<Option<NutritionTargets>, PluginError> {
+    Ok(base_targets(ctx, date)
+        .await?
+        .map(|t| targets::with_exercise(t, exercise_kcal)))
+}
+
+/// Targets for `date` from the profile, latest weight and active goal alone, or `None` if the
+/// profile or a weight is missing (§8.6).
+pub async fn base_targets(
     ctx: &PluginContext,
     date: NaiveDate,
 ) -> Result<Option<NutritionTargets>, PluginError> {

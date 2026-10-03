@@ -6,6 +6,8 @@
 //! lands in M2) is just `get_json::<ModelsConfig>("models")` away — no change needed here
 //! when that type exists.
 
+use std::collections::BTreeMap;
+
 use chrono::{DateTime, Utc};
 use lifeagent_llm::router::ModelsConfig;
 use serde::de::DeserializeOwned;
@@ -169,6 +171,26 @@ impl Settings {
         self.set_json("language", &lang, now).await
     }
 
+    /// Optional plugins' on/off switches, by plugin id. A plugin missing from the map is off
+    /// (see `Plugin::optional`).
+    pub async fn plugins_enabled(&self) -> Result<BTreeMap<String, bool>, CoreError> {
+        Ok(self
+            .get_json::<BTreeMap<String, bool>>("plugins_enabled")
+            .await?
+            .unwrap_or_default())
+    }
+
+    pub async fn set_plugin_enabled(
+        &self,
+        id: &str,
+        on: bool,
+        now: DateTime<Utc>,
+    ) -> Result<(), CoreError> {
+        let mut switches = self.plugins_enabled().await?;
+        switches.insert(id.to_string(), on);
+        self.set_json("plugins_enabled", &switches, now).await
+    }
+
     /// `None` until onboarding configures a provider (§7.2: "none (onboarding required)").
     pub async fn models(&self) -> Result<Option<ModelsConfig>, CoreError> {
         self.get_json("models").await
@@ -230,6 +252,23 @@ mod tests {
         assert_eq!(settings.language().await.unwrap(), Language::Ja);
         settings.set_language(Language::En, now()).await.unwrap();
         assert_eq!(settings.language().await.unwrap(), Language::En);
+    }
+
+    #[tokio::test]
+    async fn plugin_switches_default_off_and_are_stored_per_id() {
+        let (pool, _dir) = crate::db::test_pool().await;
+        let settings = Settings::new(pool);
+        assert!(settings.plugins_enabled().await.unwrap().is_empty());
+
+        settings.set_plugin_enabled("a", true, now()).await.unwrap();
+        settings
+            .set_plugin_enabled("b", false, now())
+            .await
+            .unwrap();
+
+        let switches = settings.plugins_enabled().await.unwrap();
+        assert_eq!(switches.get("a"), Some(&true));
+        assert_eq!(switches.get("b"), Some(&false));
     }
 
     #[tokio::test]

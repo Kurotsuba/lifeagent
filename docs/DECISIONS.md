@@ -2518,3 +2518,71 @@ they used out of it; plans are built from it and carry a shopping list.
   like the locale: it's a view preference, so no server setting or migration. A new browser
   shows the tour once more, which is harmless. If storage is unavailable the tour does not
   auto-open, so it never nags on every load.
+## 2026-10-03 — Training plugin, optional plugins and staged planning
+
+A training log and daily training plan, as a new optional plugin (`crates/plugin-training`,
+id `training`), with the next day's diet planned on top of the next day's training.
+
+- **Optional plugins (core).** `Plugin::optional()` (default `false`). Optional plugins start
+  off; the switches live in the `plugins_enabled` setting (plugin id → bool). A disabled plugin
+  keeps its tables and events but contributes no tools (not offered to the model, and a call to
+  one from stale history is refused), no context snippet, no today card and no plan section.
+  `CoreApp::plugins()` / `set_plugin_enabled()`; the commands `get_plugins` /
+  `set_plugin_enabled`; `AppState.enabled_plugins` tells the UI which pages to show. Only
+  `training` is optional; diet and stock stay always on. The event dispatcher still calls every plugin's
+  `on_event` (no plugin uses it, and reading the setting per event isn't worth it yet).
+  Settings › Features holds the switch; the CLI has `plugins [enable|disable <id>]`.
+- **Staged planning (core).** `Plugin::plan_after()` names the plugins whose sections this one
+  builds on. `PlanService` groups the enabled plugins into stages (a plugin goes one stage after
+  the latest of its dependencies; unknown or disabled dependencies are ignored, a cycle can't
+  loop) and makes one planner call per stage, each with its own violation retry. Later stages
+  get the earlier stages' finalized sections as a `PlanDraft`, passed to `plan_input` and
+  `finalize_plan_section` (both gained a `prior: &PlanDraft` parameter) and shown in the prompt
+  under "## Already planned". The stored summary is the last stage's, which saw every section.
+  With training off there is still exactly one planner call, as before. Chosen over one
+  combined call because the diet targets (numbers by code) must be computed from the training
+  that was actually planned and validated, not guessed in the same call.
+- **Diet builds on training.** `DietPlugin::plan_after() == ["training"]`, and so does
+  `StockPlugin`'s: the stock section builds the diet's meals in the same call, so the two must
+  share a stage. Diet reads the
+  training section by name only — no crate dependency between plugins — through the fields
+  `rest_day`, `title`, `time_of_day`, `duration_min` and `exercise_kcal`. The kcal target is
+  raised by `targets::exercise_credit`: 50% of the session's net exercise energy (the activity
+  factor in the TDEE already covers part of the user's usual exercise, and eating back half is
+  the common conservative rule), capped at 600 kcal, rounded up to 10, all added as carbs, with
+  fiber following kcal. The validator checks against the same raised targets, the section
+  stores `exercise_kcal_added`, and the brief tells the planner when the session is so meals
+  can fuel and follow it. `intake::targets_for` applies the stored plan's credit too, so the
+  Today card for that day shows the target the plan was built for.
+- **Training logging.** `training_log_session` takes structured exercises (kind, intensity,
+  sets/reps/weight, duration/distance) filled by the conversation model from the user's words,
+  rather than a separate parser-model call like meals: there is no food-table lookup to do, and
+  every number either comes from the user or is computed by the app. Duration and energy are
+  computed in Rust (`energy.rs`): an exercise's own duration, else 2.5 min per set, else 10 min;
+  energy = (MET − 1) × kg × hours with per-kind/intensity METs, scaled when the user states the
+  session's total time; `null` without a logged weight. Corrections go through
+  `core_delete_entry` like meals. Other tools: `training_get_log`, `training_set_day_preference`,
+  `training_update_preferences`.
+- **Preferences.** Standing preferences (goal, days per week 1–7, session minutes 10–180,
+  equipment/place, notes) are stored in the core settings table under `training.preferences`
+  (one JSON value, no migration needed). The per-day request is the plugin's own table
+  `training_day_preferences` (plan date → text, blank clears) and is optional: the Training
+  page's input box and the chat tool both write it, and the plan for that date reads it.
+- **Training plan.** Requires a profile (like diet, nothing is planned before onboarding). The
+  brief has the preferences, the day's request, the last 7 days' log (D−7..D−1, "nothing
+  logged" when empty), recent training days and the current streak, plus rules (rest-day
+  triggers, the request wins unless unsafe, gradual progression, respect injuries). Validation:
+  structure, per-exercise ranges, a training day needs an exercise, a rest day may only hold low
+  intensity mobility, and > 180 min is a violation; longer than 1.25 × the usual session, more
+  than 1.5 × the longest recent session, high intensity with no recent log, and a third high
+  intensity day in a row are warnings. Like the diet validator's, these texts are zh-CN and
+  stored with the plan.
+- **UI.** A Training tab (shown only while the plugin is on): the last 7 days with per-day bars
+  and deletable sessions, today's and tomorrow's planned training, the optional request for
+  tomorrow with "regenerate with this" (which saves it and regenerates the whole plan, so the
+  diet follows), and the preferences form. Tomorrow's plan card on Today shows the training line
+  and the kcal added for it. New commands: `get_training_view`, `save_training_preferences`,
+  `save_training_day_preference`.
+- **Tests.** The cross-plugin case (two planner calls, raised diet targets, the brief's training
+  line) lives in `crates/api/tests/training_plan.rs`, the first crate that depends on both
+  plugins, so the plugins stay independent of each other.

@@ -23,6 +23,7 @@ use lifeagent_api::ErrorDetail;
 use lifeagent_core::goals::WeightGoal;
 use lifeagent_core::i18n::Language;
 use lifeagent_core::profile::Profile;
+use lifeagent_plugin_training::prefs::TrainingPreferences;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast::error::RecvError;
@@ -133,6 +134,16 @@ struct Token {
     token: String,
 }
 #[derive(Deserialize)]
+struct TrainingPreferencesArg {
+    preferences: TrainingPreferences,
+}
+#[derive(Deserialize)]
+struct DayPreference {
+    #[serde(default)]
+    date: Option<String>,
+    text: String,
+}
+#[derive(Deserialize)]
 struct CommitImport {
     token: String,
     #[serde(default)]
@@ -217,6 +228,20 @@ pub async fn command(
             reply(ops::delete_preference(app, &a.id).await)
         }
         "get_usage_summary" => reply(ops::get_usage_summary(app).await),
+        "get_plugins" => reply(ops::get_plugins(app).await),
+        "set_plugin_enabled" => {
+            let a: Enabled = args(&body)?;
+            reply(ops::set_plugin_enabled(app, &a.id, a.enabled).await)
+        }
+        "get_training_view" => reply(ops::get_training_view(app).await),
+        "save_training_preferences" => {
+            let a: TrainingPreferencesArg = args(&body)?;
+            reply(ops::save_training_preferences(app, &a.preferences).await)
+        }
+        "save_training_day_preference" => {
+            let a: DayPreference = args(&body)?;
+            reply(ops::save_training_day_preference(app, a.date, &a.text).await)
+        }
         "list_food_sources" => reply(ops::list_food_sources(app).await),
         "list_foods" => {
             let a: ListFoods = args(&body)?;

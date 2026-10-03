@@ -54,6 +54,17 @@ export interface AppState {
   onboarding_complete: boolean;
   models_configured: boolean;
   logical_date: string;
+  /** Ids of the plugins switched on (e.g. `"training"` once enabled). */
+  enabled_plugins: string[];
+}
+
+/** `lifeagent_core::app::PluginInfo`. */
+export interface PluginInfo {
+  id: string;
+  name: string;
+  /** The user can switch it on or off; optional plugins start off. */
+  optional: boolean;
+  enabled: boolean;
 }
 
 export interface SettingsDto {
@@ -148,6 +159,9 @@ export interface DietPlanMeal {
 /** `StoredPlan.content.sections["diet"]`. */
 export interface DietPlanSection {
   targets: DietMacros;
+  /** kcal the targets were raised by for the day's planned training (0 without one). Absent in
+   * plans made before the training plugin existed. */
+  exercise_kcal_added?: number;
   total: DietMacros;
   meals: DietPlanMeal[];
   tips: string[];
@@ -158,7 +172,8 @@ export type PlanTrigger = "schedule" | "manual" | "revision";
 
 export interface PlanContent {
   summary: string;
-  /** Plugin id -> that plugin's finalized section data; only `"diet"` exists in Phase 1. */
+  /** Plugin id -> that plugin's finalized section data (`"diet"`, and `"training"` when that
+   * plugin is on). */
   sections: Record<string, unknown>;
   disclaimer: string | null;
 }
@@ -248,6 +263,91 @@ export interface NewStockItem {
   quantity: number;
   unit: StockUnit;
   expires_on: string | null;
+}
+
+// ---- Training (`crates/plugin-training`) ----------------------------------------------------
+
+export type ExerciseKind = "strength" | "cardio" | "mobility" | "sport" | "other";
+export type Intensity = "low" | "moderate" | "high";
+export type TimeOfDay = "morning" | "midday" | "afternoon" | "evening";
+export type TrainingGoal = "general_fitness" | "strength" | "muscle" | "endurance" | "fat_loss";
+
+export interface Exercise {
+  name: string;
+  kind: ExerciseKind;
+  intensity: Intensity;
+  sets: number | null;
+  reps: number | null;
+  weight_kg: number | null;
+  duration_min: number | null;
+  distance_km: number | null;
+  note: string | null;
+}
+
+/** One logged session (`log::SessionView`). `duration_min`/`exercise_kcal` are computed by
+ * the app; `exercise_kcal` is `null` when no weight was recorded. */
+export interface TrainingSession {
+  entry_id: string;
+  date: string;
+  time: string; // "HH:MM"
+  title: string;
+  raw_text: string;
+  exercises: Exercise[];
+  duration_min: number;
+  exercise_kcal: number | null;
+  intensity: Intensity;
+  rpe: number | null;
+  notes: string | null;
+}
+
+export interface TrainingDay {
+  date: string;
+  sessions: TrainingSession[];
+  minutes: number;
+  kcal: number;
+}
+
+/** `StoredPlan.content.sections["training"]` (the training plugin's `validate::finalize`). */
+export interface TrainingPlanSection {
+  rest_day: boolean;
+  title: string;
+  focus: string | null;
+  time_of_day: TimeOfDay | null;
+  exercises: (Exercise & { minutes: number })[];
+  duration_min: number;
+  exercise_kcal: number | null;
+  intensity: Intensity;
+  tips: string[];
+}
+
+export interface TrainingPreferences {
+  goal: TrainingGoal;
+  days_per_week: number;
+  session_minutes: number;
+  equipment: string;
+  notes: string;
+}
+
+export interface TrainingView {
+  logical_date: string;
+  preferences: TrainingPreferences;
+  /** Last 7 days up to today, oldest first. */
+  days: TrainingDay[];
+  week_sessions: number;
+  week_minutes: number;
+  week_kcal: number;
+  today_plan: TrainingPlanSection | null;
+  tomorrow_date: string;
+  tomorrow_plan: TrainingPlanSection | null;
+  tomorrow_has_plan: boolean;
+  tomorrow_preference: string | null;
+}
+
+/** `StoredPlan.content.sections["training"]`, narrowed from the untyped `Record`; `null` when
+ * absent or invalid. */
+export function trainingPlanSection(plan: StoredPlan): TrainingPlanSection | null {
+  const section = plan.content.sections["training"];
+  return section && typeof section === "object" ? (section as TrainingPlanSection) : null;
 }
 
 // ---- Nutrition sources / batch import (`docs/NUTRITION_SOURCES.md`) ------------------------

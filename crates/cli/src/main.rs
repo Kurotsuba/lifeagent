@@ -1,7 +1,7 @@
 //! `lifeagent-cli`: developer harness (chat, plan, inspect data).
 //!
 //! The command tree matches `docs/PHASE1_SPEC.md` §11. This crate is a composition root
-//! (`CLAUDE.md`): it registers the diet plugin and builds `CoreApp`, since `lifeagent-core`
+//! (`CLAUDE.md`): it registers the diet and training plugins and builds `CoreApp`, since `lifeagent-core`
 //! never depends on a plugin crate itself.
 
 mod mock;
@@ -25,6 +25,7 @@ use lifeagent_plugin_diet::import::{self, ImportFormat, ImportTarget};
 use lifeagent_plugin_diet::sources;
 use lifeagent_plugin_diet::{intake, DietPlugin};
 use lifeagent_plugin_stock::StockPlugin;
+use lifeagent_plugin_training::TrainingPlugin;
 
 use output::{print_json, print_turn};
 
@@ -83,6 +84,19 @@ enum Command {
     },
     /// Print `NutritionTargets` for today.
     Targets,
+    /// List plugins, or switch an optional one on or off.
+    Plugins {
+        #[command(subcommand)]
+        action: Option<PluginsAction>,
+    },
+    /// Print the Training page's data as pretty JSON.
+    Training,
+}
+
+#[derive(Subcommand)]
+enum PluginsAction {
+    Enable { id: String },
+    Disable { id: String },
 }
 
 #[derive(Subcommand)]
@@ -232,7 +246,8 @@ async fn main() -> Result<()> {
     let mock = Arc::new(MockChatModel::new());
     let mut builder = CoreAppBuilder::new(db)
         .plugin(Arc::new(DietPlugin))
-        .plugin(Arc::new(StockPlugin));
+        .plugin(Arc::new(StockPlugin))
+        .plugin(Arc::new(TrainingPlugin));
     if cli.mock {
         builder = builder.chat_model_override(mock.clone());
     }
@@ -247,6 +262,17 @@ async fn main() -> Result<()> {
         Command::Profile { action } => profile(&app, action).await,
         Command::Models { action } => models(&app, action).await,
         Command::Targets => targets(&app).await,
+        Command::Plugins { action } => {
+            match action {
+                Some(PluginsAction::Enable { id }) => app.set_plugin_enabled(&id, true).await?,
+                Some(PluginsAction::Disable { id }) => app.set_plugin_enabled(&id, false).await?,
+                None => {}
+            }
+            print_json(&app.plugins().await?)
+        }
+        Command::Training => print_json(
+            &lifeagent_plugin_training::view::training_view(&app.plugin_context()).await?,
+        ),
     }
 }
 

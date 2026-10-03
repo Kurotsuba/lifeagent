@@ -69,6 +69,16 @@ pub struct WeightPoint {
     pub occurred_at: DateTime<Utc>,
 }
 
+/// A registered plugin and whether it's switched on, for the Settings page.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct PluginInfo {
+    pub id: String,
+    pub name: String,
+    /// The user can switch it off (and it starts off); see `Plugin::optional`.
+    pub optional: bool,
+    pub enabled: bool,
+}
+
 /// Everything the Today page shows (§7.14).
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct TodayView {
@@ -528,6 +538,50 @@ impl CoreApp {
         Ok(())
     }
 
+    /// The plugins currently switched on (see `Plugin::optional`).
+    pub async fn enabled_plugins(&self) -> Result<Vec<Arc<dyn Plugin>>, CoreError> {
+        crate::plugin::enabled_plugins(&self.0.settings, &self.0.plugins).await
+    }
+
+    /// Every registered plugin, in registration order, with its on/off state.
+    pub async fn plugins(&self) -> Result<Vec<PluginInfo>, CoreError> {
+        let enabled = self.enabled_plugins().await?;
+        Ok(self
+            .0
+            .plugins
+            .iter()
+            .map(|p| {
+                let manifest = p.manifest();
+                PluginInfo {
+                    id: manifest.id.to_string(),
+                    name: manifest.name.to_string(),
+                    optional: p.optional(),
+                    enabled: enabled.iter().any(|e| e.manifest().id == manifest.id),
+                }
+            })
+            .collect())
+    }
+
+    /// Switches an optional plugin on or off. Unknown ids are `NotFound`; a plugin that isn't
+    /// optional can't be switched off.
+    pub async fn set_plugin_enabled(&self, id: &str, enabled: bool) -> Result<(), CoreError> {
+        let plugin = self
+            .0
+            .plugins
+            .iter()
+            .find(|p| p.manifest().id == id)
+            .ok_or_else(|| CoreError::NotFound(format!("plugin {id:?}")))?;
+        if !plugin.optional() {
+            return Err(CoreError::Validation(format!(
+                "plugin {id:?} is not optional"
+            )));
+        }
+        self.0
+            .settings
+            .set_plugin_enabled(id, enabled, self.0.clock.now())
+            .await
+    }
+
     /// Starts the scheduler (§7.13): one tick immediately, then every 60 s, for the life of
     /// the runtime. Shells call this once.
     pub fn start_scheduler(&self) -> tokio::task::JoinHandle<()> {
@@ -625,7 +679,7 @@ impl CoreApp {
         let ctx = self.plugin_context();
 
         let mut cards = BTreeMap::new();
-        for plugin in &self.0.plugins {
+        for plugin in &self.enabled_plugins().await? {
             let id = plugin.manifest().id;
             let card = plugin
                 .today_card(&ctx, today)
@@ -681,12 +735,13 @@ impl CoreApp {
 
         let plugin_ctx = self.plugin_context();
         let router = plugin_ctx.llm.clone();
-        let tool_specs = self.0.registry.specs();
+        let plugins = self.enabled_plugins().await?;
+        let tool_specs = self.0.registry.specs_for(&plugins);
         let mut activities = Vec::new();
         // Built once per turn, not per iteration: rebuilt after a tool call, "Today's status"
         // already lists the meal that call just logged, and the model then tells the user it
         // was "already recorded". Tool results carry the updated totals instead.
-        let system_prompt = context::build_system_prompt(&plugin_ctx, &self.0.plugins).await?;
+        let system_prompt = context::build_system_prompt(&plugin_ctx, &plugins).await?;
         let boundary = self.0.settings.day_boundary().await?;
 
         for _ in 0..MAX_ITERATIONS {
@@ -722,12 +777,18 @@ impl CoreApp {
             }
 
             for call in resp.tool_calls {
-                let content = match self
-                    .0
-                    .registry
-                    .call(&plugin_ctx, &call.name, call.arguments)
-                    .await
-                {
+                let result = if self.0.registry.is_available(&call.name, &plugins) {
+                    self.0
+                        .registry
+                        .call(&plugin_ctx, &call.name, call.arguments)
+                        .await
+                } else {
+                    Err(PluginError::NotFound(format!(
+                        "unknown tool {:?}",
+                        call.name
+                    )))
+                };
+                let content = match result {
                     Ok(out) => {
                         activities.push(out.summary);
                         out.content
@@ -998,6 +1059,118 @@ mod tests {
         );
         assert_eq!(view.today_plan, None);
         assert_eq!(view.latest_weight, None);
+    }
+
+    /// Optional, with one tool and a today card.
+    struct OptionalPlugin;
+
+    #[async_trait::async_trait]
+    impl Plugin for OptionalPlugin {
+        fn manifest(&self) -> crate::plugin::PluginManifest {
+            crate::plugin::PluginManifest {
+                id: "opt",
+                name: "Optional",
+                version: "0.1.0",
+                event_types: vec![],
+                migrations: vec![],
+            }
+        }
+        fn optional(&self) -> bool {
+            true
+        }
+        fn tools(&self) -> Vec<lifeagent_llm::types::ToolSpec> {
+            vec![lifeagent_llm::types::ToolSpec {
+                name: "opt_ping".into(),
+                description: "ping".into(),
+                parameters: serde_json::json!({"type": "object"}),
+            }]
+        }
+        async fn call_tool(
+            &self,
+            _ctx: &PluginContext,
+            _name: &str,
+            _args: Value,
+        ) -> Result<crate::plugin::ToolOutput, PluginError> {
+            Ok(crate::plugin::ToolOutput {
+                content: serde_json::json!({"pong": true}),
+                summary: "pong".into(),
+            })
+        }
+        async fn today_card(
+            &self,
+            _ctx: &PluginContext,
+            _date: NaiveDate,
+        ) -> Result<Option<Value>, PluginError> {
+            Ok(Some(serde_json::json!({})))
+        }
+    }
+
+    fn tool_names(request: &lifeagent_llm::types::ChatRequest) -> Vec<String> {
+        request.tools.iter().map(|t| t.name.clone()).collect()
+    }
+
+    #[tokio::test]
+    async fn an_optional_plugin_is_off_until_enabled() {
+        let (builder, _dir) = builder().await;
+        let mock = Arc::new(MockChatModel::new());
+        let ping = || ToolCall {
+            id: "call_1".into(),
+            name: "opt_ping".into(),
+            arguments: serde_json::json!({}),
+            provider_extra: None,
+        };
+        mock.push_response(response(None, vec![ping()]));
+        mock.push_response(response(Some("off"), vec![]));
+        mock.push_response(response(None, vec![ping()]));
+        mock.push_response(response(Some("on"), vec![]));
+        let app = builder
+            .plugin(Arc::new(RecordingPlugin::default()))
+            .plugin(Arc::new(OptionalPlugin))
+            .chat_model_override(mock.clone())
+            .build()
+            .await
+            .unwrap();
+
+        let info = app.plugins().await.unwrap();
+        assert_eq!(
+            info.iter()
+                .map(|p| (p.id.as_str(), p.optional, p.enabled))
+                .collect::<Vec<_>>(),
+            vec![("rec", false, true), ("opt", true, false)]
+        );
+        assert!(!app.today_view().await.unwrap().cards.contains_key("opt"));
+        // Off: the tool isn't offered, and a call to it anyway is refused.
+        let turn = app.send_message("ping").await.unwrap();
+        assert!(turn.activities.is_empty());
+        let requests = mock.received_requests();
+        assert!(!tool_names(&requests[0]).contains(&"opt_ping".to_string()));
+
+        app.set_plugin_enabled("opt", true).await.unwrap();
+
+        assert!(app.today_view().await.unwrap().cards.contains_key("opt"));
+        let turn = app.send_message("ping again").await.unwrap();
+        assert_eq!(turn.activities, vec!["pong"]);
+        let requests = mock.received_requests();
+        assert!(tool_names(&requests[2]).contains(&"opt_ping".to_string()));
+        assert!(app.plugins().await.unwrap()[1].enabled);
+    }
+
+    #[tokio::test]
+    async fn only_registered_optional_plugins_can_be_switched() {
+        let (builder, _dir) = builder().await;
+        let app = builder
+            .plugin(Arc::new(RecordingPlugin::default()))
+            .build()
+            .await
+            .unwrap();
+        assert!(matches!(
+            app.set_plugin_enabled("nope", true).await,
+            Err(CoreError::NotFound(_))
+        ));
+        assert!(matches!(
+            app.set_plugin_enabled("rec", false).await,
+            Err(CoreError::Validation(_))
+        ));
     }
 
     #[tokio::test]

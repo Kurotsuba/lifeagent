@@ -22,8 +22,8 @@ use async_trait::async_trait;
 use chrono::NaiveDate;
 use lifeagent_core::events::Event;
 use lifeagent_core::plugin::{
-    PlanInput, PlanSection, Plugin, PluginContext, PluginError, PluginManifest, PluginMigration,
-    ToolOutput,
+    PlanDraft, PlanInput, PlanSection, Plugin, PluginContext, PluginError, PluginManifest,
+    PluginMigration, ToolOutput,
 };
 use lifeagent_llm::types::ToolSpec;
 use serde_json::Value;
@@ -109,10 +109,17 @@ impl Plugin for StockPlugin {
         Ok(Some(lines.join("\n")))
     }
 
+    /// Stock builds the diet section's meals in the same planner call, so it goes in diet's
+    /// stage: after the day's training, when the training plugin is on.
+    fn plan_after(&self) -> &'static [&'static str] {
+        &["training"]
+    }
+
     async fn plan_input(
         &self,
         ctx: &PluginContext,
         date: NaiveDate,
+        _prior: &PlanDraft,
     ) -> Result<Option<PlanInput>, PluginError> {
         plan::plan_input(ctx, date).await
     }
@@ -122,6 +129,7 @@ impl Plugin for StockPlugin {
         ctx: &PluginContext,
         date: NaiveDate,
         raw: Value,
+        _prior: &PlanDraft,
     ) -> Result<PlanSection, PluginError> {
         plan::finalize(ctx, date, raw).await
     }

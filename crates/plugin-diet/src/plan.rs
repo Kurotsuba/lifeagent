@@ -1,10 +1,11 @@
 //! The diet section's plan input, per `docs/PHASE1_SPEC.md` §8.9.
 
 use chrono::{Days, NaiveDate};
-use lifeagent_core::plugin::{PlanInput, PluginContext, PluginError};
+use lifeagent_core::plugin::{PlanDraft, PlanInput, PluginContext, PluginError};
 use serde_json::{json, Value};
 
-use crate::intake;
+use crate::intake::{self, TRAINING_SECTION};
+use crate::targets;
 
 pub const SECTION: &str = "diet";
 
@@ -39,13 +40,16 @@ pub fn output_schema() -> Value {
 }
 
 /// §8.9. `None` (with a warning logged) when the profile or a weight is missing, since there
-/// are no targets to plan against.
+/// are no targets to plan against. `prior` holds the day's training section when the training
+/// plugin planned one: the targets are raised for it and the brief says when it is.
 pub async fn plan_input(
     ctx: &PluginContext,
     date: NaiveDate,
+    prior: &PlanDraft,
 ) -> Result<Option<PlanInput>, PluginError> {
+    let exercise_kcal = intake::planned_exercise_kcal(prior);
     let (Some(targets), Some(profile)) = (
-        intake::targets_for(ctx, date).await?,
+        intake::targets_with_exercise(ctx, date, exercise_kcal).await?,
         ctx.profile.get().await?,
     ) else {
         tracing::warn!(%date, "no diet plan input: profile or weight missing");
@@ -70,6 +74,9 @@ pub async fn plan_input(
             list_or_none(&ctx.preferences.dislikes_on(date).await?)
         ),
     ];
+    if let Some(line) = training_line(prior, exercise_kcal) {
+        brief.push(line);
+    }
 
     let mut adherence_lines = Vec::new();
     for day in days_before(date, ADHERENCE_DAYS) {
@@ -102,6 +109,39 @@ pub async fn plan_input(
         targets: targets.as_macros().to_json(),
         output_schema: output_schema(),
     }))
+}
+
+/// The brief's line about the day's training, from the already-planned training section, or
+/// `None` when the training plugin isn't planning (disabled, or its section is invalid).
+fn training_line(prior: &PlanDraft, exercise_kcal: f64) -> Option<String> {
+    let section = prior.get(TRAINING_SECTION).filter(|s| s.is_object())?;
+    if section.get("rest_day").and_then(Value::as_bool) == Some(true) {
+        return Some(
+            "Training that day: rest day. Keep meals evenly spread; no pre- or post-workout \
+             meals needed."
+                .into(),
+        );
+    }
+    let title = section.get("title").and_then(Value::as_str).unwrap_or("");
+    let mut line = format!("Training that day (already planned): {title}");
+    if let Some(minutes) = section.get("duration_min").and_then(Value::as_f64) {
+        line.push_str(&format!(", {minutes:.0} min"));
+    }
+    if let Some(time) = section.get("time_of_day").and_then(Value::as_str) {
+        line.push_str(&format!(", in the {time}"));
+    }
+    line.push('.');
+    let credit = targets::exercise_credit(exercise_kcal);
+    if credit > 0.0 {
+        line.push_str(&format!(
+            " The targets above already include {credit:.0} kcal extra (as carbs) for it."
+        ));
+    }
+    line.push_str(
+        " Time the meals around the session: a carb-containing meal or snack 1–3 h before, \
+         and a protein-rich meal within 2 h after.",
+    );
+    Some(line)
 }
 
 /// `date − n .. date − 1`, oldest first.
@@ -150,7 +190,10 @@ mod tests {
     async fn none_without_profile_or_weight() {
         let env = env().await;
         let today = env.ctx.today().await.unwrap();
-        assert!(plan_input(&env.ctx, today).await.unwrap().is_none());
+        assert!(plan_input(&env.ctx, today, &PlanDraft::new())
+            .await
+            .unwrap()
+            .is_none());
     }
 
     #[tokio::test]
@@ -183,7 +226,10 @@ mod tests {
             .unwrap();
         log_meal_event(&env.ctx, MealType::Lunch, 600.0, 30.0).await;
 
-        let input = plan_input(&env.ctx, tomorrow).await.unwrap().unwrap();
+        let input = plan_input(&env.ctx, tomorrow, &PlanDraft::new())
+            .await
+            .unwrap()
+            .unwrap();
 
         assert_eq!(input.section, "diet");
         assert!(input.targets["kcal"].as_f64().unwrap() > 0.0);
@@ -196,6 +242,47 @@ mod tests {
         )));
         assert!(input.brief.contains("(vary from these): 番茄炒蛋饭."));
         assert_eq!(input.output_schema, output_schema());
+        assert!(!input.brief.contains("Training that day"));
+    }
+
+    #[tokio::test]
+    async fn a_planned_session_raises_the_targets_and_is_in_the_brief() {
+        let env = env().await;
+        seed_person(&env.ctx).await;
+        let tomorrow = env.ctx.today().await.unwrap().succ_opt().unwrap();
+        let base = plan_input(&env.ctx, tomorrow, &PlanDraft::new())
+            .await
+            .unwrap()
+            .unwrap();
+        let prior = PlanDraft::from([(
+            "training".to_string(),
+            json!({
+                "rest_day": false, "title": "下肢力量", "time_of_day": "evening",
+                "duration_min": 50.0, "exercise_kcal": 300.0
+            }),
+        )]);
+
+        let input = plan_input(&env.ctx, tomorrow, &prior)
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(
+            input.targets["kcal"].as_f64().unwrap(),
+            base.targets["kcal"].as_f64().unwrap() + 150.0
+        );
+        assert!(input.brief.contains(
+            "Training that day (already planned): 下肢力量, 50 min, in the evening. The targets \
+             above already include 150 kcal extra (as carbs) for it."
+        ));
+
+        let rest = PlanDraft::from([("training".to_string(), json!({"rest_day": true}))]);
+        let input = plan_input(&env.ctx, tomorrow, &rest)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(input.targets, base.targets);
+        assert!(input.brief.contains("Training that day: rest day."));
     }
 
     #[test]

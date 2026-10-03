@@ -21,6 +21,7 @@ import type {
   NewStockItem,
   Preference,
   NutritionTargets,
+  PluginInfo,
   Profile,
   SettingsDto,
   SourceInfo,
@@ -29,6 +30,8 @@ import type {
   StockView,
   StoredPlan,
   TodayView,
+  TrainingPreferences,
+  TrainingView,
   WeightGoal,
 } from "./types";
 
@@ -114,6 +117,31 @@ export function saveSettings(settings: SettingsDto): Promise<void> {
 
 export function setLanguage(language: Locale): Promise<void> {
   return call("set_language", { language });
+}
+
+// ---- Plugins -------------------------------------------------------------------------------
+
+export function getPlugins(): Promise<PluginInfo[]> {
+  return call("get_plugins");
+}
+
+export function setPluginEnabled(id: string, enabled: boolean): Promise<void> {
+  return call("set_plugin_enabled", { id, enabled });
+}
+
+// ---- Training ------------------------------------------------------------------------------
+
+export function getTrainingView(): Promise<TrainingView> {
+  return call("get_training_view");
+}
+
+export function saveTrainingPreferences(preferences: TrainingPreferences): Promise<void> {
+  return call("save_training_preferences", { preferences });
+}
+
+/** `date` omitted means tomorrow. Blank `text` clears the request. */
+export function saveTrainingDayPreference(text: string, date?: string): Promise<void> {
+  return call("save_training_day_preference", { text, date: date ?? null });
 }
 
 // ---- Preferences ---------------------------------------------------------------------------

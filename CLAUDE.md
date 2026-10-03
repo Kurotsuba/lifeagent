@@ -28,6 +28,7 @@ Cargo.toml              # workspace
 crates/llm/             # lifeagent-llm: model abstraction, providers, router (no dependency on core)
 crates/core/            # lifeagent-core: storage, plugin API, orchestrator, planner, scheduler
 crates/plugin-diet/     # lifeagent-plugin-diet: diet tracking + diet plan section
+crates/plugin-training/ # lifeagent-plugin-training: optional training log + training plan section
 crates/api/             # lifeagent-api: command surface + error mapping used by the server
 crates/cli/             # lifeagent-cli: developer harness (chat, plan, inspect data)
 crates/server/          # lifeagent-server: HTTP backend for the web build (accounts, per-user apps)
@@ -36,7 +37,8 @@ docs/
 ```
 
 Dependency rule: `llm` <- `core` <- `plugin-*` <- `api` <- `server`; `cli` uses `core` and the
-plugins directly. `core` must never depend on any plugin crate. Plugins are registered in the
+plugins directly. `core` must never depend on any plugin crate, and plugins never depend on each
+other (they share data only by event type and plan section name). Plugins are registered in the
 composition roots (`cli` and `server`).
 
 ## Commands

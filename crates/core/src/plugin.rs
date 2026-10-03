@@ -1,7 +1,7 @@
 //! `PluginManifest`, `PluginContext`, the `Plugin` trait and `PluginError`, per
 //! `docs/PHASE1_SPEC.md` §7.6, plus plugin-migration application (§5 "Plugin migrations").
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -83,6 +83,12 @@ pub struct PlanInput {
     pub output_schema: Value,
 }
 
+/// Finalized sections (section id -> `PlanSection::data`) from earlier planning stages, handed
+/// to a plugin that declared them in [`Plugin::plan_after`]. Empty in the first stage, and for
+/// plugins that depend on nothing. A section a plugin depends on but that isn't being planned
+/// (its plugin disabled, or it had no plan input) is simply absent.
+pub type PlanDraft = BTreeMap<String, Value>;
+
 /// The result of validating and enriching a plugin's raw planner output for one section (M5).
 pub struct PlanSection {
     pub data: Value,
@@ -160,10 +166,25 @@ pub trait Plugin: Send + Sync {
         Ok(None)
     }
 
+    /// Optional plugins can be switched off by the user and start switched off; the rest are
+    /// always on. A disabled plugin keeps its tables and events, but contributes no tools,
+    /// context, today card or plan section until it is enabled again.
+    fn optional(&self) -> bool {
+        false
+    }
+
+    /// Plan sections this plugin's own section builds on (e.g. diet after `"training"`). They are
+    /// planned and finalized in an earlier planner call, and passed to `plan_input` and
+    /// `finalize_plan_section` as the [`PlanDraft`].
+    fn plan_after(&self) -> &'static [&'static str] {
+        &[]
+    }
+
     async fn plan_input(
         &self,
         _ctx: &PluginContext,
         _date: NaiveDate,
+        _prior: &PlanDraft,
     ) -> Result<Option<PlanInput>, PluginError> {
         Ok(None)
     }
@@ -173,9 +194,24 @@ pub trait Plugin: Send + Sync {
         _ctx: &PluginContext,
         _date: NaiveDate,
         _raw: Value,
+        _prior: &PlanDraft,
     ) -> Result<PlanSection, PluginError> {
         Err(PluginError::Unsupported)
     }
+}
+
+/// The plugins currently switched on, in registration order: every non-optional plugin, plus
+/// the optional ones the user enabled (`Settings::plugins_enabled`).
+pub async fn enabled_plugins(
+    settings: &Settings,
+    plugins: &[Arc<dyn Plugin>],
+) -> Result<Vec<Arc<dyn Plugin>>, CoreError> {
+    let switches = settings.plugins_enabled().await?;
+    Ok(plugins
+        .iter()
+        .filter(|p| !p.optional() || switches.get(p.manifest().id).copied().unwrap_or(false))
+        .cloned()
+        .collect())
 }
 
 /// Applies any of `manifest`'s migrations not yet recorded in `plugin_migrations`, in version

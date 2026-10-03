@@ -10,6 +10,13 @@ use crate::model::{round1, Macros};
 /// Carbs never planned below this (g), rather than let protein and fat crowd them out.
 const MIN_CARBS_G: f64 = 100.0;
 
+/// Share of a planned session's net exercise energy added to the day's kcal target. Only half:
+/// the activity factor in the TDEE already counts part of the user's usual exercise, and eating
+/// back half of it is the common conservative rule (`docs/DECISIONS.md`, "Training plugin").
+pub const EXERCISE_CREDIT: f64 = 0.5;
+/// Cap on the kcal added for one day's training.
+pub const MAX_EXERCISE_CREDIT_KCAL: f64 = 600.0;
+
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct NutritionTargets {
     pub kcal: f64,
@@ -129,10 +136,62 @@ pub fn compute(
     }
 }
 
+/// The kcal added to the target for `exercise_kcal` of planned net exercise energy: the
+/// [`EXERCISE_CREDIT`] share, capped, rounded up to 10. 0 for no (or a negative) amount.
+pub fn exercise_credit(exercise_kcal: f64) -> f64 {
+    let credit = (exercise_kcal * EXERCISE_CREDIT).min(MAX_EXERCISE_CREDIT_KCAL);
+    if credit > 0.0 {
+        round_up_to_10(credit)
+    } else {
+        0.0
+    }
+}
+
+/// `t` raised for a day with `exercise_kcal` of planned training: the credit goes to carbs, the
+/// session's fuel, and fiber follows kcal as in [`compute`]. Protein and fat are unchanged.
+pub fn with_exercise(t: NutritionTargets, exercise_kcal: f64) -> NutritionTargets {
+    let add = exercise_credit(exercise_kcal);
+    if add == 0.0 {
+        return t;
+    }
+    let kcal = t.kcal + add;
+    NutritionTargets {
+        kcal,
+        carbs_g: round1(t.carbs_g + add / 4.0),
+        fiber_g: round1(14.0 * kcal / 1000.0),
+        ..t
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use chrono::NaiveDate;
+
+    #[test]
+    fn exercise_credit_is_half_capped_and_rounded_up() {
+        assert_eq!(exercise_credit(0.0), 0.0);
+        assert_eq!(exercise_credit(-50.0), 0.0);
+        assert_eq!(exercise_credit(301.0), 160.0);
+        assert_eq!(exercise_credit(5000.0), MAX_EXERCISE_CREDIT_KCAL);
+    }
+
+    #[test]
+    fn with_exercise_adds_the_credit_to_kcal_and_carbs() {
+        let base = compute(
+            &profile(Sex::Male, 180.0, ActivityLevel::Moderate),
+            80.0,
+            30,
+            Some(&goal(GoalDirection::Lose, Some(75.0), 0.5)),
+        );
+        let t = with_exercise(base, 400.0);
+        assert_eq!(t.kcal, base.kcal + 200.0);
+        assert_eq!(t.carbs_g, round1(base.carbs_g + 50.0));
+        assert_eq!(t.protein_g, base.protein_g);
+        assert_eq!(t.fat_g, base.fat_g);
+        assert_eq!(t.fiber_g, round1(14.0 * t.kcal / 1000.0));
+        assert_eq!(with_exercise(base, 0.0), base);
+    }
     use lifeagent_core::profile::DietaryPattern;
 
     fn profile(sex: Sex, height_cm: f64, activity_level: ActivityLevel) -> Profile {
