@@ -31,7 +31,7 @@ pub enum LlmError {
 
 impl LlmError {
     /// A stable, short classification code, independent of any UI's wording — shared by
-    /// `CommandError`'s zh-CN mapping (`apps/desktop/src-tauri/src/error.rs`) and the
+    /// `CommandError`'s mapping (`crates/api/src/error.rs`) and the
     /// scheduler's `AppEvent::PlanFailed` (`crates/core/src/scheduler.rs`), so the two can never
     /// drift apart on what counts as, say, an auth failure.
     pub fn code(&self) -> &'static str {

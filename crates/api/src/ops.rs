@@ -3,11 +3,10 @@
 //!
 //! Every function is a thin wrapper: call an existing `CoreApp`/service method, map the error
 //! through `CommandError`. No business logic lives here beyond the odd default (e.g.
-//! `generate_plan`'s date) already established by the CLI in M6. Moved here from the desktop's
-//! `commands.rs` so the web server shares it (`docs/DECISIONS.md`, "Web server").
+//! `generate_plan`'s date) already established by the CLI in M6. Served over HTTP by
+//! `lifeagent-server` (`docs/DECISIONS.md`, "Web server").
 
 use std::sync::{Mutex, PoisonError};
-use std::time::Instant;
 
 use chrono::{DateTime, NaiveDate, Utc};
 use lifeagent_core::app::{ChatTurn, CoreApp, HistoryMessage, TodayView};
@@ -18,8 +17,6 @@ use lifeagent_core::plan::{PlanTrigger, StoredPlan};
 use lifeagent_core::profile::Profile;
 use lifeagent_core::time::{age_years, format_hhmm, parse_hhmm};
 use lifeagent_core::usage::RoleUsage;
-use lifeagent_llm::router::{ModelsConfig, RoleRequest};
-use lifeagent_llm::types::{Message, ResponseFormat, Role};
 use lifeagent_plugin_diet::import::{
     self, FoodDataError, ImportMessage, ImportPreview, ImportReport, ImportTarget, ParsedImport,
 };
@@ -33,11 +30,7 @@ use crate::error::CommandError;
 
 /// `generate_plan`'s `date` if given (`YYYY-MM-DD`), else tomorrow — the plan a user is about
 /// to eat, not today's already-settled one. Mirrors `lifeagent-cli`'s own `resolve_date` (M6).
-/// Public so the desktop tray's 生成明日计划 item can resolve the same default.
-pub async fn resolve_plan_date(
-    app: &CoreApp,
-    date: Option<String>,
-) -> Result<NaiveDate, CommandError> {
+async fn resolve_plan_date(app: &CoreApp, date: Option<String>) -> Result<NaiveDate, CommandError> {
     match date {
         Some(s) => parse_date(&s),
         None => {
@@ -159,8 +152,6 @@ pub async fn preview_targets(
 pub struct SettingsDto {
     pub plan_time: String,
     pub day_boundary: String,
-    pub notifications_enabled: bool,
-    pub autostart: bool,
 }
 
 pub async fn get_settings(app: &CoreApp) -> Result<SettingsDto, CommandError> {
@@ -168,93 +159,17 @@ pub async fn get_settings(app: &CoreApp) -> Result<SettingsDto, CommandError> {
     Ok(SettingsDto {
         plan_time: format_hhmm(settings.plan_time().await?),
         day_boundary: format_hhmm(settings.day_boundary().await?),
-        notifications_enabled: settings.notifications_enabled().await?,
-        autostart: settings.autostart().await?,
     })
 }
 
-/// Persists every field, `autostart` included. Syncing the OS-level autostart registration is
-/// the desktop shell's job, after this returns.
 pub async fn save_settings(app: &CoreApp, settings: &SettingsDto) -> Result<(), CommandError> {
     let now = app.clock().now();
     let plan_time = parse_hhmm(&settings.plan_time)?;
     let day_boundary = parse_hhmm(&settings.day_boundary)?;
-    let s = app.settings();
-    s.set_plan_time_and_day_boundary(plan_time, day_boundary, now)
+    app.settings()
+        .set_plan_time_and_day_boundary(plan_time, day_boundary, now)
         .await?;
-    s.set_notifications_enabled(settings.notifications_enabled, now)
-        .await?;
-    s.set_autostart(settings.autostart, now).await?;
     Ok(())
-}
-
-// ---- Models / API keys -----------------------------------------------------------------------
-
-pub async fn get_models(app: &CoreApp) -> Result<Option<ModelsConfig>, CommandError> {
-    Ok(app.settings().models().await?)
-}
-
-pub async fn save_models(app: &CoreApp, models: &ModelsConfig) -> Result<(), CommandError> {
-    app.settings().set_models(models, app.clock().now()).await?;
-    // Takes effect on this already-running `CoreApp` immediately, not just after a restart —
-    // see `docs/DECISIONS.md`'s M7.1 `reload_models` entry.
-    app.reload_models().await?;
-    Ok(())
-}
-
-pub async fn set_api_key(app: &CoreApp, provider_id: &str, key: &str) -> Result<(), CommandError> {
-    app.secrets().set(provider_id, key)?;
-    // A key change only matters once a `models` config actually references `provider_id`;
-    // `reload_models` is a no-op (still "not configured") until `save_models` has run, and a
-    // harmless rebuild if it already has — either way, safe to call unconditionally.
-    app.reload_models().await?;
-    Ok(())
-}
-
-pub async fn has_api_key(app: &CoreApp, provider_id: &str) -> Result<bool, CommandError> {
-    Ok(app.secrets().has(provider_id)?)
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct TestModelResult {
-    pub ok: bool,
-    pub latency_ms: u64,
-    pub error: Option<CommandError>,
-}
-
-/// Sends "Reply with OK." on `role`'s currently-bound model (§10.2), for onboarding's and
-/// Settings' 测试连接 buttons. Bypasses the orchestrator entirely — no history, no tools, no
-/// message persisted — since this is a connectivity check, not a conversation turn.
-pub async fn test_model(app: &CoreApp, role: Role) -> Result<TestModelResult, CommandError> {
-    let llm = app.plugin_context().llm;
-    let start = Instant::now();
-    let result = llm
-        .complete(
-            role,
-            RoleRequest {
-                messages: vec![Message::User {
-                    content: "Reply with OK.".into(),
-                }],
-                tools: vec![],
-                max_tokens: Some(16),
-                response_format: ResponseFormat::Text,
-            },
-        )
-        .await;
-    let latency_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
-
-    Ok(match result {
-        Ok(_) => TestModelResult {
-            ok: true,
-            latency_ms,
-            error: None,
-        },
-        Err(e) => TestModelResult {
-            ok: false,
-            latency_ms,
-            error: Some(CommandError::from(CoreError::Llm(e))),
-        },
-    })
 }
 
 // ---- Memory ---------------------------------------------------------------------------------
@@ -356,8 +271,8 @@ pub async fn delete_food_source(app: &CoreApp, id: &str) -> Result<(), CommandEr
 /// A parsed-but-not-yet-committed import, kept between `preview_food_import` and
 /// `commit_food_import`/`cancel_food_import` (§8.2 "Preview → commit token"). There is a single
 /// slot: a new preview replaces the old one, and an entry expires after
-/// [`PENDING_IMPORT_TTL_SECS`] via the injected `Clock`. One per user: the desktop keeps one in
-/// managed state, the web server one per logged-in user.
+/// [`PENDING_IMPORT_TTL_SECS`] via the injected `Clock`. One per user: the web server keeps one per
+/// logged-in user.
 struct PendingImportRecord {
     token: Uuid,
     parsed: ParsedImport,
@@ -408,8 +323,8 @@ pub struct ImportPreviewWithToken {
     pub token: String,
 }
 
-/// `bytes` is the uploaded file and `file_name` its (already decoded) name; each shell gets
-/// them from its own transport (Tauri's raw IPC body, an HTTP request body).
+/// `bytes` is the uploaded file and `file_name` its (already decoded) name; the server reads
+/// them from the HTTP request.
 pub async fn preview_food_import(
     app: &CoreApp,
     pending: &PendingImportState,

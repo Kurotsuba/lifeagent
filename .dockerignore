@@ -1,9 +1,7 @@
 # Keep the build context small: build outputs and dependencies are rebuilt in the image.
 .git
 target
-apps/desktop/src-tauri/target
-apps/desktop/src-tauri/gen
 **/node_modules
-apps/desktop/ui/dist
+apps/web/dist
 *.db
 *.db-*

@@ -1,6 +1,6 @@
 # LifeAgent
 
-A Windows desktop AI agent that assists with daily life. The AI core is a replaceable cloud
+A web-based AI agent that assists with daily life. The AI core is a replaceable cloud
 LLM; functionality comes from plugins. Phase 1 ships one plugin: diet tracking and a next-day
 plan generated from your health goals.
 
@@ -11,54 +11,25 @@ Phase 1 spec this codebase implements). `CLAUDE.md` has the repository conventio
 ## Prerequisites
 
 - **Rust**, stable, 2021 edition (`rustup default stable`).
-- **Node.js** 20+ and npm, for the desktop app's frontend.
-- **An LLM provider API key** — either an Anthropic key, or any OpenAI-compatible Chat
-  Completions endpoint's key (see "Configuring a model provider" below). Nothing in this repo
-  works end to end without one; the CLI's `--mock` flag and the test suite are the only paths
-  that don't need one.
-- **Windows**, to build and run the actual desktop app: the bundler targets NSIS
-  (`apps/desktop/src-tauri/tauri.conf.json`), autostart uses the Windows registry, and API
-  keys are stored in Windows Credential Manager. The Rust crates (`lifeagent-core`,
-  `lifeagent-llm`, `lifeagent-plugin-diet`, `lifeagent-cli`) are plain, cross-platform Rust and
-  build and test fine on Linux/macOS too — that's normal for iterating on core/plugin logic
-  without a Windows machine, but `apps/desktop` itself needs Windows (or a Windows VM) to run.
-  See "Cross-compiling the desktop app from Linux" below if you only have Linux/WSL.
-
-On Linux (including WSL2), the OS keyring backend needs a running D-Bus Secret Service, which
-most minimal setups (WSL2 in particular) don't have by default. This only affects the desktop
-app and `lifeagent-cli models set-key` — the test suite never touches a real keyring
-(`MemorySecretStore` stands in). If you hit `secret store error: ...` while testing manually
-on WSL2, see the 2026-09-25 "Setting up a working OS keyring in WSL" entry in
-`docs/DECISIONS.md` for the workaround (and its limits — it's for manual testing only, and
-irrelevant on the real target platform, Windows).
+- **Node.js** 20+ and npm, for the web frontend.
+- **PostgreSQL** 17 for local development and tests (see "Running it").
+- **A model**: Gemini on Google Cloud's Agent Platform (no API key, see below), or an
+  Anthropic / OpenAI-compatible key for the CLI. The CLI's `--mock` flag,
+  `LIFEAGENT_MOCK_LLM=1` on the server and the test suite need none.
 
 ## Setup
 
 ```
 git clone <this repo>
-cd life-agent
+cd lifeagent
 cargo build --workspace
-cd apps/desktop && npm install
+cd apps/web && npm install
 ```
-
-`npm install` at `apps/desktop` installs both the Tauri CLI (`apps/desktop/package.json`) and
-the frontend's own dependencies (`apps/desktop/ui`, an npm workspace member) in one step.
 
 ## Running it
 
-**Desktop app** (Windows):
-
-```
-cd apps/desktop
-npm run tauri dev
-```
-
-First run opens onboarding: enter your profile and a weight goal, then configure a model
-provider (see below) — "测试连接" must succeed before you can finish. After that you land on
-Today/Chat/Settings.
-
 **CLI** (any platform the Rust toolchain runs on), a developer harness — chat, inspect data,
-generate plans without opening the desktop app:
+generate plans without opening the web app:
 
 ```
 cargo run -p lifeagent-cli -- --help
@@ -68,7 +39,7 @@ cargo run -p lifeagent-cli -- today                      # TodayView as JSON
 cargo run -p lifeagent-cli -- plan generate
 ```
 
-Data lives in Postgres. Both the desktop app and the CLI read `LIFEAGENT_DATABASE_URL`
+Data lives in Postgres. The CLI reads `LIFEAGENT_DATABASE_URL`
 (default `postgres://lifeagent:lifeagent@localhost/lifeagent_dev`) and `LIFEAGENT_DB_SCHEMA`
 (default `public`); the schema is created and migrated on start. The CLI also accepts
 `--database-url` and `--schema`. A separate schema is handy for trying things out without
@@ -78,8 +49,7 @@ touching your real data:
 cargo run -p lifeagent-cli -- --schema scratch today
 ```
 
-The desktop app still writes its logs to the OS's standard app-data directory
-(`%APPDATA%\LifeAgent\data\logs` on Windows). Setting up the local Postgres (PostgreSQL 17,
+Setting up the local Postgres (PostgreSQL 17,
 role `lifeagent`, databases `lifeagent_dev` and `lifeagent_test`) is described in
 `docs/HACKATHON.md` §1 and the 2026-10-02 "Postgres port" entry in `docs/DECISIONS.md`.
 
@@ -87,7 +57,7 @@ role `lifeagent`, databases `lifeagent_dev` and `lifeagent_test`) is described i
 an API key or network access — it will not produce a real reply, meal parse or plan.
 
 **Web server** (the hackathon's Cloud Run build, `docs/HACKATHON.md` §1): accounts with
-per-user Postgres schemas, and the same commands as the desktop as `POST /api/{command}`
+per-user Postgres schemas, and the commands of `crates/api` as `POST /api/{command}`
 (JSON arguments, snake_case). Locally, with the echo model and no UI:
 
 ```
@@ -97,10 +67,10 @@ curl -c jar -H 'content-type: application/json' \
 curl -b jar -H 'content-type: application/json' -d '{"text":"你好"}' localhost:8080/api/send_message
 ```
 
-The UI is the same React app as the desktop's. To work on the web version, run the server as
-above and `cd apps/desktop/ui && npm run dev`, then open http://localhost:1420 (Vite proxies
+The UI lives in `apps/web`. To work on it, run the server as above and
+`cd apps/web && npm run dev`, then open http://localhost:1420 (Vite proxies
 `/api` to the server). For a single-process setup, `npm run build` and point
-`LIFEAGENT_STATIC_DIR` at `apps/desktop/ui/dist`.
+`LIFEAGENT_STATIC_DIR` at `apps/web/dist`.
 
 With a real model, Gemini on Google Cloud's Agent Platform needs no API key: run
 `gcloud auth application-default login` once, then set `LIFEAGENT_MODELS` to the
@@ -116,41 +86,19 @@ Deploying to Cloud Run: `deploy/deploy.sh` (Cloud Build, Cloud Run, Cloud Schedu
 non-secret environment in `deploy/env.yaml`. The one-time Google Cloud setup it relies on is
 the console checklist in `docs/HACKATHON.md` §1.
 
-### Configuring a model provider
+### Configuring a model provider for the CLI
 
-Onboarding's model step (or Settings → 模型 later) needs, for whichever provider you use:
-
-- **Anthropic**: provider kind "Anthropic", base URL `https://api.anthropic.com`, your API
-  key, and a model name per role (defaults suggested: Haiku for parsing, Opus for planning,
-  Sonnet for conversation — you can also use one model for all three roles).
-- **An OpenAI-compatible endpoint**: provider kind "OpenAI-compatible", that endpoint's base
-  URL and key, and its model name(s).
-- **Google Gemini** (through its OpenAI-compatible endpoint): provider kind "OpenAI-compatible",
-  base URL `https://generativelanguage.googleapis.com/v1beta/openai`, a Google AI Studio API
-  key, and Gemini model names (e.g. `gemini-2.5-flash` for parsing, a Pro or Gemini 3 model for
-  planning and conversation). For Gemini 3 models the per-role temperature is not sent, so they
-  run at Google's recommended default.
-
-From the CLI instead, without onboarding's UI:
+In the web build the operator configures models for everyone through `LIFEAGENT_MODELS`. The
+CLI stores its own config:
 
 ```
 cargo run -p lifeagent-cli -- models set-json <path-to-a-models-config.json>
 cargo run -p lifeagent-cli -- models set-key <provider_id>   # key read from stdin, hidden
 ```
 
-See `docs/PHASE1_SPEC.md` §6.3 for the exact `ModelsConfig` JSON shape.
-
-### Cross-compiling the desktop app from Linux
-
-Building and running `apps/desktop` day to day needs Windows, but a one-off NSIS installer can
-be cross-built from Linux/WSL with [`cargo-xwin`](https://github.com/rust-cross/cargo-xwin)
-(`cargo install cargo-xwin`, add the `x86_64-pc-windows-msvc` target via `rustup target add`,
-then point `apps/desktop`'s `npm run tauri build` at that target with `cargo-xwin` as the
-runner — see that project's own docs for the exact Tauri-CLI flags, which change between
-versions). This is how the M7.6 acceptance pass produced an installer to test on a real Windows
-machine from this sandbox; see `docs/DECISIONS.md`'s 2026-09-26 M7.6 entries for what was
-actually verified working (the installer itself, single instance, quick-entry, and the tray's
-生成明日计划 toast).
+See `docs/PHASE1_SPEC.md` §6.3 for the exact `ModelsConfig` JSON shape. On Linux the key goes
+to the D-Bus Secret Service; on WSL2 see the 2026-09-25 "Setting up a working OS keyring in
+WSL" entry in `docs/DECISIONS.md`.
 
 ## Development commands
 
@@ -158,7 +106,7 @@ actually verified working (the installer itself, single instance, quick-entry, a
 cargo fmt --all
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
-cd apps/desktop/ui && npx tsc -b        # frontend typecheck; no frontend test runner (thin view layer, no logic to test)
+cd apps/web && npx tsc -b               # frontend typecheck; no frontend test runner (thin view layer, no logic to test)
 ```
 
 Run `fmt`, `clippy` and `cargo test --workspace` after finishing each milestone's work — see
@@ -179,27 +127,23 @@ Cargo.toml              # workspace
 crates/llm/              lifeagent-llm: model abstraction, providers, router
 crates/core/             lifeagent-core: storage, plugin API, orchestrator, planner, scheduler
 crates/plugin-diet/      lifeagent-plugin-diet: diet tracking + diet plan section
-crates/api/              lifeagent-api: command surface + error mapping shared by desktop and server
+crates/api/              lifeagent-api: command surface + error mapping used by the server
 crates/cli/              lifeagent-cli: developer harness (chat, plan, inspect data)
 crates/server/           lifeagent-server: HTTP backend for the web build (accounts, per-user apps)
-apps/desktop/src-tauri/  Tauri 2 shell (Rust), composition root for the desktop app
-apps/desktop/ui/         Vite + React + TypeScript, thin view layer
+apps/web/                Vite + React + TypeScript, thin view layer
 docs/                    ARCHITECTURE.md, PHASE1_SPEC.md, DECISIONS.md, ...
 ```
 
-Dependency rule: `llm` <- `core` <- `plugin-*` <- `api` <- (`cli`, `desktop`, `server`).
+Dependency rule: `llm` <- `core` <- `plugin-*` <- `api` <- `server`; `cli` uses `core` and
+the plugins directly.
 `core` never depends on any plugin crate.
 
 ## Troubleshooting
 
-- **`secret store error: ...`** on Linux/WSL2 — see "Prerequisites" above.
-- **Onboarding's "测试连接" fails** — check the base URL (no trailing path for Anthropic;
-  include the full completions path an OpenAI-compatible endpoint expects), the key, and that
-  the model name(s) exist for that provider. The error message names which role failed.
-- **A command fails with "尚未完成模型配置..."** — no provider is configured yet, or the
-  stored one no longer builds (e.g. a keyring entry went missing); redo the model step in
-  Settings.
-- Logs live in `<data dir>/logs/lifeagent.<date>.log` (14 days kept), INFO by default; set
-  `LIFEAGENT_LOG=debug` (or another `tracing_subscriber::EnvFilter` string) to get more detail
-  for development. Per `CLAUDE.md`, API keys and full prompts never appear at INFO or above —
+- **`secret store error: ...`** from `lifeagent-cli models set-key` on Linux/WSL2 — see
+  "Configuring a model provider for the CLI" above.
+- **A command fails with "尚未完成模型配置..."** — no model is configured: set
+  `LIFEAGENT_MODELS` (server) or run `lifeagent-cli models set-json` (CLI).
+- Logs go to stdout (Cloud Logging on Cloud Run), INFO by default; set `RUST_LOG=debug` for the
+  server or `LIFEAGENT_LOG=debug` for the CLI (any `tracing_subscriber::EnvFilter` string). Per `CLAUDE.md`, API keys and full prompts never appear at INFO or above —
   DEBUG can be more verbose but still never logs a key.

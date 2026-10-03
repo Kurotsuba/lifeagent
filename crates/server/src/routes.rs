@@ -1,7 +1,6 @@
 //! The command API: `POST /api/{command}` with the command's arguments as a JSON object
-//! (snake_case keys, the names the desktop's Tauri commands use), answered with the command's
-//! JSON result, or an `ApiError` body. Each command calls the same `lifeagent_api::ops`
-//! function as the desktop, so the UI's existing calls map one to one.
+//! (snake_case keys), answered with the command's JSON result, or an `ApiError` body. Each
+//! command calls one `lifeagent_api::ops` function.
 //!
 //! Left out on purpose: `get_models`, `save_models`, `set_api_key`, `has_api_key` and
 //! `test_model`. In the web build the operator configures models for everyone
@@ -246,8 +245,8 @@ pub async fn preview_food_import(
     reply(ops::preview_food_import(&tenant.app, &tenant.imports, &file_name, &body).await)
 }
 
-/// The user's `AppEvent`s as Server-Sent Events, with the same names and payloads the desktop
-/// emits as Tauri events (`lifeagent_api::events`). Holding the tenant keeps it cached while
+/// The user's `AppEvent`s as Server-Sent Events, with the names and payloads of
+/// `lifeagent_api::events`. Holding the tenant keeps it cached while
 /// the stream is open, so changes made by this user's other requests reach it.
 pub async fn events(
     State(state): State<Arc<AppState>>,

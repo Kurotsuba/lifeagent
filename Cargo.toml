@@ -7,7 +7,6 @@ members = [
     "crates/api",
     "crates/cli",
     "crates/server",
-    "apps/desktop/src-tauri",
 ]
 
 # Shared across crates; member Cargo.toml files pull these in with `dep.workspace = true`

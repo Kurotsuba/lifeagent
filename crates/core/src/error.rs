@@ -61,7 +61,7 @@ pub enum CoreError {
 
 impl CoreError {
     /// A stable, short classification code, independent of any UI's wording. `CommandError`'s
-    /// zh-CN mapping (`apps/desktop/src-tauri/src/error.rs`) uses it for `CommandError.code`,
+    /// mapping (`crates/api/src/error.rs`) uses it for `CommandError.code`,
     /// and the scheduler (`scheduler.rs`) attaches it to `AppEvent::PlanFailed` so a *scheduled*
     /// failure's cause survives past the event boundary without carrying English detail — one
     /// source of truth instead of two independent classifications that could drift apart.

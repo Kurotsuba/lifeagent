@@ -1,6 +1,6 @@
 //! The event names and JSON payloads every shell pushes to its UI, per `docs/PHASE1_SPEC.md`
-//! §10.1: `data-changed`, `plan-ready`, `plan-failed`. The desktop emits them as Tauri events,
-//! the web server as Server-Sent Events, so the UI handles both the same way.
+//! §10.1: `data-changed`, `plan-ready`, `plan-failed`. The web server sends them as
+//! Server-Sent Events.
 
 use lifeagent_core::events::AppEvent;
 use serde_json::json;

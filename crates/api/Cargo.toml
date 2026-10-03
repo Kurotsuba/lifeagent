@@ -2,7 +2,7 @@
 name = "lifeagent-api"
 version = "0.1.0"
 edition = "2021"
-description = "Transport-neutral command surface shared by the desktop shell and the web server."
+description = "Command surface and error mapping served by the web server."
 
 [dependencies]
 lifeagent-core = { workspace = true }

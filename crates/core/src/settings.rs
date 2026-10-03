@@ -143,29 +143,6 @@ impl Settings {
         Ok(())
     }
 
-    pub async fn notifications_enabled(&self) -> Result<bool, CoreError> {
-        Ok(self
-            .get_json::<bool>("notifications_enabled")
-            .await?
-            .unwrap_or(true))
-    }
-
-    pub async fn set_notifications_enabled(
-        &self,
-        on: bool,
-        now: DateTime<Utc>,
-    ) -> Result<(), CoreError> {
-        self.set_json("notifications_enabled", &on, now).await
-    }
-
-    pub async fn autostart(&self) -> Result<bool, CoreError> {
-        Ok(self.get_json::<bool>("autostart").await?.unwrap_or(false))
-    }
-
-    pub async fn set_autostart(&self, on: bool, now: DateTime<Utc>) -> Result<(), CoreError> {
-        self.set_json("autostart", &on, now).await
-    }
-
     pub async fn onboarding_complete(&self) -> Result<bool, CoreError> {
         Ok(self
             .get_json::<bool>("onboarding_complete")
@@ -348,8 +325,6 @@ mod tests {
             settings.day_boundary().await.unwrap(),
             parse_hhmm("04:00").unwrap()
         );
-        assert!(settings.notifications_enabled().await.unwrap());
-        assert!(!settings.autostart().await.unwrap());
         assert!(!settings.onboarding_complete().await.unwrap());
         assert_eq!(settings.models().await.unwrap(), None);
     }
@@ -377,12 +352,6 @@ mod tests {
             settings.day_boundary().await.unwrap(),
             parse_hhmm("03:00").unwrap()
         );
-
-        settings.set_notifications_enabled(false, t).await.unwrap();
-        assert!(!settings.notifications_enabled().await.unwrap());
-
-        settings.set_autostart(true, t).await.unwrap();
-        assert!(settings.autostart().await.unwrap());
 
         settings.set_onboarding_complete(true, t).await.unwrap();
         assert!(settings.onboarding_complete().await.unwrap());

@@ -1,12 +1,12 @@
 //! `CommandError`: the error type every command returns, per `docs/PHASE1_SPEC.md` §10.2
-//! (`CommandError { code, message }`). Tauri commands return it as is; the web server sends it
-//! as the JSON body of an error response.
+//! (`CommandError { code, message }`). The web server sends it as the JSON body of an
+//! error response.
 //!
 //! `code` always comes from `CoreError::code()`/`LlmError::code()` (`crates/core`,
 //! `crates/llm`), the same classification the scheduler attaches to a scheduled
-//! `AppEvent::PlanFailed` (the desktop's `notify.rs`), so the two surfaces can't drift on what
+//! `AppEvent::PlanFailed`, so the two surfaces can't drift on what
 //! counts as, say, an auth failure. `detail` says precisely what went wrong, as data: the UI
-//! words it in the user's language (`apps/desktop/ui/src/i18n`, `errors`). `message` is the
+//! words it in the user's language (`apps/web/src/i18n`, `errors`). `message` is the
 //! same thing in zh-CN, for the CLI and for any client that doesn't know a `detail` kind.
 //! `CoreError::Validation`'s free-form English detail (db/format-invariant failures, not
 //! something a user's own input caused) still gets one generic message; `CoreError::InvalidInput`'s

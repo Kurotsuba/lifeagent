@@ -2348,3 +2348,22 @@ Phase 1 rule of a single zh-CN file.
 - **Still Chinese:** text written by the model (plan titles, tips and summaries, chat replies
   follow the prompts and the user's language) and the plan validator's warnings shown on the
   plan card (`crates/plugin-diet/src/validate.rs`), which are stored with the plan.
+
+## 2026-10-03 — Desktop app removed on `g-hackathon`
+
+The hackathon is judged from the Cloud Run web build, so the Tauri desktop app is gone from this
+branch (it still exists on `phase1`).
+
+- **Deleted:** `apps/desktop/src-tauri` (tray, notifications, autostart, quick-entry window,
+  single-instance lock, `set_locale`) and its workspace entry; the npm workspace root that only
+  held the Tauri CLI.
+- **UI moved** from `apps/desktop/ui` to `apps/web`, a standalone npm package. `isDesktop`/`isWeb`
+  branches, Tauri `invoke`/`listen`, the quick-entry root, onboarding's 模型 step and Settings →
+  模型 are gone: the server's operator configures models for everyone. Their strings were removed
+  from all three locale tables.
+- **Commands removed** from `lifeagent-api`: `get_models`, `save_models`, `set_api_key`,
+  `has_api_key`, `test_model` (the server never exposed them). `SettingsDto` lost
+  `notifications_enabled` and `autostart`, and `Settings` their accessors; any stored values are
+  simply ignored.
+- **Kept:** `lifeagent-cli` and the keyring-backed `SecretStore`, which the CLI's
+  `models set-key` still uses; the server's `get_usage_summary` endpoint.

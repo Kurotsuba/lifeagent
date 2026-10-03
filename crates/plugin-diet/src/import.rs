@@ -72,7 +72,7 @@ pub struct RowIssue {
 
 /// Everything an import can report to the user — file-level failures (`FoodDataError`) and
 /// row-level errors and warnings (`RowIssue`) — as data, so the UI words it in the user's
-/// language (`apps/desktop/ui/src/i18n`). `Display` is the zh-CN text the CLI prints.
+/// language (`apps/web/src/i18n`). `Display` is the zh-CN text the CLI prints.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ImportMessage {

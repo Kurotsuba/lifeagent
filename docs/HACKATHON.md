@@ -47,6 +47,9 @@ The event asks for a public web version where possible. For desktop apps, featur
 work on the desktop just need to be documented, and the app is judged mainly from the demo
 video. The desktop app can stay as the main product, with the web build as the judges' URL.
 
+Update 2026-10-03: the desktop app is not needed for the hackathon and was removed from this
+branch; the UI now lives in `apps/web` (`docs/DECISIONS.md`, "Desktop app removed").
+
 #### Decisions (2026-10-02)
 
 - The Rust side becomes an HTTP backend: a new `crates/server` crate (axum) as a third
@@ -456,7 +459,7 @@ To make that visible:
 - A 3-minute demo video (YouTube link).
 - A project description covering target users, the problem and the solution.
 - Consider switching the UI from Chinese to Japanese for the demo. The strings are all in
-  `apps/desktop/ui/src/i18n/zh-CN.ts`, so adding a `ja-JP` file is cheap.
+  `apps/web/src/i18n/zh-CN.ts`, so adding a `ja-JP` file is cheap.
 - The event page summary says the repository should stay unchanged until the final pitch on
   2026-12-01. Check the exact wording. If it applies, submit the `g-hackathon` branch and keep
   working elsewhere, e.g. on `phase1`.
