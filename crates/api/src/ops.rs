@@ -12,6 +12,7 @@ use chrono::{DateTime, NaiveDate, Utc};
 use lifeagent_core::app::{ChatTurn, CoreApp, HistoryMessage, TodayView};
 use lifeagent_core::error::CoreError;
 use lifeagent_core::goals::WeightGoal;
+use lifeagent_core::i18n::Language;
 use lifeagent_core::memory::MemoryNote;
 use lifeagent_core::plan::{PlanTrigger, StoredPlan};
 use lifeagent_core::profile::Profile;
@@ -169,6 +170,14 @@ pub async fn save_settings(app: &CoreApp, settings: &SettingsDto) -> Result<(), 
     app.settings()
         .set_plan_time_and_day_boundary(plan_time, day_boundary, now)
         .await?;
+    Ok(())
+}
+
+/// Stores the UI's locale as the language the assistant replies in. The web app sends it on
+/// every load, so changing the UI language also changes the assistant's.
+pub async fn set_language(app: &CoreApp, language: Language) -> Result<(), CommandError> {
+    let now = app.clock().now();
+    app.settings().set_language(language, now).await?;
     Ok(())
 }
 

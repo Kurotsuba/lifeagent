@@ -36,8 +36,6 @@ pub struct ServerConfig {
     /// `LIFEAGENT_INPROCESS_SCHEDULER=1`: tick every user once a minute from inside the server,
     /// for local development or an always-on instance, instead of Cloud Scheduler.
     pub inprocess_scheduler: bool,
-    /// `LIFEAGENT_INVITE_CODE`: when set, registration requires it.
-    pub invite_code: Option<String>,
     /// `LIFEAGENT_INSECURE_COOKIES=1` drops the cookie's `Secure` flag, for plain-HTTP testing
     /// on something other than `localhost`. Never set it in production.
     pub secure_cookies: bool,
@@ -83,7 +81,6 @@ impl ServerConfig {
             mock_llm: flag("LIFEAGENT_MOCK_LLM"),
             tick_token: optional("LIFEAGENT_TICK_TOKEN"),
             inprocess_scheduler: flag("LIFEAGENT_INPROCESS_SCHEDULER"),
-            invite_code: optional("LIFEAGENT_INVITE_CODE"),
             secure_cookies: !flag("LIFEAGENT_INSECURE_COOKIES"),
         })
     }

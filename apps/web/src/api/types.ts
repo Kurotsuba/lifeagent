@@ -397,7 +397,6 @@ export type ErrorDetail =
   | { kind: "invalid_password" }
   | { kind: "too_many_attempts" }
   | { kind: "invalid_credentials" }
-  | { kind: "wrong_invite_code" }
   | { kind: "username_taken" }
   | { kind: "bad_request" }
   | { kind: "unknown_endpoint" };

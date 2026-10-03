@@ -2166,7 +2166,7 @@ desktop shell.
   sessions. Unknown usernames verify against a dummy hash so they cost the same as a wrong
   password, and both get the same answer. Login and registration share a per-IP fixed-window
   limit (20 per 10 min, in memory); the IP is the *last* `X-Forwarded-For` entry, the one
-  Cloud Run's front end appends. Optional `LIFEAGENT_INVITE_CODE`. Usernames are 3–32 of
+  Cloud Run's front end appends. Usernames are 3–32 of
   `[a-z0-9_.-]`, case-insensitive; passwords 8–128 characters. Account deletion re-checks the
   password, then `db::destroy`s the tenant and deletes the user (sessions cascade).
 - **Tenant cache.** One `CoreApp` per user per instance, opened on first use through a
@@ -2386,3 +2386,17 @@ branch (it still exists on `phase1`).
   it out means CI never reads `tick-token`. `deploy.sh schedule` now passes `--format none`,
   because gcloud printed the job, tick token header included.
 
+
+## 2026-10-03 — Assistant language follows the UI locale
+
+- **Rule:** the assistant always replies in the UI's language, not the language the user writes
+  in. The chat system prompt says "Always reply in {user_language}", and the planner's summary
+  already used `{user_language}`.
+- **Stored per account:** the `language` setting (`"ja"`, `"en"`, `"zh-CN"`, the UI's locale
+  codes). The nightly plan runs from the tick with no browser request, so a request header
+  wouldn't reach it. Unset means Japanese, the UI's default.
+- **Sync:** the web app calls `set_language` with its locale on every load after sign-in, without
+  waiting for it; changing the language reloads the page, which syncs again. The locale itself
+  stays in `localStorage`, because the login screen needs it before there is an account.
+- **Not changed:** the diet plugin's parser and matcher prompts. They name foods to match the
+  food table, not to talk to the user.

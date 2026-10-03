@@ -15,7 +15,6 @@ use tokio::sync::Mutex;
 use crate::clock::Clock;
 use crate::error::{CoreError, ValidationRule};
 use crate::events::AppEvent;
-use crate::i18n::USER_LANGUAGE;
 use crate::plugin::{PlanInput, PlanSection, Plugin, PluginContext};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -414,6 +413,7 @@ async fn planner_prompt(
     let latest_weight = ctx.events.latest("body.weight_logged").await?;
     let profile_summary =
         crate::context::render_profile_summary(profile.as_ref(), latest_weight.as_ref(), date);
+    let language = ctx.settings.language().await?;
     let notes = ctx.memory.list(50).await?;
     let memory_notes = if notes.is_empty() {
         "(none)".to_string()
@@ -428,7 +428,7 @@ async fn planner_prompt(
     // User-supplied text is substituted last in each part, so braces in it are never
     // mistaken for a placeholder.
     let mut parts = vec![PLANNER_HEADER
-        .replace("{user_language}", USER_LANGUAGE.prompt_name())
+        .replace("{user_language}", language.prompt_name())
         .replace("{plan_date}", &date.to_string())
         .replace("{weekday}", &date.format("%A").to_string())
         .replace("{profile_summary}", &profile_summary)
@@ -695,7 +695,7 @@ mod tests {
             .unwrap();
 
         let prompt = last_user_message(&mock.received_requests()[0]);
-        assert!(prompt.contains("to the user in Simplified Chinese"));
+        assert!(prompt.contains("to the user in Japanese"));
         assert!(prompt.contains("Date: 2026-09-25 (Friday)"));
         assert!(prompt.contains("## Section \"test\"\nTargets: {\"x\":1}\nBrief:\ntest brief"));
         assert!(!prompt.contains("## Current plan"));

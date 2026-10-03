@@ -14,6 +14,7 @@ use serde_json::Value;
 use sqlx::PgPool;
 
 use crate::error::{CoreError, ValidationRule};
+use crate::i18n::Language;
 use crate::time::{format_hhmm, parse_hhmm};
 use chrono::NaiveTime;
 
@@ -158,6 +159,16 @@ impl Settings {
         self.set_json("onboarding_complete", &on, now).await
     }
 
+    /// The language the assistant talks to the user in: the web UI's locale, synced on every
+    /// page load. [`Language::default`] until the first sync.
+    pub async fn language(&self) -> Result<Language, CoreError> {
+        Ok(self.get_json("language").await?.unwrap_or_default())
+    }
+
+    pub async fn set_language(&self, lang: Language, now: DateTime<Utc>) -> Result<(), CoreError> {
+        self.set_json("language", &lang, now).await
+    }
+
     /// `None` until onboarding configures a provider (§7.2: "none (onboarding required)").
     pub async fn models(&self) -> Result<Option<ModelsConfig>, CoreError> {
         self.get_json("models").await
@@ -210,6 +221,16 @@ fn check_plan_time(plan_time: NaiveTime, day_boundary: NaiveTime) -> Result<(), 
 mod tests {
     use super::*;
     use chrono::TimeZone;
+
+    #[tokio::test]
+    async fn language_defaults_to_japanese_until_set() {
+        let (pool, _dir) = crate::db::test_pool().await;
+        let settings = Settings::new(pool);
+
+        assert_eq!(settings.language().await.unwrap(), Language::Ja);
+        settings.set_language(Language::En, now()).await.unwrap();
+        assert_eq!(settings.language().await.unwrap(), Language::En);
+    }
 
     #[tokio::test]
     async fn plan_time_earlier_than_day_boundary_is_rejected_from_either_setter() {

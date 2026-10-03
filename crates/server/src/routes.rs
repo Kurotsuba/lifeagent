@@ -21,6 +21,7 @@ use lifeagent_api::events::payload_for;
 use lifeagent_api::ops::{self, ListFoods, SettingsDto};
 use lifeagent_api::ErrorDetail;
 use lifeagent_core::goals::WeightGoal;
+use lifeagent_core::i18n::Language;
 use lifeagent_core::profile::Profile;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -89,6 +90,10 @@ struct PreviewTargets {
 #[derive(Deserialize)]
 struct SettingsArg {
     settings: SettingsDto,
+}
+#[derive(Deserialize)]
+struct LanguageArg {
+    language: Language,
 }
 #[derive(Deserialize)]
 struct Ids {
@@ -175,6 +180,10 @@ pub async fn command(
         "save_settings" => {
             let a: SettingsArg = args(&body)?;
             reply(ops::save_settings(app, &a.settings).await)
+        }
+        "set_language" => {
+            let a: LanguageArg = args(&body)?;
+            reply(ops::set_language(app, a.language).await)
         }
         "get_memory" => {
             let a: Limit = args(&body)?;

@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
 import { me, SIGNED_OUT_EVENT } from "./api/auth";
-import { getAppState } from "./api/commands";
+import { getAppState, setLanguage } from "./api/commands";
 import { SESSION_EXPIRED_EVENT } from "./api/transport";
 import { isCommandError } from "./api/types";
 import { AuthScreen } from "./auth/AuthScreen";
 import { Chat } from "./chat/Chat";
 import { Sidebar } from "./components/Sidebar";
-import { strings } from "./i18n";
+import { locale, strings } from "./i18n";
 import { Onboarding } from "./onboarding/Onboarding";
 import { Settings } from "./settings/Settings";
 import { Today } from "./today/Today";
@@ -41,6 +41,10 @@ export default function App() {
         setScreen("auth");
         return;
       }
+      // The assistant replies in the UI's language, including in plans made overnight, so the
+      // server keeps a copy. Switching language reloads the page, which lands back here.
+      // Best effort: on failure the server keeps the previous language.
+      void setLanguage(locale).catch(() => {});
       try {
         const state = await getAppState();
         if (!cancelled) setScreen(state.onboarding_complete ? "main" : "onboarding");

@@ -80,7 +80,7 @@ Configuration is all environment variables (`crates/server/src/config.rs`):
 `LIFEAGENT_DATABASE_URL` (its role needs `CREATEROLE`), `LIFEAGENT_MODELS` (models config JSON,
 keys in `LIFEAGENT_KEY_<PROVIDER_ID>`) or `LIFEAGENT_MOCK_LLM=1`, `LIFEAGENT_STATIC_DIR` (built
 UI to serve), `LIFEAGENT_TICK_TOKEN` (enables `/api/internal/tick`),
-`LIFEAGENT_INPROCESS_SCHEDULER=1`, `LIFEAGENT_INVITE_CODE`, `LIFEAGENT_DB_PASSWORD`, `PORT`.
+`LIFEAGENT_INPROCESS_SCHEDULER=1`, `LIFEAGENT_DB_PASSWORD`, `PORT`.
 
 Deploying to Cloud Run: `deploy/deploy.sh` (Cloud Build, Cloud Run, Cloud Scheduler), with the
 non-secret environment in `deploy/env.yaml`. The one-time Google Cloud setup it relies on is

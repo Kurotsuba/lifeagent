@@ -30,12 +30,8 @@ export function login(username: string, password: string): Promise<Me> {
   return post("login", { username, password });
 }
 
-export function register(
-  username: string,
-  password: string,
-  inviteCode: string | null,
-): Promise<Me> {
-  return post("register", { username, password, invite_code: inviteCode });
+export function register(username: string, password: string): Promise<Me> {
+  return post("register", { username, password });
 }
 
 export function logout(): Promise<void> {

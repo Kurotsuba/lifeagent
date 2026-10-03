@@ -7,6 +7,7 @@
  * this kind of pure forwarding.
  */
 
+import type { Locale } from "../i18n";
 import { call, callRaw } from "./transport";
 import type {
   AppState,
@@ -103,6 +104,10 @@ export function deleteEntry(id: string): Promise<void> {
 
 export function saveSettings(settings: SettingsDto): Promise<void> {
   return call("save_settings", { settings });
+}
+
+export function setLanguage(language: Locale): Promise<void> {
+  return call("set_language", { language });
 }
 
 // ---- Memory --------------------------------------------------------------------------------

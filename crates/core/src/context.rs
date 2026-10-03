@@ -8,6 +8,7 @@ use serde_json::Value;
 use crate::error::CoreError;
 use crate::events::Event;
 use crate::goals::{GoalDirection, WeightGoal};
+use crate::i18n::Language;
 use crate::memory::MemoryNote;
 use crate::plan::StoredPlan;
 use crate::plugin::{Plugin, PluginContext};
@@ -35,7 +36,8 @@ Rules:
   they are correcting that day. Do not repeat the tag in your replies.
 - Save durable preferences with core_remember; do not save one-off events.
 - To change a plan, call core_revise_plan with the user's request as the instruction.
-- Be brief and warm. Reply in the language the user writes in (default Simplified Chinese).
+- Be brief and warm. Always reply in {user_language}, the language of the user's app, even
+  when the user writes in another language.
 - You give lifestyle guidance, not medical advice. If the user describes symptoms or a medical
   condition, suggest consulting a professional.
 
@@ -72,6 +74,7 @@ pub async fn build_system_prompt(
 ) -> Result<String, CoreError> {
     let now_local = ctx.clock.now().with_timezone(&Local);
     let today = ctx.today().await?;
+    let language = ctx.settings.language().await?;
 
     let profile = ctx.profile.get().await?;
     let latest_weight = ctx.events.latest("body.weight_logged").await?;
@@ -117,6 +120,7 @@ pub async fn build_system_prompt(
         render_template(
             now_local,
             today,
+            language,
             &profile_summary,
             &goals_text,
             &plugin_snippets,
@@ -135,9 +139,12 @@ pub async fn build_system_prompt(
     Ok(prompt)
 }
 
+// One argument per template placeholder group; a struct would only rename them.
+#[allow(clippy::too_many_arguments)]
 fn render_template(
     now_local: chrono::DateTime<Local>,
     today: NaiveDate,
+    language: Language,
     profile_summary: &str,
     goals_text: &str,
     plugin_snippets: &str,
@@ -161,6 +168,7 @@ fn render_template(
         )
         .replace("{weekday}", &now_local.format("%A").to_string())
         .replace("{logical_date}", &today.to_string())
+        .replace("{user_language}", language.prompt_name())
         .replace("{profile_summary}", profile_summary)
         .replace("{goals}", goals_text)
         .replace("{plugin_snippets}", plugin_snippets)
@@ -364,6 +372,20 @@ mod tests {
         assert!(prompt.contains("(no data yet)"));
         assert!(prompt.contains(NO_PLANS));
         assert!(prompt.contains("(none)"));
+        assert!(prompt.contains("Always reply in Japanese"));
+    }
+
+    #[tokio::test]
+    async fn replies_in_the_language_setting() {
+        let (ctx, _mock, _dir) = crate::test_support::context().await;
+        ctx.settings
+            .set_language(Language::En, ctx.clock.now())
+            .await
+            .unwrap();
+        let prompt = build_system_prompt(&ctx, &[]).await.unwrap();
+
+        assert!(prompt.contains("Always reply in English"));
+        assert!(!prompt.contains("{user_language}"));
     }
 
     #[tokio::test]

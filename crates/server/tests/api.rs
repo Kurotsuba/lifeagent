@@ -35,7 +35,6 @@ async fn start_with(edit: impl FnOnce(&mut ServerConfig)) -> TestServer {
         mock_llm: true,
         tick_token: Some(TICK_TOKEN.into()),
         inprocess_scheduler: false,
-        invite_code: None,
         secure_cookies: false,
     };
     edit(&mut config);
@@ -430,27 +429,21 @@ async fn the_tick_endpoint_is_off_without_a_token() {
 }
 
 #[tokio::test]
-async fn registration_can_require_an_invite_code() {
-    let server = start_with(|c| c.invite_code = Some("let-me-in".into())).await;
-    let none = Session { cookie: None };
-    let (status, body) = server
-        .post(
-            &none,
-            "/api/auth/register",
-            json!({ "username": "alice", "password": "password123" }),
-        )
-        .await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
-    assert_eq!(body["code"], "forbidden");
+async fn set_language_accepts_only_the_ui_locales() {
+    let server = start().await;
+    let alice = server.register("alice").await;
 
-    let (status, _) = server
-        .post(
-            &none,
-            "/api/auth/register",
-            json!({ "username": "alice", "password": "password123", "invite_code": "let-me-in" }),
-        )
+    for language in ["ja", "en", "zh-CN"] {
+        let (status, body) = server
+            .post(&alice, "/api/set_language", json!({ "language": language }))
+            .await;
+        assert_eq!(status, StatusCode::OK, "{language}: {body}");
+    }
+    let (status, body) = server
+        .post(&alice, "/api/set_language", json!({ "language": "fr" }))
         .await;
-    assert_eq!(status, StatusCode::OK);
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["code"], "invalid_input");
 }
 
 #[tokio::test]

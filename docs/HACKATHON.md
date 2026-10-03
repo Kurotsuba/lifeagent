@@ -215,7 +215,7 @@ each with a connection bound to that user's schema.
 
 All users share one Gemini bill, so add a per-user daily token budget built on `llm_usage`
 (see §2). Open registration could otherwise run up the bill. Consider
-closing registration (or requiring an invite code) after judging.
+closing registration after judging.
 
 #### Cost
 

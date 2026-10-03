@@ -76,7 +76,8 @@ never call a real LLM in tests; use `MockChatModel` from `lifeagent-llm`.
   `strings` from `apps/web/src/i18n`. Errors the user can see leave Rust as data
   (`ErrorDetail` in `crates/api/src/error.rs`, `ImportMessage` in the diet plugin) and are worded
   by the UI's `errors`/`importMessages` tables, so a new one needs a variant and three
-  translations. The assistant replies in the language the user writes in.
+  translations. The assistant replies in the UI's language: the web app syncs its locale to the
+  per-account `language` setting (`set_language`), which the chat and planner prompts read.
 - Keep dependencies minimal. Add a crate only when it removes meaningful code or risk.
 
 ## Workflow

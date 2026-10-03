@@ -252,8 +252,6 @@ fn check_rate(state: &AppState, headers: &HeaderMap, peer: PeerAddr) -> Result<(
 pub struct Credentials {
     username: String,
     password: String,
-    #[serde(default)]
-    invite_code: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -278,11 +276,6 @@ pub async fn register(
     Json(creds): Json<Credentials>,
 ) -> Result<Response, ApiError> {
     check_rate(&state, &headers, peer)?;
-    if let Some(expected) = &state.config.invite_code {
-        if creds.invite_code.as_deref() != Some(expected.as_str()) {
-            return Err(ApiError::new("forbidden", ErrorDetail::WrongInviteCode));
-        }
-    }
     let username = normalize_username(&creds.username)?;
     validate_password(&creds.password)?;
     let password_hash = hash_password(creds.password).await?;

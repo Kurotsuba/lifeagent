@@ -1047,9 +1047,10 @@ Food: {name}
 
 ### 9.4 Planner (core, role Planner, JSON)
 
-`{user_language}` is `"Simplified Chinese"` in Phase 1, from `lifeagent_core::i18n::Language`
-(zh-CN is the only variant). i18n stays open: a second language is a new variant plus a
-setting, not a prompt change.
+`{user_language}` comes from the per-account `language` setting (`lifeagent_core::i18n::Language`:
+Japanese, English or Simplified Chinese; Japanese until set), which the web app syncs from its
+UI locale. The chat system prompt (§9.1) uses the same setting. See `docs/DECISIONS.md`
+2026-10-03, "Assistant language follows the UI locale".
 
 ```
 You create tomorrow's plan for the user. The plan has one section per domain below. Each

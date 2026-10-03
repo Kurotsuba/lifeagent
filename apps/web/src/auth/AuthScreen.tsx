@@ -15,14 +15,13 @@ interface AuthScreenProps {
 }
 
 /** Web build only: log in, or create an account. Every rule (username format, password
- * length, invite code) is checked by the server; the form only checks that the two password
+ * length) is checked by the server; the form only checks that the two password
  * fields match, which the server never sees. */
 export function AuthScreen({ notice, onSignedIn }: AuthScreenProps) {
   const [mode, setMode] = useState<"login" | "register">("login");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
-  const [inviteCode, setInviteCode] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -38,7 +37,7 @@ export function AuthScreen({ notice, onSignedIn }: AuthScreenProps) {
     setError(null);
     try {
       if (isRegister) {
-        await register(username, password, inviteCode.trim() || null);
+        await register(username, password);
       } else {
         await login(username, password);
       }
@@ -105,14 +104,6 @@ export function AuthScreen({ notice, onSignedIn }: AuthScreenProps) {
                 value={confirm}
                 onChange={(e) => setConfirm(e.target.value)}
                 required
-              />
-            </Field>
-            <Field label={strings.common.withOptional(t.inviteCode)}>
-              <input
-                className={inputClass}
-                autoComplete="off"
-                value={inviteCode}
-                onChange={(e) => setInviteCode(e.target.value)}
               />
             </Field>
           </>
