@@ -5,6 +5,7 @@ import { SESSION_EXPIRED_EVENT } from "./api/transport";
 import { isCommandError } from "./api/types";
 import { AuthScreen } from "./auth/AuthScreen";
 import { Chat } from "./chat/Chat";
+import { Guide, guideSeen } from "./components/Guide";
 import { Sidebar } from "./components/Sidebar";
 import { locale, strings } from "./i18n";
 import { Onboarding } from "./onboarding/Onboarding";
@@ -114,6 +115,8 @@ export default function App() {
 function MainShell({ username }: { username: string | null }) {
   const [tab, setTab] = useState<Tab>("today");
   const [chatDraft, setChatDraft] = useState<string | null>(null);
+  // The tour opens by itself the first time this account reaches the shell on this browser.
+  const [showGuide, setShowGuide] = useState(() => !guideSeen(username));
 
   function openChatWithDraft(prefillText: string) {
     setChatDraft(prefillText);
@@ -122,7 +125,12 @@ function MainShell({ username }: { username: string | null }) {
 
   return (
     <div className="flex h-dvh flex-col bg-neutral-50 text-neutral-900 dark:bg-neutral-900 dark:text-neutral-50 md:flex-row">
-      <Sidebar tab={tab} onChange={setTab} username={username} />
+      <Sidebar
+        tab={tab}
+        onChange={setTab}
+        username={username}
+        onShowGuide={() => setShowGuide(true)}
+      />
       <main className="min-h-0 flex-1 overflow-hidden">
         {tab === "today" ? <Today onAdjustPlan={openChatWithDraft} /> : null}
         {tab === "chat" ? (
@@ -131,6 +139,7 @@ function MainShell({ username }: { username: string | null }) {
         {tab === "stock" ? <Stock /> : null}
         {tab === "settings" ? <Settings /> : null}
       </main>
+      {showGuide ? <Guide username={username} onClose={() => setShowGuide(false)} /> : null}
     </div>
   );
 }

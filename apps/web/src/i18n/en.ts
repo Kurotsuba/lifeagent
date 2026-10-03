@@ -47,6 +47,34 @@ export const en: Strings = {
     stock: "Stock",
     settings: "Settings",
   },
+  guide: {
+    open: "Guide",
+    skip: "Skip",
+    done: "Get started",
+    stepCounter: (n: number, total: number) => `${n} / ${total}`,
+    steps: [
+      {
+        title: "Welcome to LifeAgent",
+        body: "LifeAgent keeps track of what you eat and, every day, plans the next one around your goals. Here's a quick tour.",
+      },
+      {
+        title: "Chat: log a meal in one sentence",
+        body: "Tell the assistant what you ate, e.g. \"ramen and a beer for lunch\". It logs the meal; calories and macros are calculated by the app.\nGot something wrong? Fix or delete it in chat too.",
+      },
+      {
+        title: "Today: how today is going, and tomorrow's plan",
+        body: "See today's calories, protein, carbs and fat, and which parts of today's plan you've eaten.\nTomorrow's plan is made automatically at the time you set. You can also create it now, regenerate it with a request, or accept it. Log your weight from the top right.",
+      },
+      {
+        title: "Stock: what's in your kitchen",
+        body: "Say \"bought a dozen eggs and 1 L of milk\" in chat, or add items on the Stock tab. Logged meals are taken out of stock automatically, and plans use what you have first and make a shopping list.",
+      },
+      {
+        title: "Settings",
+        body: "Change your profile and goal, when plans are made, preferences such as foods you dislike, and the language. The assistant replies in the language you pick.\nOpen this guide again any time with the ? button.",
+      },
+    ],
+  },
   mealType: {
     breakfast: "Breakfast",
     lunch: "Lunch",

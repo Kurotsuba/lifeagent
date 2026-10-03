@@ -2507,3 +2507,14 @@ they used out of it; plans are built from it and carry a shopping list.
   the plugin's own page. With both off the plugin is a plain pantry list.
 - **Plan warnings and tool summaries are zh-CN**, like the diet plugin's; UI strings are in all
   three locales.
+
+## 2026-10-03 — First-run usage guide
+
+- **A five-step tour of the tabs** (`apps/web/src/components/Guide.tsx`), in the UI's locale
+  from the usual `strings` tables (`guide` key). It opens by itself the first time an account
+  reaches the main shell, including straight after onboarding, and again from a `?` button in
+  the sidebar (the end of the tab bar on phones).
+- **"Seen" is per account per browser, in localStorage** (`lifeagent.guideSeen.<username>`),
+  like the locale: it's a view preference, so no server setting or migration. A new browser
+  shows the tour once more, which is harmless. If storage is unavailable the tour does not
+  auto-open, so it never nags on every load.

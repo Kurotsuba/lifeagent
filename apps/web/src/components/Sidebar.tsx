@@ -15,9 +15,11 @@ interface SidebarProps {
   onChange: (tab: Tab) => void;
   /** The logged-in user, shown with a logout button. */
   username: string | null;
+  /** Reopens the usage guide (the ? button). */
+  onShowGuide: () => void;
 }
 
-export function Sidebar({ tab, onChange, username }: SidebarProps) {
+export function Sidebar({ tab, onChange, username, onShowGuide }: SidebarProps) {
   const [loggingOut, setLoggingOut] = useState(false);
 
   async function handleLogout() {
@@ -47,8 +49,22 @@ export function Sidebar({ tab, onChange, username }: SidebarProps) {
           {item.label}
         </button>
       ))}
+      {/* Phones: a narrow "?" at the end of the tab bar. From `md` up: pinned to the bottom of
+          the sidebar, above the account block. */}
+      <button
+        type="button"
+        aria-label={strings.guide.open}
+        title={strings.guide.open}
+        onClick={onShowGuide}
+        className="flex shrink-0 items-center gap-2 rounded-md px-2 py-2 text-sm font-medium text-neutral-700 transition-colors hover:bg-neutral-200 md:mt-auto md:px-3 dark:text-neutral-300 dark:hover:bg-neutral-800"
+      >
+        <span className="flex h-5 w-5 items-center justify-center rounded-full border border-current text-xs">
+          ?
+        </span>
+        <span className="hidden md:inline">{strings.guide.open}</span>
+      </button>
       {username ? (
-        <div className="mt-auto hidden border-t border-neutral-200 px-2 pt-3 md:block dark:border-neutral-800">
+        <div className="mt-2 hidden border-t border-neutral-200 px-2 pt-3 md:block dark:border-neutral-800">
           <p className="truncate text-xs text-neutral-500 dark:text-neutral-400" title={username}>
             {username}
           </p>
