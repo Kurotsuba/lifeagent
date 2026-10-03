@@ -9,15 +9,16 @@ import { Sidebar } from "./components/Sidebar";
 import { locale, strings } from "./i18n";
 import { Onboarding } from "./onboarding/Onboarding";
 import { Settings } from "./settings/Settings";
+import { Stock } from "./stock/Stock";
 import { Today } from "./today/Today";
 
 /**
  * Thin view layer: all state comes from commands, no business logic here (see CLAUDE.md).
  * A login comes first; then, on the first run, onboarding; afterwards, the
- * main shell with its 今日 / 对话 / 设置 tabs.
+ * main shell with its 今日 / 对话 / 库存 / 设置 tabs.
  */
 type Screen = "loading" | "auth" | "onboarding" | "main";
-export type Tab = "today" | "chat" | "settings";
+export type Tab = "today" | "chat" | "stock" | "settings";
 
 export default function App() {
   const [screen, setScreen] = useState<Screen>("loading");
@@ -127,6 +128,7 @@ function MainShell({ username }: { username: string | null }) {
         {tab === "chat" ? (
           <Chat draftText={chatDraft} onDraftConsumed={() => setChatDraft(null)} />
         ) : null}
+        {tab === "stock" ? <Stock /> : null}
         {tab === "settings" ? <Settings /> : null}
       </main>
     </div>

@@ -8,6 +8,7 @@ description = "HTTP backend for the web build: accounts, per-user CoreApps, the 
 lifeagent-core = { workspace = true }
 lifeagent-llm = { workspace = true }
 lifeagent-plugin-diet = { workspace = true }
+lifeagent-plugin-stock = { workspace = true }
 lifeagent-api = { workspace = true }
 tokio = { workspace = true }
 async-trait = { workspace = true }

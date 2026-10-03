@@ -2469,3 +2469,41 @@ connection used to act as a tenant only by its startup `role`, so arbitrary SQL 
   existing role. That upgrades tenants created as `NOLOGIN` (tested from the old provisioning
   statements) and follows a rotated `db-password`. With max instances 1, a rotation restarts
   the only process, so no instance keeps pools using the old password.
+
+## 2026-10-03 — Stock plugin (hackathon only)
+
+A third crate of plugin code, `crates/plugin-stock`: the food the user has at home. Added from
+chat (`stock_add`, `stock_list`, `stock_update`) or the new Stock tab; logged meals take what
+they used out of it; plans are built from it and carry a shopping list.
+
+- **No dependency on the diet plugin, either way.** Consumption reacts to the
+  `diet.meal_logged` event through `on_event`, reading only the payload fields it needs
+  (`raw_text`, `items[].name/kind/grams`), all optional-tolerant. Planning is a separate `stock`
+  plan section: the planner already sees every section in one prompt, so the stock brief asks
+  it to build the diet section's meals from stock without the diet plugin knowing. The diet
+  section, its validator and the Today page are unchanged. A cross-plugin test in
+  `crates/api/tests/stock_with_diet.rs` runs the real diet payload through the live dispatcher.
+- **Core gained one hook: `Plugin::on_event_deleted`**, default no-op, dispatched for soft
+  deletes. Without it a meal correction (delete + re-log, the diet tool's documented flow)
+  would take stock out twice. Stock records each amount per event in `stock_uses` and puts it
+  back on delete; items the user has removed since stay removed.
+- **The model maps meals to stock; Rust does the arithmetic.** One `Parser`-role call per
+  logged meal, only when auto-consume is on, stock is non-empty and the meal has food (not
+  chain-dish) items. The model converts as-eaten to as-stored (cooked rice to raw, grams of egg
+  to eggs) and skips meals eaten out; Rust drops bad indexes, merges repeats, caps amounts at
+  what's left, and never goes below zero. The call runs on the dispatcher, so the chat reply
+  doesn't mention it; the Stock tab refetches on the `DataChanged` that follows.
+- **Units are `g`, `ml`, `piece`**; one item per (name key, unit). Adding more tops the item
+  up and keeps the earlier best-before (use older food first); a run-out item (quantity 0, kept
+  hidden so a deleted meal can restore into it) takes the new date.
+- **Plan checks.** A `uses` line naming something not in stock, in the wrong unit, or more than
+  is left is a violation (one planner retry, as for diet). Soon-expiring stock (within a day of
+  the plan date) left unused is a warning. Shopping-list amounts are the planner's proposal,
+  like portions; the Stock tab shows next to each how much is in stock now, so items bought
+  since (the "bought" button adds them to stock) show as covered. No section without a profile
+  and weight, so `NothingToPlan` still fires when diet can't plan.
+- **Two per-account switches** under the settings key `stock.settings`: `auto_consume` and
+  `plan_from_stock`, both on by default, on the Stock tab rather than Settings since the tab is
+  the plugin's own page. With both off the plugin is a plain pantry list.
+- **Plan warnings and tool summaries are zh-CN**, like the diet plugin's; UI strings are in all
+  three locales.

@@ -138,6 +138,12 @@ pub trait Plugin: Send + Sync {
         Ok(())
     }
 
+    /// Called after an event is soft-deleted (`core_delete_entry`, the UI's delete button), so
+    /// a plugin can undo whatever its `on_event` did for it (e.g. stock a meal took out).
+    async fn on_event_deleted(&self, _ctx: &PluginContext, _e: &Event) -> Result<(), PluginError> {
+        Ok(())
+    }
+
     async fn context_snippet(
         &self,
         _ctx: &PluginContext,

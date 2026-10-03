@@ -1542,8 +1542,10 @@ dependencies = [
  "lifeagent-core",
  "lifeagent-llm",
  "lifeagent-plugin-diet",
+ "lifeagent-plugin-stock",
  "serde",
  "serde_json",
+ "tokio",
  "tracing",
  "uuid",
 ]
@@ -1558,6 +1560,7 @@ dependencies = [
  "lifeagent-core",
  "lifeagent-llm",
  "lifeagent-plugin-diet",
+ "lifeagent-plugin-stock",
  "rpassword",
  "serde",
  "serde_json",
@@ -1618,6 +1621,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "lifeagent-plugin-stock"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "lifeagent-core",
+ "lifeagent-llm",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "lifeagent-server"
 version = "0.1.0"
 dependencies = [
@@ -1632,6 +1651,7 @@ dependencies = [
  "lifeagent-core",
  "lifeagent-llm",
  "lifeagent-plugin-diet",
+ "lifeagent-plugin-stock",
  "reqwest",
  "serde",
  "serde_json",

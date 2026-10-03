@@ -12,6 +12,7 @@ path = "src/main.rs"
 lifeagent-core = { workspace = true }
 lifeagent-llm = { workspace = true }
 lifeagent-plugin-diet = { workspace = true }
+lifeagent-plugin-stock = { workspace = true }
 tokio = { workspace = true }
 clap = { workspace = true }
 anyhow = { workspace = true }

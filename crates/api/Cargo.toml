@@ -8,9 +8,14 @@ description = "Command surface and error mapping served by the web server."
 lifeagent-core = { workspace = true }
 lifeagent-llm = { workspace = true }
 lifeagent-plugin-diet = { workspace = true }
+lifeagent-plugin-stock = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 chrono = { workspace = true }
 uuid = { workspace = true }
 tracing = { workspace = true }
 
+
+[dev-dependencies]
+lifeagent-core = { workspace = true, features = ["test-support"] }
+tokio = { workspace = true }

@@ -530,3 +530,59 @@ async fn food_import_previews_and_commits_over_http() {
         .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
+
+#[tokio::test]
+async fn stock_items_can_be_added_changed_and_removed() {
+    let server = start().await;
+    let session = server.register("pantry").await;
+
+    let (status, item) = server
+        .post(
+            &session,
+            "/api/add_stock_item",
+            json!({ "item": { "name": "鸡蛋", "quantity": 10, "unit": "piece", "expires_on": "2026-10-20" } }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(item["quantity"], 10.0);
+    let id = item["id"].as_str().unwrap().to_string();
+
+    let (status, _) = server
+        .post(
+            &session,
+            "/api/set_stock_quantity",
+            json!({ "id": id, "quantity": 4 }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, view) = server.post(&session, "/api/get_stock", json!({})).await;
+    assert_eq!(view["items"][0]["quantity"], 4.0);
+    assert_eq!(view["settings"]["auto_consume"], true);
+    assert!(view["shopping"].is_null());
+
+    let (status, body) = server
+        .post(
+            &session,
+            "/api/add_stock_item",
+            json!({ "item": { "name": "牛奶", "quantity": 0, "unit": "ml" } }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["detail"]["kind"], "invalid_input");
+
+    let (status, _) = server
+        .post(
+            &session,
+            "/api/save_stock_settings",
+            json!({ "settings": { "auto_consume": false, "plan_from_stock": true } }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = server
+        .post(&session, "/api/delete_stock_item", json!({ "id": id }))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, view) = server.post(&session, "/api/get_stock", json!({})).await;
+    assert_eq!(view["items"], json!([]));
+    assert_eq!(view["settings"]["auto_consume"], false);
+}

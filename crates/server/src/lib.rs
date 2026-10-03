@@ -28,6 +28,7 @@ use lifeagent_core::db::validate_identifier;
 use lifeagent_core::plugin::Plugin;
 use lifeagent_llm::types::ChatModel;
 use lifeagent_plugin_diet::DietPlugin;
+use lifeagent_plugin_stock::StockPlugin;
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use sqlx::{AssertSqlSafe, PgPool};
 use tower_http::services::{ServeDir, ServeFile};
@@ -89,7 +90,7 @@ impl AppState {
                 "no LIFEAGENT_MODELS and no LIFEAGENT_MOCK_LLM: chat will report not configured"
             );
         }
-        let plugins: Vec<Arc<dyn Plugin>> = vec![Arc::new(DietPlugin)];
+        let plugins: Vec<Arc<dyn Plugin>> = vec![Arc::new(DietPlugin), Arc::new(StockPlugin)];
         let tenants = Tenants::new(AppFactory {
             database_url: config.database_url.clone(),
             clock: clock.clone(),

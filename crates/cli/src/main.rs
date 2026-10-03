@@ -24,6 +24,7 @@ use lifeagent_llm::router::ModelsConfig;
 use lifeagent_plugin_diet::import::{self, ImportFormat, ImportTarget};
 use lifeagent_plugin_diet::sources;
 use lifeagent_plugin_diet::{intake, DietPlugin};
+use lifeagent_plugin_stock::StockPlugin;
 
 use output::{print_json, print_turn};
 
@@ -229,7 +230,9 @@ async fn main() -> Result<()> {
     // Built up front, even when `--mock` is off, so its handle is available to `chat`/`say`
     // without threading an `Option<Arc<MockChatModel>>` through `CoreAppBuilder`.
     let mock = Arc::new(MockChatModel::new());
-    let mut builder = CoreAppBuilder::new(db).plugin(Arc::new(DietPlugin));
+    let mut builder = CoreAppBuilder::new(db)
+        .plugin(Arc::new(DietPlugin))
+        .plugin(Arc::new(StockPlugin));
     if cli.mock {
         builder = builder.chat_model_override(mock.clone());
     }

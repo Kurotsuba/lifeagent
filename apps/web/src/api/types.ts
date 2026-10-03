@@ -195,6 +195,61 @@ export function dietPlanSection(plan: StoredPlan): DietPlanSection | null {
   return (section as DietPlanSection | undefined) ?? null;
 }
 
+// ---- Stock (`crates/plugin-stock`) ----------------------------------------------------------
+
+/** `Unit` in `crates/plugin-stock/src/model.rs`. */
+export type StockUnit = "g" | "ml" | "piece";
+
+export interface StockItem {
+  id: string;
+  name: string;
+  quantity: number;
+  unit: StockUnit;
+  /** "YYYY-MM-DD" best-before, if the user gave one. */
+  expires_on: string | null;
+  updated_at: string;
+}
+
+/** An amount a logged meal took out of stock. */
+export interface StockUse {
+  event_id: string;
+  logical_date: string;
+  item_name: string;
+  unit: StockUnit;
+  amount: number;
+  used_at: string;
+}
+
+export interface StockSettings {
+  auto_consume: boolean;
+  plan_from_stock: boolean;
+}
+
+export interface ShoppingItem {
+  name: string;
+  amount: number;
+  unit: StockUnit;
+  /** How much of it is in stock now (bought since the plan was made, or never needed). */
+  in_stock: number;
+}
+
+/** `get_stock`: everything the Stock tab shows. */
+export interface StockView {
+  logical_date: string;
+  items: StockItem[];
+  recent_uses: StockUse[];
+  settings: StockSettings;
+  /** From tomorrow's plan, or else today's; `null` without one. */
+  shopping: { plan_date: string; items: ShoppingItem[] } | null;
+}
+
+export interface NewStockItem {
+  name: string;
+  quantity: number;
+  unit: StockUnit;
+  expires_on: string | null;
+}
+
 // ---- Nutrition sources / batch import (`docs/NUTRITION_SOURCES.md`) ------------------------
 
 /** `SourceKind`'s serde names: manual is still `"user"`, so old `diet.meal_logged` payloads and

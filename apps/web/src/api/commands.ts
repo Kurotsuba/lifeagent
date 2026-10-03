@@ -18,11 +18,15 @@ import type {
   ImportPreview,
   ImportReport,
   NewPreference,
+  NewStockItem,
   Preference,
   NutritionTargets,
   Profile,
   SettingsDto,
   SourceInfo,
+  StockItem,
+  StockSettings,
+  StockView,
   StoredPlan,
   TodayView,
   WeightGoal,
@@ -124,6 +128,28 @@ export function addPreference(preference: NewPreference): Promise<Preference> {
 
 export function deletePreference(id: string): Promise<void> {
   return call("delete_preference", { id });
+}
+
+// ---- Stock -------------------------------------------------------------------------------
+
+export function getStock(): Promise<StockView> {
+  return call("get_stock");
+}
+
+export function addStockItem(item: NewStockItem): Promise<StockItem> {
+  return call("add_stock_item", { item });
+}
+
+export function setStockQuantity(id: string, quantity: number): Promise<StockItem> {
+  return call("set_stock_quantity", { id, quantity });
+}
+
+export function deleteStockItem(id: string): Promise<void> {
+  return call("delete_stock_item", { id });
+}
+
+export function saveStockSettings(settings: StockSettings): Promise<void> {
+  return call("save_stock_settings", { settings });
 }
 
 // ---- Nutrition sources / batch import (`docs/NUTRITION_SOURCES.md` §8.2) -------------------

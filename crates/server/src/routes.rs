@@ -18,7 +18,7 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use futures_util::stream::{self, Stream};
 use lifeagent_api::events::payload_for;
-use lifeagent_api::ops::{self, ListFoods, SettingsDto};
+use lifeagent_api::ops::{self, ListFoods, NewStockDto, SettingsDto};
 use lifeagent_api::ErrorDetail;
 use lifeagent_core::goals::WeightGoal;
 use lifeagent_core::i18n::Language;
@@ -114,6 +114,19 @@ struct Enabled {
 struct Rename {
     id: String,
     name: String,
+}
+#[derive(Deserialize)]
+struct StockItemArg {
+    item: NewStockDto,
+}
+#[derive(Deserialize)]
+struct StockQuantity {
+    id: String,
+    quantity: f64,
+}
+#[derive(Deserialize)]
+struct StockSettingsArg {
+    settings: lifeagent_plugin_stock::settings::StockSettings,
 }
 #[derive(Deserialize)]
 struct Token {
@@ -242,6 +255,23 @@ pub async fn command(
             let a: Token = args(&body)?;
             ops::cancel_food_import(&tenant.imports, &a.token);
             reply(Ok(()))
+        }
+        "get_stock" => reply(ops::get_stock(app).await),
+        "add_stock_item" => {
+            let a: StockItemArg = args(&body)?;
+            reply(ops::add_stock_item(app, &a.item).await)
+        }
+        "set_stock_quantity" => {
+            let a: StockQuantity = args(&body)?;
+            reply(ops::set_stock_quantity(app, &a.id, a.quantity).await)
+        }
+        "delete_stock_item" => {
+            let a: Id = args(&body)?;
+            reply(ops::delete_stock_item(app, &a.id).await)
+        }
+        "save_stock_settings" => {
+            let a: StockSettingsArg = args(&body)?;
+            reply(ops::save_stock_settings(app, &a.settings).await)
         }
         _ => Err(ApiError::new("not_found", ErrorDetail::UnknownEndpoint)),
     }

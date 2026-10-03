@@ -1,0 +1,20 @@
+[package]
+name = "lifeagent-plugin-stock"
+version = "0.1.0"
+edition = "2021"
+description = "Food stock plugin: pantry tracking, consumption from logged meals, stock-aware plan section."
+
+[dependencies]
+lifeagent-core = { workspace = true }
+lifeagent-llm = { workspace = true }
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sqlx = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+lifeagent-core = { workspace = true, features = ["test-support"] }
+tokio = { workspace = true }

@@ -562,10 +562,9 @@ impl CoreApp {
         }
     }
 
-    /// The dispatcher (§7.5): delivers each appended event to every plugin's `on_event`
-    /// (errors are logged, not propagated), then emits `AppEvent::DataChanged` for appends and
-    /// deletes alike. Deletions are not passed to `on_event`, since `Event` carries no marker a
-    /// plugin could tell them apart by. Runs until the last `CoreApp` handle drops (see `CoreAppInner::dispatcher`).
+    /// The dispatcher (§7.5): delivers each appended event to every plugin's `on_event` and
+    /// each deleted one to `on_event_deleted` (errors are logged, not propagated), then emits
+    /// `AppEvent::DataChanged` for both. Runs until the last `CoreApp` handle drops (see `CoreAppInner::dispatcher`).
     fn spawn_dispatcher(&self) {
         let mut changes = self.0.events.subscribe_changes();
         let ctx = self.plugin_context();
@@ -580,11 +579,13 @@ impl CoreApp {
                     }
                     Err(RecvError::Closed) => break,
                 };
-                if let EventChange::Appended(event) = &change {
-                    for plugin in &plugins {
-                        if let Err(e) = plugin.on_event(&ctx, event).await {
-                            tracing::warn!(plugin = plugin.manifest().id, error = %e, "on_event failed");
-                        }
+                for plugin in &plugins {
+                    let result = match &change {
+                        EventChange::Appended(event) => plugin.on_event(&ctx, event).await,
+                        EventChange::Deleted(event) => plugin.on_event_deleted(&ctx, event).await,
+                    };
+                    if let Err(e) = result {
+                        tracing::warn!(plugin = plugin.manifest().id, error = %e, "event hook failed");
                     }
                 }
                 let event = change.event();
@@ -864,10 +865,12 @@ mod tests {
         (builder, dir)
     }
 
-    /// Records every event its `on_event` receives, and returns a fixed today card.
+    /// Records every event its `on_event` and `on_event_deleted` receive, and returns a fixed
+    /// today card.
     #[derive(Default)]
     struct RecordingPlugin {
         seen: std::sync::Mutex<Vec<String>>,
+        deleted: std::sync::Mutex<Vec<String>>,
     }
 
     #[async_trait::async_trait]
@@ -898,6 +901,14 @@ mod tests {
             e: &crate::events::Event,
         ) -> Result<(), PluginError> {
             self.seen.lock().unwrap().push(e.id.clone());
+            Ok(())
+        }
+        async fn on_event_deleted(
+            &self,
+            _ctx: &PluginContext,
+            e: &crate::events::Event,
+        ) -> Result<(), PluginError> {
+            self.deleted.lock().unwrap().push(e.id.clone());
             Ok(())
         }
         async fn today_card(
@@ -944,7 +955,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dispatcher_emits_data_changed_for_deletes_without_calling_on_event() {
+    async fn dispatcher_delivers_deletes_to_on_event_deleted_then_emits_data_changed() {
         let (builder, _dir) = builder().await;
         let plugin = Arc::new(RecordingPlugin::default());
         let app = builder.plugin(plugin.clone()).build().await.unwrap();
@@ -965,6 +976,7 @@ mod tests {
 
         assert_eq!(next_data_changed(&mut rx).await, "test.thing");
         assert_eq!(plugin.seen.lock().unwrap().len(), 1);
+        assert_eq!(*plugin.deleted.lock().unwrap(), vec![event.id]);
     }
 
     #[tokio::test]

@@ -6,6 +6,7 @@ import type { Tab } from "../App";
 const TABS: { id: Tab; label: string }[] = [
   { id: "today", label: strings.nav.today },
   { id: "chat", label: strings.nav.chat },
+  { id: "stock", label: strings.nav.stock },
   { id: "settings", label: strings.nav.settings },
 ];
 

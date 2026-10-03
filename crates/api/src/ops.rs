@@ -24,6 +24,10 @@ use lifeagent_plugin_diet::import::{
 use lifeagent_plugin_diet::model::Dish;
 use lifeagent_plugin_diet::sources::{self, Food, SourceInfo};
 use lifeagent_plugin_diet::targets::{self, NutritionTargets};
+use lifeagent_plugin_stock::model::{StockItem, Unit};
+use lifeagent_plugin_stock::settings::StockSettings;
+use lifeagent_plugin_stock::store::{self as stock_store, NewStock};
+use lifeagent_plugin_stock::view::{self as stock_view, StockView};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -287,6 +291,56 @@ pub async fn rename_food_source(app: &CoreApp, id: &str, name: &str) -> Result<(
 
 pub async fn delete_food_source(app: &CoreApp, id: &str) -> Result<(), CommandError> {
     Ok(sources::delete_source(&app.plugin_context(), id).await?)
+}
+
+// ---- Stock (`lifeagent-plugin-stock`, the Stock tab) ----------------------------------------
+
+pub async fn get_stock(app: &CoreApp) -> Result<StockView, CommandError> {
+    Ok(stock_view::stock_view(&app.plugin_context()).await?)
+}
+
+/// `add_stock_item`'s argument. `expires_on` is `YYYY-MM-DD`; empty or omitted means no date.
+#[derive(Debug, Clone, Deserialize)]
+pub struct NewStockDto {
+    pub name: String,
+    pub quantity: f64,
+    pub unit: Unit,
+    #[serde(default)]
+    pub expires_on: Option<String>,
+}
+
+pub async fn add_stock_item(app: &CoreApp, item: &NewStockDto) -> Result<StockItem, CommandError> {
+    let expires_on = match item.expires_on.as_deref().map(str::trim) {
+        None | Some("") => None,
+        Some(s) => Some(parse_date(s)?),
+    };
+    let new = NewStock {
+        name: item.name.clone(),
+        quantity: item.quantity,
+        unit: item.unit,
+        expires_on,
+    };
+    Ok(stock_store::add(&app.plugin_context(), &new).await?)
+}
+
+pub async fn set_stock_quantity(
+    app: &CoreApp,
+    id: &str,
+    quantity: f64,
+) -> Result<StockItem, CommandError> {
+    Ok(stock_store::set_quantity(&app.plugin_context(), id, quantity).await?)
+}
+
+pub async fn delete_stock_item(app: &CoreApp, id: &str) -> Result<(), CommandError> {
+    Ok(stock_store::delete(&app.plugin_context(), id).await?)
+}
+
+pub async fn save_stock_settings(
+    app: &CoreApp,
+    settings: &StockSettings,
+) -> Result<(), CommandError> {
+    let ctx = app.plugin_context();
+    Ok(lifeagent_plugin_stock::settings::set(&ctx, settings, app.clock().now()).await?)
 }
 
 /// A parsed-but-not-yet-committed import, kept between `preview_food_import` and
