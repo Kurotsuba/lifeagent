@@ -16,6 +16,10 @@
 *.db.bak
 /logs/
 
+# Written into the checkout by google-github-actions/auth in CI; ignored so the image tag isn't
+# -dirty and the file isn't uploaded to Cloud Build (.gcloudignore includes this file).
+gha-creds-*.json
+
 # Editors, OS
 .DS_Store
 *.swp
