@@ -54,6 +54,7 @@ export const zhCN = {
     stock: "库存",
     settings: "设置",
     training: "训练",
+    household: "家庭",
   },
   guide: {
     open: "使用指南",
@@ -333,12 +334,15 @@ export const zhCN = {
       names: {
         training: "训练记录与计划",
         stock: "库存管理",
+        multimember: "家庭共餐",
       } as Record<string, string>,
       descriptions: {
         training:
           "在对话中记录训练；按你的偏好和近 7 天的记录生成每日训练计划，第二天的饮食计划会围绕训练来安排。",
         stock:
           "记录家里的食材；记录饮食时自动扣减，计划优先使用库存并列出购物清单。",
+        multimember:
+          "登记和你一起吃饭的家人或室友（16–70 岁）。共餐时计划为同桌的人做同一套菜，避开每个人的过敏和不喜欢的食物，并按各自维持体重所需的量分配份量。",
       } as Record<string, string>,
     },
     language: {
@@ -416,6 +420,51 @@ export const zhCN = {
       sampleTitle: "示例",
       importAction: "导入",
       deleteConfirm: "删除后已记录的饮食不受影响",
+    },
+  },
+  // Household page (`crates/plugin-multimember`).
+  household: {
+    title: "家庭",
+    intro:
+      "和你一起吃饭的人（16–70 岁）。共餐时计划会为同桌的人做同一套菜，避开每个人的过敏和不喜欢的食物，并按各自维持体重所需的量分配份量。",
+    noMembers: "还没有成员。添加后，计划会照顾到同桌每个人。",
+    add: "添加成员",
+    edit: "编辑",
+    archive: "移除",
+    archiveConfirm: "确认移除",
+    memberLine: (age: number, sex: string, pattern: string) => `${age} 岁 · ${sex} · ${pattern}`,
+    allergiesLine: (list: string) => `过敏：${list}`,
+    form: {
+      addTitle: "添加成员",
+      editTitle: (name: string) => `编辑 ${name}`,
+      name: "名字",
+      weightKg: "体重（千克）",
+      weightHint: "用于估算维持体重所需的量，需要时手动更新。",
+      ageHint: "16–70 岁",
+      invalid: "请填写名字、出生日期、身高和体重。",
+    },
+    attendance: {
+      title: "平时一起吃的正餐",
+      weekdays: ["一", "二", "三", "四", "五", "六", "日"],
+      saving: "保存中…",
+    },
+    week: {
+      title: "未来 7 天",
+      hint: "点一下可临时改变那一餐（例如出差、聚餐），只影响那一天。带 * 的是临时变化。",
+      today: "今天",
+      reset: "恢复平时",
+      notePlaceholder: "备注（可选）",
+    },
+    dislikes: {
+      title: "不喜欢的食物",
+      placeholder: "例如：香菜",
+      add: "添加",
+      none: "无",
+    },
+    shared: {
+      with: (names: string, portions: number) => `一起吃：${names} · 共 ${portions} 人份`,
+      guest: (name: string, kcal: number) => `${name} 约 ${kcal} 千卡`,
+      estimateNote: "按各自维持体重所需估算的份量（目安）",
     },
   },
   // Backend errors (`ErrorDetail`, `crates/api/src/error.rs`), keyed by `kind`.

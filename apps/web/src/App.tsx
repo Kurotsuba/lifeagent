@@ -6,6 +6,7 @@ import { isCommandError } from "./api/types";
 import { AuthScreen } from "./auth/AuthScreen";
 import { Chat } from "./chat/Chat";
 import { Guide, guideSeen } from "./components/Guide";
+import { Household } from "./household/Household";
 import { Sidebar } from "./components/Sidebar";
 import { locale, strings } from "./i18n";
 import { Nutrition } from "./nutrition/Nutrition";
@@ -19,13 +20,25 @@ import { Training } from "./training/Training";
  * Thin view layer: all state comes from commands, no business logic here (see CLAUDE.md).
  * A login comes first; then, on the first run, onboarding; afterwards, the
  * main shell. Its tabs, in order: Today (a read-only summary of the day), Chat, then one tab per
- * plugin (Nutrition, plus Training and Stock while those optional plugins are on), and Settings.
+ * plugin (Nutrition, plus Training, Household and Stock while those optional plugins are on), and
+ * Settings.
  */
 type Screen = "loading" | "auth" | "onboarding" | "main";
-export type Tab = "today" | "chat" | "nutrition" | "training" | "stock" | "settings";
+export type Tab =
+  | "today"
+  | "chat"
+  | "nutrition"
+  | "training"
+  | "household"
+  | "stock"
+  | "settings";
 
 /** Tabs that belong to an optional plugin, by plugin id. */
-const PLUGIN_TABS: Partial<Record<Tab, string>> = { training: "training", stock: "stock" };
+const PLUGIN_TABS: Partial<Record<Tab, string>> = {
+  training: "training",
+  household: "multimember",
+  stock: "stock",
+};
 
 export default function App() {
   const [screen, setScreen] = useState<Screen>("loading");
@@ -172,6 +185,7 @@ function MainShell({ username }: { username: string | null }) {
         ) : null}
         {visibleTab === "nutrition" ? <Nutrition onAdjustPlan={openChatWithDraft} /> : null}
         {visibleTab === "training" ? <Training /> : null}
+        {visibleTab === "household" ? <Household /> : null}
         {visibleTab === "stock" ? <Stock /> : null}
         {visibleTab === "settings" ? (
           <Settings onPluginsChanged={() => void refreshPlugins()} />

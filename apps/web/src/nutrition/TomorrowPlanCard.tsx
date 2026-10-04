@@ -9,6 +9,7 @@ import {
 import { primaryButtonClass, secondaryButtonClass } from "../components/buttonStyles";
 import { inputClass } from "../components/Field";
 import { strings } from "../i18n";
+import { SharedMeal } from "./SharedMeal";
 
 const t = strings.today.tomorrowPlan;
 
@@ -136,6 +137,7 @@ export function TomorrowPlanCard({ plan, planTime, onAdjust, onChanged }: Tomorr
                   {meal.prep_note}
                 </p>
               ) : null}
+              <SharedMeal meal={meal} />
             </div>
           ))}
           <p className="text-sm font-medium text-neutral-700 dark:text-neutral-300">

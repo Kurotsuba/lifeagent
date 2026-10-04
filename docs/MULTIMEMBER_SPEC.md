@@ -1,7 +1,8 @@
 # Multimember plugin — specification
 
-Status: approved design, not yet implemented (2026-10-04). Decisions behind it are recorded in
-`docs/DECISIONS.md`, "Multimember plugin".
+Status: implemented (2026-10-04), milestones MM1–MM5. Decisions behind it, and where the
+implementation refined this design, are recorded in `docs/DECISIONS.md`, "Multimember plugin"
+and "Multimember plugin (implementation)".
 
 This document follows the conventions of `docs/PHASE1_SPEC.md`: it is the source of truth for
 the plugin's behavior, `CLAUDE.md` wins for conventions, and milestones (§10) are implemented in
@@ -71,12 +72,17 @@ diet plan becomes **one set of shared dishes** that:
 ### 3.1 Core addition: computed plan sections
 
 Every plan section today goes through the planner LLM. The `multimember` section is a pure
-function of stored data, so core gains one optional hook:
+function of stored data, so core gains two optional hooks:
 
 ```rust
-/// A section built without the LLM. Called in the plugin's planning stage, before
-/// `plan_input`. When it returns `Some`, the section is added to the draft and to the stored
-/// plan as is, and `plan_input`/`finalize_plan_section` are not called for this plugin.
+/// True for a plugin whose section is built without the LLM. Such a plugin implements
+/// `computed_plan_section` instead of `plan_input`/`finalize_plan_section`.
+fn computes_plan_section(&self) -> bool {
+    false
+}
+
+/// The section for `date`, or `None` for no section that day. Called in the plugin's planning
+/// stage, before any LLM call; the section is added to the draft and the stored plan as is.
 async fn computed_plan_section(
     &self,
     _ctx: &PluginContext,
@@ -95,6 +101,10 @@ Rules:
 - If only computed sections exist (no LLM stage ran), planning still fails with
   `NothingToPlan`, as it does today when no section has input.
 - Revisions recompute the section from current data; the revision instruction doesn't reach it.
+- **A computed section is never shown to the planner LLM**: not in "already planned", and not
+  in a revision's previous plan (any stored section of a plugin whose `computes_plan_section`
+  is true is removed from it). The `multimember` section carries guests' height and weight; a
+  plugin that reads it puts only what the model needs into its own brief.
 
 ### 3.2 Planning stages
 
@@ -176,22 +186,24 @@ Notes:
 
 ## 5. Validation
 
-`MemberProfile` validation, in the plugin. Failures are `CoreError::InvalidInput` with a
-`ValidationRule`, so they reach the UI as data and the LLM as a fixable tool error.
+`MemberProfile` validation, in the plugin. The rules are the plugin's own `MemberRule` enum
+(`crates/plugin-multimember/src/model.rs`), not core's `ValidationRule`, so core stays unaware
+of members. A broken rule is a `MemberError::Invalid(rule)`: tools turn it into a fixable
+`PluginError::InvalidArgs` with the rule's English text, and `lifeagent-api` maps it to an
+`ErrorDetail` the UI words.
 
-| Field | Rule | ValidationRule |
+| Field | Rule | `MemberRule` → `ErrorDetail` |
 |---|---|---|
-| `display_name` | trimmed, 1–40 chars, unique among non-archived members (case-insensitive) | new `MemberNameInvalid`, new `MemberNameTaken` |
-| `birth_date` | age (core `age_years`, on today's logical date) within **16..=70** | new `MemberAgeOutOfRange { got, birth_date }` |
-| `height_cm` | 120–230 (same as the owner) | existing `HeightOutOfRange` |
-| `weight_kg` | 30–300 (same as `core_log_weight`) | existing `WeightOutOfRange` |
-| `allergies` | ≤ 20 entries, each trimmed 1–40 chars | new `MemberAllergiesInvalid` |
-| members | at most **7** non-archived members | new `TooManyMembers { max }` |
-| dislike `text` | trimmed 1–100 chars; `valid_from ≤ valid_until` when both set | reuse the core preference rules |
-| attendance | `meal_type` is a main meal; `weekday` 0..=6; override date not in the past | new `AttendanceInvalid` |
+| `display_name` | trimmed, 1–40 chars, unique among non-archived members (case-insensitive) | `NameInvalid` → `member_name_invalid`, `NameTaken` → `member_name_taken` |
+| `birth_date` | age (core `age_years`, on today's logical date) within **16..=70** | `AgeOutOfRange { got }` → `member_age_out_of_range` |
+| `height_cm` | 120–230 (same as the owner) | `HeightOutOfRange` → existing `height_out_of_range` |
+| `weight_kg` | 30–300 (same as `core_log_weight`) | `WeightOutOfRange` → existing `weight_out_of_range` |
+| `allergies` | ≤ 20 entries, each trimmed 1–40 chars | `AllergiesInvalid` → `member_allergies_invalid` |
+| members | at most **7** non-archived members | `TooManyMembers { max }` → `too_many_members` |
+| dislike `text` | trimmed 1–100 chars; `valid_from ≤ valid_until` when both set | `DislikeEmpty`, `DislikeTooLong`, `DatesReversed` → existing `note_empty`, `note_too_long`, `preference_dates_reversed` |
+| attendance | `meal_type` is a main meal; `weekday` 0..=6; override date not in the past; note ≤ 100 chars | `AttendanceInvalid` → `attendance_invalid` |
 
-Each new rule needs an `ErrorDetail` variant in `crates/api/src/error.rs` and strings in all
-three locale tables.
+Each new `ErrorDetail` kind has strings in all three locale tables.
 
 Age is checked again at plan time (§6.1): a member who has since turned 71 is left out of plans
 with a warning, never an error, and stays editable so the owner can archive them.
@@ -311,7 +323,7 @@ the owner tells the assistant about the others ("my partner is out for dinner on
 | `multimember_add_member` | profile fields; optional `attendance: [{weekday, meal_type, present}]` | Adds a member (§4 default attendance unless given). |
 | `multimember_update_member` | `member` (id or exact name), any profile fields | Partial update, revalidated. |
 | `multimember_archive_member` | `member` | Archives. |
-| `multimember_set_attendance` | `member`; either `weekday` + `meal_type` + `present` (default) or `date` + `meal_type` + `present` + optional `note` (override) | Upserts one row. |
+| `multimember_set_attendance` | `member`, `meal_type`, `present`; and either `weekdays` (array, 0 = Monday) for the usual week or `date` + optional `note` for a one-off change | Upserts the default rows, or one override. |
 | `multimember_clear_attendance_override` | `member`, `date`, `meal_type` | Removes an override. |
 | `multimember_add_dislike` | `member`, `text`, optional `valid_from`, `valid_until` | Adds a dislike. |
 | `multimember_remove_dislike` | `id` | Soft-deletes. |
@@ -334,19 +346,25 @@ members. Anything else is `NotFound`, listing the known names so the model can a
 
 ## 9. API, server and UI
 
-**Commands** (`crates/api/src/ops.rs`, routes in `crates/server`): `list_members`,
+**Commands** (`crates/api/src/ops.rs`, routes in `crates/server`): `get_household_view`,
 `add_member`, `update_member`, `archive_member`, `set_attendance_default`,
 `set_attendance_override`, `clear_attendance_override`, `add_member_dislike`,
-`remove_member_dislike`, `get_attendance(from, to)`. Errors leave Rust as `ErrorDetail`.
+`remove_member_dislike`. Errors leave Rust as `ErrorDetail`.
+
+`get_household_view` returns the members (profile, age, the 21 weekly default slots, current
+dislikes), the one-off changes for the next 7 days, and those 7 days **resolved** (`week`: for
+each date, every member × main meal with `present` and whether an override decides it), so the
+UI never re-implements attendance resolution.
 
 **Web UI** (`apps/web`): a new **Household** tab (家族 / Household / 家庭), shown while the plugin is
 on, after Training:
 - Member list with an add/edit form (all §5 fields, inline validation messages from
   `errors`), archive button.
-- Weekly attendance grid: rows = members, columns = 7 days × 3 main meals, toggles.
-- Next 7 days: overrides on top of the grid, with a note field.
-- Per-member dislikes, same control as the owner's preferences.
-- Shared-meal display on Today and Nutrition (§8).
+- Weekly attendance grid per member: weekdays × 3 main meals, saved on each toggle.
+- Next 7 days, resolved: tapping a meal makes a one-off change (marked `*`), ↺ removes it.
+  Notes are shown; they are added from chat (`multimember_set_attendance`).
+- Per-member dislikes: chips with remove, and an add field.
+- Shared-meal display on Today's diet plan card and Nutrition's tomorrow card (§8).
 
 Settings → Features gains the multimember switch, like training and stock. Every new string goes
 into `ja.ts`, `en.ts` and `zh-CN.ts`. Plan warnings stay in the language the planner already
@@ -391,5 +409,6 @@ members, set attendance, generate tomorrow's plan, see shared meals with portion
 - Never call a real LLM; use `MockChatModel`. Time from the injected `Clock`.
 - The targets engine is reused, not re-tested; tests for guests check that diet builds the right
   `Profile` and passes `goal = None`.
-- Privacy: a test asserts that member weight and height don't appear in INFO-level log output
-  from planning.
+- Privacy: tests assert that guests' measurements never reach the planner LLM (core's computed
+  section test, and `crates/api/tests/multimember.rs`), and the chat snippet has no weight or
+  height. Errors that could quote member data are logged at DEBUG only.

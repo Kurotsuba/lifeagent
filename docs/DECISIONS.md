@@ -2636,3 +2636,27 @@ Spec: `docs/MULTIMEMBER_SPEC.md`. Not implemented yet.
   aren't balanced per guest; member-only extras are out of scope.
 - **Computed plan sections.** Core gains `Plugin::computed_plan_section` so a section built from
   stored data needs no LLM call. Diet and stock add `multimember` to `plan_after`.
+
+## 2026-10-04 — Multimember plugin (implementation)
+
+Implemented per `docs/MULTIMEMBER_SPEC.md` (MM1–MM5). Where the code refines the design:
+
+- **Errors stay in the plugin.** Member rules are a `MemberRule` enum in the plugin, not new
+  core `ValidationRule` variants, so core knows nothing about members. `lifeagent-api` maps each
+  rule to an `ErrorDetail`; height, weight and the dislike rules reuse the owner's existing kinds.
+- **Computed sections are hidden from the planner.** `Plugin::computes_plan_section` marks a
+  plugin whose section is built without the LLM. Core strips such sections from the planner
+  prompt ("already planned" and a revision's previous plan), because the `multimember` section
+  carries guests' height and weight. Diet's brief passes on only names, allergies, dislikes, the
+  table's dietary pattern and the portion count.
+- **Scale uses the owner's day target**, including any training credit, as computed before the
+  LLM call, so the brief's portion count and the stored servings agree.
+- **Dietary pattern check is term-based.** A small built-in list per pattern (meat; plus seafood
+  for vegetarian; plus egg, dairy and honey for vegan), matched like allergies. Bare 乳/奶/蛋 are
+  left out so soy milk and 蛋白 (protein) don't trip it.
+- **One API read for the page.** `get_household_view` replaces the spec's `list_members` and
+  `get_attendance(from, to)`, and includes the next 7 days already resolved.
+- **`multimember_set_attendance` takes `weekdays` (an array)** for the usual week, so "weekends
+  at lunch" is one call.
+- **No owner row.** The owner eats every main meal by definition (diet requires all three), so
+  attendance covers other members only.

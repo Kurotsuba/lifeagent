@@ -48,6 +48,7 @@ export const ja: Strings = {
     stock: "在庫",
     settings: "設定",
     training: "トレーニング",
+    household: "家族",
   },
   guide: {
     open: "使い方ガイド",
@@ -327,12 +328,15 @@ export const ja: Strings = {
       names: {
         training: "トレーニング記録とプラン",
         stock: "在庫管理",
+        multimember: "家族の食事",
       } as Record<string, string>,
       descriptions: {
         training:
           "チャットでトレーニングを記録し、好みと直近 7 日間の記録から毎日のトレーニングプランを作成します。翌日の食事プランはトレーニングに合わせて組まれます。",
         stock:
           "家にある食材を記録します。記録した食事は在庫から自動で差し引かれ、プランは在庫を優先して使い、買い物リストも作ります。",
+        multimember:
+          "一緒に食べる家族や同居人（16〜70歳）を登録します。一緒に食べる食事は全員分を同じ献立で作り、それぞれのアレルギーと苦手な食べ物を避け、体重を保つのに必要な量で一人ずつ盛り付け量を決めます。",
       } as Record<string, string>,
     },
     language: {
@@ -412,6 +416,51 @@ export const ja: Strings = {
       sampleTitle: "例",
       importAction: "インポート",
       deleteConfirm: "削除しても記録済みの食事には影響しません",
+    },
+  },
+  // Household page (`crates/plugin-multimember`).
+  household: {
+    title: "家族",
+    intro:
+      "一緒に食べる人（16〜70歳）。一緒に食べる食事は全員分を同じ献立で作り、それぞれのアレルギーと苦手な食べ物を避け、体重を保つのに必要な量で一人ずつ盛り付け量を決めます。",
+    noMembers: "まだメンバーがいません。追加すると、プランが食卓の全員に合わせて作られます。",
+    add: "メンバーを追加",
+    edit: "編集",
+    archive: "削除",
+    archiveConfirm: "削除する",
+    memberLine: (age: number, sex: string, pattern: string) => `${age}歳 · ${sex} · ${pattern}`,
+    allergiesLine: (list: string) => `アレルギー：${list}`,
+    form: {
+      addTitle: "メンバーを追加",
+      editTitle: (name: string) => `${name} を編集`,
+      name: "名前",
+      weightKg: "体重（kg）",
+      weightHint: "体重を保つのに必要な量の目安に使います。変わったら手動で更新してください。",
+      ageHint: "16〜70歳",
+      invalid: "名前、生年月日、身長、体重を入力してください。",
+    },
+    attendance: {
+      title: "いつも一緒に食べる食事",
+      weekdays: ["月", "火", "水", "木", "金", "土", "日"],
+      saving: "保存中…",
+    },
+    week: {
+      title: "これから 7 日間",
+      hint: "タップするとその日だけ変更できます（出張、飲み会など）。* はその日だけの変更です。",
+      today: "今日",
+      reset: "いつも通りに戻す",
+      notePlaceholder: "メモ（任意）",
+    },
+    dislikes: {
+      title: "苦手な食べ物",
+      placeholder: "例：パクチー",
+      add: "追加",
+      none: "なし",
+    },
+    shared: {
+      with: (names: string, portions: number) => `一緒に：${names} · 計 ${portions} 人前`,
+      guest: (name: string, kcal: number) => `${name} 約 ${kcal} kcal`,
+      estimateNote: "それぞれ体重を保つのに必要な量で見積もった盛り付け量（目安）",
     },
   },
   errors: {

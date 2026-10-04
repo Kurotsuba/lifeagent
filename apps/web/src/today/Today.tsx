@@ -12,6 +12,7 @@ import {
 } from "../api/types";
 import { strings } from "../i18n";
 import { IntakeSummary } from "../nutrition/IntakeSummary";
+import { SharedMeal } from "../nutrition/SharedMeal";
 import { ShoppingList } from "../stock/ShoppingList";
 import { TrainingPlanCard } from "../training/TrainingPlanCard";
 
@@ -188,6 +189,7 @@ function DietPlanCard({ view }: { view: TodayView }) {
                     {meal.prep_note}
                   </p>
                 ) : null}
+                <SharedMeal meal={meal} />
               </div>
             );
           })}

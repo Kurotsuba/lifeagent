@@ -11,6 +11,7 @@ pub mod model;
 pub mod section;
 pub mod store;
 pub mod tools;
+pub mod view;
 
 use async_trait::async_trait;
 use chrono::NaiveDate;

@@ -598,3 +598,116 @@ async fn stock_items_can_be_added_changed_and_removed() {
     assert_eq!(status, StatusCode::NOT_FOUND);
     assert_eq!(body["detail"]["kind"], "not_found");
 }
+
+#[tokio::test]
+async fn household_members_attendance_and_dislikes_over_http() {
+    let server = start().await;
+    let session = server.register("family").await;
+    let profile = json!({
+        "display_name": "Aki", "sex": "female", "birth_date": "1992-05-10",
+        "height_cm": 160, "weight_kg": 52, "activity_level": "light",
+        "dietary_pattern": "omnivore", "allergies": ["えび"]
+    });
+
+    let (status, member) = server
+        .post(&session, "/api/add_member", json!({ "profile": profile }))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let id = member["id"].as_str().unwrap().to_string();
+
+    let mut too_old = profile.clone();
+    too_old["display_name"] = json!("Ken");
+    too_old["birth_date"] = json!("1940-01-01");
+    let (status, body) = server
+        .post(&session, "/api/add_member", json!({ "profile": too_old }))
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["detail"]["kind"], "member_age_out_of_range");
+
+    let mut heavier = profile.clone();
+    heavier["weight_kg"] = json!(53.5);
+    let (status, _) = server
+        .post(
+            &session,
+            "/api/update_member",
+            json!({ "id": id, "profile": heavier }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, _) = server
+        .post(
+            &session,
+            "/api/set_attendance_default",
+            json!({ "member_id": id, "slot": { "weekday": 5, "meal_type": "lunch", "present": true } }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (_, view) = server
+        .post(&session, "/api/get_household_view", json!({}))
+        .await;
+    let today = view["today"].as_str().unwrap().to_string();
+    let (status, _) = server
+        .post(
+            &session,
+            "/api/set_attendance_override",
+            json!({ "member_id": id, "date": today, "meal_type": "dinner", "present": false, "note": "飲み会" }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, body) = server
+        .post(
+            &session,
+            "/api/set_attendance_override",
+            json!({ "member_id": id, "date": "2000-01-01", "meal_type": "dinner", "present": true }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["detail"]["kind"], "attendance_invalid");
+
+    let (status, dislike) = server
+        .post(
+            &session,
+            "/api/add_member_dislike",
+            json!({ "member_id": id, "text": "セロリ" }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (_, view) = server
+        .post(&session, "/api/get_household_view", json!({}))
+        .await;
+    let m = &view["members"][0];
+    assert_eq!(m["weight_kg"], 53.5);
+    assert_eq!(m["dislikes"][0]["text"], "セロリ");
+    let saturday_lunch = m["attendance"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["weekday"] == 5 && s["meal_type"] == "lunch")
+        .unwrap();
+    assert_eq!(saturday_lunch["present"], true);
+    assert_eq!(view["overrides"][0]["note"], "飲み会");
+
+    for (path, body) in [
+        (
+            "/api/clear_attendance_override",
+            json!({ "member_id": id, "date": today, "meal_type": "dinner" }),
+        ),
+        ("/api/remove_member_dislike", json!({ "id": dislike["id"] })),
+        ("/api/archive_member", json!({ "id": id })),
+    ] {
+        let (status, _) = server.post(&session, path, body).await;
+        assert_eq!(status, StatusCode::OK, "{path}");
+    }
+    let (_, view) = server
+        .post(&session, "/api/get_household_view", json!({}))
+        .await;
+    assert_eq!(view["members"], json!([]));
+    assert_eq!(view["overrides"], json!([]));
+    let (status, _) = server
+        .post(&session, "/api/archive_member", json!({ "id": id }))
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}

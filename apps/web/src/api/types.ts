@@ -154,6 +154,18 @@ export interface DietPlanMeal {
   prep_note: string | null;
   items: DietMealItem[];
   total: DietMacros;
+  /** Shared meals only: each household member's portion (`docs/MULTIMEMBER_SPEC.md` §6.3). */
+  servings?: GuestServing[];
+  /** Shared meals only: portions cooked in total, the user's included. */
+  portions?: number;
+}
+
+/** One household member's portion of a shared meal; `total` is computed in Rust. */
+export interface GuestServing {
+  member_id: string;
+  name: string;
+  scale: number;
+  total: DietMacros;
 }
 
 /** `StoredPlan.content.sections["diet"]`. */
@@ -165,6 +177,8 @@ export interface DietPlanSection {
   total: DietMacros;
   meals: DietPlanMeal[];
   tips: string[];
+  /** Plans with shared meals: each guest's maintenance estimate, by member id. */
+  guest_estimates?: Record<string, DietMacros>;
 }
 
 export type PlanStatus = "proposed" | "accepted";
@@ -208,6 +222,68 @@ export function dietCard(view: TodayView): DietCard | null {
 export function dietPlanSection(plan: StoredPlan): DietPlanSection | null {
   const section = plan.content.sections["diet"];
   return (section as DietPlanSection | undefined) ?? null;
+}
+
+// ---- Household (`crates/plugin-multimember`) -------------------------------------------------
+
+export type MainMealType = "breakfast" | "lunch" | "dinner";
+
+/** `MemberProfile`: everything the user enters about another household member. */
+export interface MemberProfile {
+  display_name: string;
+  sex: Sex;
+  /** "YYYY-MM-DD". */
+  birth_date: string;
+  height_cm: number;
+  weight_kg: number;
+  activity_level: ActivityLevel;
+  dietary_pattern: DietaryPattern;
+  allergies: string[];
+}
+
+export interface Member extends MemberProfile {
+  id: string;
+  created_at: string;
+  updated_at: string;
+}
+
+/** A weekly default: whether the member usually eats `meal_type` on `weekday` (0 = Monday). */
+export interface AttendanceSlot {
+  weekday: number;
+  meal_type: MainMealType;
+  present: boolean;
+}
+
+export interface MemberDislike {
+  id: string;
+  member_id: string;
+  text: string;
+  valid_from: string | null;
+  valid_until: string | null;
+  created_at: string;
+}
+
+export interface MemberView extends Member {
+  age: number;
+  /** 21 slots: every weekday × main meal. */
+  attendance: AttendanceSlot[];
+  dislikes: MemberDislike[];
+}
+
+export interface DaySlot {
+  member_id: string;
+  meal_type: MainMealType;
+  present: boolean;
+  /** A one-off change decides it, rather than the weekly default. */
+  overridden: boolean;
+  note: string | null;
+}
+
+export interface HouseholdView {
+  today: string;
+  members: MemberView[];
+  /** The next 7 days, today first, resolved. */
+  week: { date: string; slots: DaySlot[] }[];
 }
 
 // ---- Stock (`crates/plugin-stock`) ----------------------------------------------------------

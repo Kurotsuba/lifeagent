@@ -48,6 +48,7 @@ export const en: Strings = {
     stock: "Stock",
     settings: "Settings",
     training: "Training",
+    household: "Household",
   },
   guide: {
     open: "Guide",
@@ -328,12 +329,15 @@ export const en: Strings = {
       names: {
         training: "Training log & plan",
         stock: "Stock",
+        multimember: "Household meals",
       } as Record<string, string>,
       descriptions: {
         training:
           "Log workouts in chat and get a daily training plan from your preferences and the last 7 days. The next day's meals are planned around the training.",
         stock:
           "Keep track of the food at home. Logged meals take what they used out of stock, and plans use what you have first and come with a shopping list.",
+        multimember:
+          "Add the family members or flatmates you cook for (aged 16–70). Shared meals become one set of dishes that avoids everyone's allergies and dislikes, with a portion for each person sized to keep their weight.",
       } as Record<string, string>,
     },
     language: {
@@ -413,6 +417,51 @@ export const en: Strings = {
       sampleTitle: "Sample",
       importAction: "Import",
       deleteConfirm: "Meals already logged are not affected",
+    },
+  },
+  // Household page (`crates/plugin-multimember`).
+  household: {
+    title: "Household",
+    intro:
+      "The people who eat with you (aged 16–70). Shared meals are planned as one set of dishes that avoids everyone's allergies and dislikes, with a portion for each person sized to keep their weight.",
+    noMembers: "No members yet. Once added, plans take everyone at the table into account.",
+    add: "Add member",
+    edit: "Edit",
+    archive: "Remove",
+    archiveConfirm: "Confirm remove",
+    memberLine: (age: number, sex: string, pattern: string) => `${age} · ${sex} · ${pattern}`,
+    allergiesLine: (list: string) => `Allergies: ${list}`,
+    form: {
+      addTitle: "Add member",
+      editTitle: (name: string) => `Edit ${name}`,
+      name: "Name",
+      weightKg: "Weight (kg)",
+      weightHint: "Used to estimate what keeps their weight; update it by hand when it changes.",
+      ageHint: "Aged 16–70",
+      invalid: "Enter a name, birth date, height and weight.",
+    },
+    attendance: {
+      title: "Usual shared meals",
+      weekdays: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
+      saving: "Saving…",
+    },
+    week: {
+      title: "Next 7 days",
+      hint: "Tap a meal to change just that day (a trip, a dinner out). * marks a one-off change.",
+      today: "Today",
+      reset: "Back to usual",
+      notePlaceholder: "Note (optional)",
+    },
+    dislikes: {
+      title: "Dislikes",
+      placeholder: "e.g. cilantro",
+      add: "Add",
+      none: "None",
+    },
+    shared: {
+      with: (names: string, portions: number) => `With ${names} · ${portions} portions`,
+      guest: (name: string, kcal: number) => `${name} about ${kcal} kcal`,
+      estimateNote: "Portions estimated to keep each person's weight",
     },
   },
   errors: {

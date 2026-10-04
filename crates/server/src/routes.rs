@@ -139,6 +139,46 @@ struct Token {
     token: String,
 }
 #[derive(Deserialize)]
+struct AddMemberArg {
+    profile: lifeagent_plugin_multimember::model::MemberProfile,
+    #[serde(default)]
+    attendance: Option<Vec<lifeagent_plugin_multimember::model::DefaultSlot>>,
+}
+#[derive(Deserialize)]
+struct UpdateMemberArg {
+    id: String,
+    profile: lifeagent_plugin_multimember::model::MemberProfile,
+}
+#[derive(Deserialize)]
+struct AttendanceDefaultArg {
+    member_id: String,
+    slot: lifeagent_plugin_multimember::model::DefaultSlot,
+}
+#[derive(Deserialize)]
+struct AttendanceOverrideArg {
+    member_id: String,
+    date: String,
+    meal_type: lifeagent_plugin_multimember::model::MealType,
+    present: bool,
+    #[serde(default)]
+    note: Option<String>,
+}
+#[derive(Deserialize)]
+struct ClearOverrideArg {
+    member_id: String,
+    date: String,
+    meal_type: lifeagent_plugin_multimember::model::MealType,
+}
+#[derive(Deserialize)]
+struct MemberDislikeArg {
+    member_id: String,
+    text: String,
+    #[serde(default)]
+    valid_from: Option<String>,
+    #[serde(default)]
+    valid_until: Option<String>,
+}
+#[derive(Deserialize)]
 struct TrainingPreferencesArg {
     preferences: TrainingPreferences,
 }
@@ -246,6 +286,58 @@ pub async fn command(
         "save_training_day_preference" => {
             let a: DayPreference = args(&body)?;
             reply(ops::save_training_day_preference(app, a.date, &a.text).await)
+        }
+        "get_household_view" => reply(ops::get_household_view(app).await),
+        "add_member" => {
+            let a: AddMemberArg = args(&body)?;
+            reply(ops::add_member(app, &a.profile, a.attendance.as_deref()).await)
+        }
+        "update_member" => {
+            let a: UpdateMemberArg = args(&body)?;
+            reply(ops::update_member(app, &a.id, &a.profile).await)
+        }
+        "archive_member" => {
+            let a: Id = args(&body)?;
+            reply(ops::archive_member(app, &a.id).await)
+        }
+        "set_attendance_default" => {
+            let a: AttendanceDefaultArg = args(&body)?;
+            reply(ops::set_attendance_default(app, &a.member_id, &a.slot).await)
+        }
+        "set_attendance_override" => {
+            let a: AttendanceOverrideArg = args(&body)?;
+            reply(
+                ops::set_attendance_override(
+                    app,
+                    &a.member_id,
+                    &a.date,
+                    a.meal_type,
+                    a.present,
+                    a.note.as_deref(),
+                )
+                .await,
+            )
+        }
+        "clear_attendance_override" => {
+            let a: ClearOverrideArg = args(&body)?;
+            reply(ops::clear_attendance_override(app, &a.member_id, &a.date, a.meal_type).await)
+        }
+        "add_member_dislike" => {
+            let a: MemberDislikeArg = args(&body)?;
+            reply(
+                ops::add_member_dislike(
+                    app,
+                    &a.member_id,
+                    &a.text,
+                    a.valid_from.as_deref(),
+                    a.valid_until.as_deref(),
+                )
+                .await,
+            )
+        }
+        "remove_member_dislike" => {
+            let a: Id = args(&body)?;
+            reply(ops::remove_member_dislike(app, &a.id).await)
         }
         "list_food_sources" => reply(ops::list_food_sources(app).await),
         "list_foods" => {

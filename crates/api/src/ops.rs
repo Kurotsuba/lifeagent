@@ -24,6 +24,9 @@ use lifeagent_plugin_diet::import::{
 use lifeagent_plugin_diet::model::Dish;
 use lifeagent_plugin_diet::sources::{self, Food, SourceInfo};
 use lifeagent_plugin_diet::targets::{self, NutritionTargets};
+use lifeagent_plugin_multimember::model::{DefaultSlot, Dislike, MealType, Member, MemberProfile};
+use lifeagent_plugin_multimember::store as members;
+use lifeagent_plugin_multimember::view::{self as household_view, HouseholdView};
 use lifeagent_plugin_stock::model::{StockItem, Unit};
 use lifeagent_plugin_stock::settings::StockSettings;
 use lifeagent_plugin_stock::shopping::{ShoppingLineRef, ShoppingStatus};
@@ -113,6 +116,94 @@ pub async fn save_training_day_preference(
 ) -> Result<(), CommandError> {
     let date = resolve_plan_date(app, date).await?;
     Ok(training_prefs::set_day_preference(&app.plugin_context(), date, text).await?)
+}
+
+// ---- Household (`lifeagent-plugin-multimember`) ------------------------------------------------
+
+pub async fn get_household_view(app: &CoreApp) -> Result<HouseholdView, CommandError> {
+    Ok(household_view::household_view(&app.plugin_context()).await?)
+}
+
+/// `attendance` gives the new member's weekly defaults; `None`: dinner every day.
+pub async fn add_member(
+    app: &CoreApp,
+    profile: &MemberProfile,
+    attendance: Option<&[DefaultSlot]>,
+) -> Result<Member, CommandError> {
+    Ok(members::add_member(&app.plugin_context(), profile, attendance).await?)
+}
+
+pub async fn update_member(
+    app: &CoreApp,
+    id: &str,
+    profile: &MemberProfile,
+) -> Result<Member, CommandError> {
+    Ok(members::update_member(&app.plugin_context(), id, profile).await?)
+}
+
+pub async fn archive_member(app: &CoreApp, id: &str) -> Result<(), CommandError> {
+    Ok(members::archive_member(&app.plugin_context(), id).await?)
+}
+
+pub async fn set_attendance_default(
+    app: &CoreApp,
+    member_id: &str,
+    slot: &DefaultSlot,
+) -> Result<(), CommandError> {
+    Ok(members::set_default(&app.plugin_context(), member_id, slot).await?)
+}
+
+pub async fn set_attendance_override(
+    app: &CoreApp,
+    member_id: &str,
+    date: &str,
+    meal_type: MealType,
+    present: bool,
+    note: Option<&str>,
+) -> Result<(), CommandError> {
+    let date = parse_date(date)?;
+    Ok(members::set_override(
+        &app.plugin_context(),
+        member_id,
+        date,
+        meal_type,
+        present,
+        note,
+    )
+    .await?)
+}
+
+pub async fn clear_attendance_override(
+    app: &CoreApp,
+    member_id: &str,
+    date: &str,
+    meal_type: MealType,
+) -> Result<(), CommandError> {
+    let date = parse_date(date)?;
+    Ok(members::clear_override(&app.plugin_context(), member_id, date, meal_type).await?)
+}
+
+pub async fn add_member_dislike(
+    app: &CoreApp,
+    member_id: &str,
+    text: &str,
+    valid_from: Option<&str>,
+    valid_until: Option<&str>,
+) -> Result<Dislike, CommandError> {
+    let valid_from = valid_from.map(parse_date).transpose()?;
+    let valid_until = valid_until.map(parse_date).transpose()?;
+    Ok(members::add_dislike(
+        &app.plugin_context(),
+        member_id,
+        text,
+        valid_from,
+        valid_until,
+    )
+    .await?)
+}
+
+pub async fn remove_member_dislike(app: &CoreApp, id: &str) -> Result<(), CommandError> {
+    Ok(members::remove_dislike(&app.plugin_context(), id).await?)
 }
 
 pub async fn complete_onboarding(app: &CoreApp) -> Result<(), CommandError> {

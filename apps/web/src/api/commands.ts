@@ -15,6 +15,12 @@ import type {
   Dish,
   Food,
   HistoryMessage,
+  AttendanceSlot,
+  HouseholdView,
+  MainMealType,
+  Member,
+  MemberDislike,
+  MemberProfile,
   ImportPreview,
   ImportReport,
   NewPreference,
@@ -144,6 +150,61 @@ export function saveTrainingPreferences(preferences: TrainingPreferences): Promi
 /** `date` omitted means tomorrow. Blank `text` clears the request. */
 export function saveTrainingDayPreference(text: string, date?: string): Promise<void> {
   return call("save_training_day_preference", { text, date: date ?? null });
+}
+
+// ---- Household -----------------------------------------------------------------------------
+
+export function getHouseholdView(): Promise<HouseholdView> {
+  return call("get_household_view");
+}
+
+/** Without `attendance`, the new member eats dinner with the user every day. */
+export function addMember(profile: MemberProfile, attendance?: AttendanceSlot[]): Promise<Member> {
+  return call("add_member", { profile, attendance: attendance ?? null });
+}
+
+export function updateMember(id: string, profile: MemberProfile): Promise<Member> {
+  return call("update_member", { id, profile });
+}
+
+export function archiveMember(id: string): Promise<void> {
+  return call("archive_member", { id });
+}
+
+export function setAttendanceDefault(memberId: string, slot: AttendanceSlot): Promise<void> {
+  return call("set_attendance_default", { memberId, slot });
+}
+
+export function setAttendanceOverride(
+  memberId: string,
+  date: string,
+  mealType: MainMealType,
+  present: boolean,
+  note?: string,
+): Promise<void> {
+  return call("set_attendance_override", {
+    memberId,
+    date,
+    mealType,
+    present,
+    note: note ?? null,
+  });
+}
+
+export function clearAttendanceOverride(
+  memberId: string,
+  date: string,
+  mealType: MainMealType,
+): Promise<void> {
+  return call("clear_attendance_override", { memberId, date, mealType });
+}
+
+export function addMemberDislike(memberId: string, text: string): Promise<MemberDislike> {
+  return call("add_member_dislike", { memberId, text });
+}
+
+export function removeMemberDislike(id: string): Promise<void> {
+  return call("remove_member_dislike", { id });
 }
 
 // ---- Preferences ---------------------------------------------------------------------------
