@@ -2611,3 +2611,28 @@ id `training`), with the next day's diet planned on top of the next day's traini
   stored plan, not taken from the client), once: the status change is claimed atomically first,
   so a double click can't add it twice. Reopening or cancelling a done line leaves stock as it
   is. New command: `set_shopping_status`.
+
+## 2026-10-04 — Multimember plugin (design)
+
+Spec: `docs/MULTIMEMBER_SPEC.md`. Not implemented yet.
+
+- **Name and shape.** A new optional plugin `multimember` (off by default) plans shared meals
+  for the owner and other household members. The core schema doesn't change: members, their
+  dislikes and attendance live in `multimember_*` tables, and diet learns about them only
+  through a `multimember` plan section, so no plugin depends on another.
+- **Only the owner uses the app.** The chat always speaks as the owner. Other members have no
+  logins, no logged meals or weights, and no goals.
+- **Age 16–70 for members.** Nutrition for children and elderly people is out of scope. Checked
+  on add/edit and again at plan time (an out-of-range member is left out with a warning). The
+  owner's own bounds (16–100) are unchanged.
+- **Maintenance estimates, computed in Rust.** Members have no goal; each is planned to
+  maintain weight. To make that a number, members store sex, height, weight and activity level,
+  and diet runs its existing targets engine with no goal (= Maintain). Considered and rejected:
+  no numbers at all (the LLM would size portions, against the "numbers come from Rust" rule) and
+  a reference table by sex/age (new data to source and check, coarser).
+- **Shared dishes, scaled portions.** Diet's `items` stay the owner's portion, so the owner's
+  targets, validator and plan-vs-actual are unchanged. A guest's portion is the owner's ×
+  `guest maintenance kcal / owner day target`, clamped to 0.5–2.0, computed in Rust. Macros
+  aren't balanced per guest; member-only extras are out of scope.
+- **Computed plan sections.** Core gains `Plugin::computed_plan_section` so a section built from
+  stored data needs no LLM call. Diet and stock add `multimember` to `plan_after`.
