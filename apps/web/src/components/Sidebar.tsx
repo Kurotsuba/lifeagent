@@ -5,8 +5,9 @@ import type { Tab } from "../App";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "today", label: strings.nav.today },
-  { id: "training", label: strings.nav.training },
   { id: "chat", label: strings.nav.chat },
+  { id: "nutrition", label: strings.nav.nutrition },
+  { id: "training", label: strings.nav.training },
   { id: "stock", label: strings.nav.stock },
   { id: "settings", label: strings.nav.settings },
 ];
@@ -18,11 +19,11 @@ interface SidebarProps {
   username: string | null;
   /** Reopens the usage guide (the ? button). */
   onShowGuide: () => void;
-  /** The optional training plugin is on, so its tab is shown. */
-  showTraining: boolean;
+  /** False for the tab of an optional plugin that is switched off. */
+  isTabShown: (tab: Tab) => boolean;
 }
 
-export function Sidebar({ tab, onChange, username, onShowGuide, showTraining }: SidebarProps) {
+export function Sidebar({ tab, onChange, username, onShowGuide, isTabShown }: SidebarProps) {
   const [loggingOut, setLoggingOut] = useState(false);
 
   async function handleLogout() {
@@ -37,13 +38,13 @@ export function Sidebar({ tab, onChange, username, onShowGuide, showTraining }: 
       <p className="mb-2 hidden px-2 text-sm font-semibold text-neutral-900 md:block dark:text-neutral-50">
         {strings.app.name}
       </p>
-      {TABS.filter((item) => item.id !== "training" || showTraining).map((item) => (
+      {TABS.filter((item) => isTabShown(item.id)).map((item) => (
         <button
           key={item.id}
           type="button"
           onClick={() => onChange(item.id)}
           className={
-            "flex-1 rounded-md px-1 py-2 text-center text-sm font-medium transition-colors md:flex-none md:px-3 md:text-left " +
+            "min-w-0 flex-1 rounded-md px-0.5 py-2 text-center text-xs font-medium break-words transition-colors md:flex-none md:px-3 md:text-left md:text-sm " +
             (tab === item.id
               ? "bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900"
               : "text-neutral-700 hover:bg-neutral-200 dark:text-neutral-300 dark:hover:bg-neutral-800")

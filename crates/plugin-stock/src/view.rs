@@ -6,6 +6,7 @@ use serde::Serialize;
 use crate::model::{name_key, StockItem, StockUse, Unit};
 use crate::plan::{StockPlanSection, SECTION};
 use crate::settings::{self, StockSettings};
+use crate::shopping::{self, ShoppingStatus};
 use crate::store;
 
 /// Recent meal uses shown under the stock list.
@@ -26,6 +27,8 @@ pub struct StockView {
 #[derive(Debug, Serialize)]
 pub struct Shopping {
     pub plan_date: chrono::NaiveDate,
+    /// The plan version the list belongs to; marking a line names it.
+    pub plan_version: u32,
     pub items: Vec<ShoppingItem>,
 }
 
@@ -36,6 +39,7 @@ pub struct ShoppingItem {
     pub unit: Unit,
     /// How much of it is in stock now, so items bought since the plan was made show as such.
     pub in_stock: f64,
+    pub status: ShoppingStatus,
 }
 
 pub async fn stock_view(ctx: &PluginContext) -> Result<StockView, PluginError> {
@@ -51,13 +55,19 @@ pub async fn stock_view(ctx: &PluginContext) -> Result<StockView, PluginError> {
         };
         let section: StockPlanSection = serde_json::from_value(section.clone())
             .map_err(|e| PluginError::Other(format!("stored stock section: {e}")))?;
+        let marks = shopping::marks(ctx, date, plan.version).await?;
         shopping = Some(Shopping {
             plan_date: date,
+            plan_version: plan.version,
             items: section
                 .shopping_list
                 .into_iter()
                 .map(|line| ShoppingItem {
                     in_stock: in_stock(&items, &line.name, line.unit),
+                    status: marks
+                        .get(&(name_key(&line.name), line.unit))
+                        .copied()
+                        .unwrap_or(ShoppingStatus::Open),
                     name: line.name,
                     amount: line.amount,
                     unit: line.unit,

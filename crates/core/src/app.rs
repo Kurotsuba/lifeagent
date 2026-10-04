@@ -633,9 +633,24 @@ impl CoreApp {
                     }
                     Err(RecvError::Closed) => break,
                 };
+                // Appended events only reach plugins that are on; deletions reach every plugin,
+                // so one switched off since can still undo what it did (see `Plugin::optional`).
+                let enabled = match crate::plugin::enabled_plugins(&ctx.settings, &plugins).await {
+                    Ok(enabled) => enabled,
+                    Err(e) => {
+                        tracing::warn!(error = %e, "reading plugin switches failed; using all");
+                        plugins.to_vec()
+                    }
+                };
                 for plugin in &plugins {
                     let result = match &change {
-                        EventChange::Appended(event) => plugin.on_event(&ctx, event).await,
+                        EventChange::Appended(event) => {
+                            let id = plugin.manifest().id;
+                            if !enabled.iter().any(|p| p.manifest().id == id) {
+                                continue;
+                            }
+                            plugin.on_event(&ctx, event).await
+                        }
                         EventChange::Deleted(event) => plugin.on_event_deleted(&ctx, event).await,
                     };
                     if let Err(e) = result {
@@ -927,11 +942,13 @@ mod tests {
     }
 
     /// Records every event its `on_event` and `on_event_deleted` receive, and returns a fixed
-    /// today card.
+    /// today card. Always on unless `optional`.
     #[derive(Default)]
     struct RecordingPlugin {
         seen: std::sync::Mutex<Vec<String>>,
         deleted: std::sync::Mutex<Vec<String>>,
+        optional: bool,
+        enabled_by_default: bool,
     }
 
     #[async_trait::async_trait]
@@ -944,6 +961,12 @@ mod tests {
                 event_types: vec![],
                 migrations: vec![],
             }
+        }
+        fn optional(&self) -> bool {
+            self.optional
+        }
+        fn enabled_by_default(&self) -> bool {
+            self.enabled_by_default
         }
         fn tools(&self) -> Vec<lifeagent_llm::types::ToolSpec> {
             vec![]
@@ -1038,6 +1061,41 @@ mod tests {
         assert_eq!(next_data_changed(&mut rx).await, "test.thing");
         assert_eq!(plugin.seen.lock().unwrap().len(), 1);
         assert_eq!(*plugin.deleted.lock().unwrap(), vec![event.id]);
+    }
+
+    #[tokio::test]
+    async fn a_default_on_plugin_switched_off_gets_deletes_but_not_appends() {
+        let (builder, _dir) = builder().await;
+        let plugin = Arc::new(RecordingPlugin {
+            optional: true,
+            enabled_by_default: true,
+            ..Default::default()
+        });
+        let app = builder.plugin(plugin.clone()).build().await.unwrap();
+        let info = app.plugins().await.unwrap();
+        assert!(info[0].optional && info[0].enabled);
+        let mut rx = app.subscribe();
+        let append = || {
+            app.events().append(
+                "test.thing",
+                Utc::now(),
+                serde_json::json!({}),
+                crate::events::EventSource::Chat,
+            )
+        };
+
+        let before = append().await.unwrap();
+        next_data_changed(&mut rx).await;
+        app.set_plugin_enabled("rec", false).await.unwrap();
+        assert!(!app.plugins().await.unwrap()[0].enabled);
+
+        append().await.unwrap();
+        next_data_changed(&mut rx).await;
+        app.events().soft_delete(&before.id).await.unwrap();
+        next_data_changed(&mut rx).await;
+
+        assert_eq!(*plugin.seen.lock().unwrap(), vec![before.id.clone()]);
+        assert_eq!(*plugin.deleted.lock().unwrap(), vec![before.id]);
     }
 
     #[tokio::test]

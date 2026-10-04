@@ -166,10 +166,17 @@ pub trait Plugin: Send + Sync {
         Ok(None)
     }
 
-    /// Optional plugins can be switched off by the user and start switched off; the rest are
-    /// always on. A disabled plugin keeps its tables and events, but contributes no tools,
-    /// context, today card or plan section until it is enabled again.
+    /// Optional plugins can be switched off by the user and start switched off (unless
+    /// `enabled_by_default`); the rest are always on. A disabled plugin keeps its tables and
+    /// events, but contributes no tools, context, today card or plan section, and its
+    /// `on_event` isn't called, until it is enabled again. `on_event_deleted` still is, so it
+    /// can undo what it did while it was on.
     fn optional(&self) -> bool {
+        false
+    }
+
+    /// For an optional plugin: whether it is on before the user has touched its switch.
+    fn enabled_by_default(&self) -> bool {
         false
     }
 
@@ -201,7 +208,7 @@ pub trait Plugin: Send + Sync {
 }
 
 /// The plugins currently switched on, in registration order: every non-optional plugin, plus
-/// the optional ones the user enabled (`Settings::plugins_enabled`).
+/// the optional ones switched on (`Settings::plugins_enabled`, else `enabled_by_default`).
 pub async fn enabled_plugins(
     settings: &Settings,
     plugins: &[Arc<dyn Plugin>],
@@ -209,7 +216,13 @@ pub async fn enabled_plugins(
     let switches = settings.plugins_enabled().await?;
     Ok(plugins
         .iter()
-        .filter(|p| !p.optional() || switches.get(p.manifest().id).copied().unwrap_or(false))
+        .filter(|p| {
+            !p.optional()
+                || switches
+                    .get(p.manifest().id)
+                    .copied()
+                    .unwrap_or_else(|| p.enabled_by_default())
+        })
         .cloned()
         .collect())
 }

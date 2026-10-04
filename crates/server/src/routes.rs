@@ -130,6 +130,11 @@ struct StockSettingsArg {
     settings: lifeagent_plugin_stock::settings::StockSettings,
 }
 #[derive(Deserialize)]
+struct ShoppingStatusArg {
+    line: lifeagent_plugin_stock::shopping::ShoppingLineRef,
+    status: lifeagent_plugin_stock::shopping::ShoppingStatus,
+}
+#[derive(Deserialize)]
 struct Token {
     token: String,
 }
@@ -297,6 +302,10 @@ pub async fn command(
         "save_stock_settings" => {
             let a: StockSettingsArg = args(&body)?;
             reply(ops::save_stock_settings(app, &a.settings).await)
+        }
+        "set_shopping_status" => {
+            let a: ShoppingStatusArg = args(&body)?;
+            reply(ops::set_shopping_status(app, &a.line, a.status).await)
         }
         _ => Err(ApiError::new("not_found", ErrorDetail::UnknownEndpoint)),
     }

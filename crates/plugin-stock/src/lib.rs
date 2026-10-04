@@ -8,12 +8,14 @@
 //!
 //! Depends on `lifeagent-core` and `lifeagent-llm` only. It knows the diet plugin solely through
 //! that event's JSON, so it can be registered or left out without either plugin changing, and
-//! both switches in [`settings`] turn its reads and writes off per account.
+//! both switches in [`settings`] turn its reads and writes off per account. The whole plugin can
+//! also be switched off in Settings (`Plugin::optional`); it starts on.
 
 pub mod consume;
 pub mod model;
 pub mod plan;
 pub mod settings;
+pub mod shopping;
 pub mod store;
 pub mod tools;
 pub mod view;
@@ -41,11 +43,27 @@ impl Plugin for StockPlugin {
             name: "Stock",
             version: env!("CARGO_PKG_VERSION"),
             event_types: vec![],
-            migrations: vec![PluginMigration {
-                version: 1,
-                sql: store::MIGRATION_1,
-            }],
+            migrations: vec![
+                PluginMigration {
+                    version: 1,
+                    sql: store::MIGRATION_1,
+                },
+                PluginMigration {
+                    version: 2,
+                    sql: shopping::MIGRATION_2,
+                },
+            ],
         }
+    }
+
+    /// Switchable in Settings, and on until the user switches it off (accounts made before
+    /// the switch existed keep it).
+    fn optional(&self) -> bool {
+        true
+    }
+
+    fn enabled_by_default(&self) -> bool {
+        true
     }
 
     fn tools(&self) -> Vec<ToolSpec> {

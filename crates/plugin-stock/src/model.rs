@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 /// How an item is counted. The model converts what the user says ("1 L 牛奶", "一盒鸡蛋") into
 /// one of these when it adds stock; amounts taken out are always in the item's own unit.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Unit {
     G,

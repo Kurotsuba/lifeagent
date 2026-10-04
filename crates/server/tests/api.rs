@@ -585,4 +585,16 @@ async fn stock_items_can_be_added_changed_and_removed() {
     let (_, view) = server.post(&session, "/api/get_stock", json!({})).await;
     assert_eq!(view["items"], json!([]));
     assert_eq!(view["settings"]["auto_consume"], false);
+    // Without a plan there is no shopping line to mark.
+    let line =
+        json!({ "plan_date": "2026-01-01", "plan_version": 1, "name": "鸡蛋", "unit": "piece" });
+    let (status, body) = server
+        .post(
+            &session,
+            "/api/set_shopping_status",
+            json!({ "line": line, "status": "done" }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(body["detail"]["kind"], "not_found");
 }

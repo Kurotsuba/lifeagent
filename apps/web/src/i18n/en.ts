@@ -44,6 +44,7 @@ export const en: Strings = {
   nav: {
     today: "Today",
     chat: "Chat",
+    nutrition: "Nutrition",
     stock: "Stock",
     settings: "Settings",
     training: "Training",
@@ -56,23 +57,27 @@ export const en: Strings = {
     steps: [
       {
         title: "Welcome to LifeAgent",
-        body: "LifeAgent keeps track of what you eat and, every day, plans the next one around your goals. Here's a quick tour.",
+        body: "LifeAgent logs what you eat and how you train, and every day makes a plan for the next one from your goals. Here's a quick look at each tab.",
       },
       {
-        title: "Chat: log a meal in one sentence",
-        body: "Tell the assistant what you ate, e.g. \"ramen and a beer for lunch\". It logs the meal; calories and macros are calculated by the app.\nGot something wrong? Fix or delete it in chat too.",
+        title: "Today: your day at a glance",
+        body: "Today's meal plan (with a ✓ on meals already logged), today's training plan and the shopping list in one place. It's for viewing; make changes on each feature's tab or in chat.",
       },
       {
-        title: "Today: how today is going, and tomorrow's plan",
-        body: "See today's calories, protein, carbs and fat, and which parts of today's plan you've eaten.\nTomorrow's plan is made automatically at the time you set. You can also create it now, regenerate it with a request, or accept it. Log your weight from the top right.",
+        title: "Chat: log things in a sentence",
+        body: "Tell the assistant what you ate or did, as you would a friend, e.g. \"ramen and a beer for lunch\". The app works out calories and nutrients itself.\nGot something wrong? Fix or delete it in chat too.",
       },
       {
-        title: "Stock: what's in your kitchen",
-        body: "Say \"bought a dozen eggs and 1 L of milk\" in chat, or add items on the Stock tab. Logged meals are taken out of stock automatically, and plans use what you have first and make a shopping list.",
+        title: "Nutrition: meals and tomorrow's plan",
+        body: "See today's calories, protein, carbs and fat, delete logged meals and log your weight.\nTomorrow's plan is made automatically at the time you set. You can also make it now, write a request and regenerate, or accept it.",
+      },
+      {
+        title: "Training and Stock",
+        body: "The Training tab shows the last 7 days and your training plan; the Stock tab keeps track of the food at home, and each shopping-list item can be marked done or cancelled. Both can be switched on or off in Settings.",
       },
       {
         title: "Settings",
-        body: "Change your profile and goal, when plans are made, preferences such as foods you dislike, and the language. The assistant replies in the language you pick.\nOpen this guide again any time with the ? button.",
+        body: "Change your profile and goal, switch features on or off, set when plans are made, list foods you dislike, and pick the language. The assistant replies in that language.\nThe ? button brings this guide back any time.",
       },
     ],
   },
@@ -189,6 +194,12 @@ export const en: Strings = {
     },
     deleteMealConfirm: "Delete this entry?",
   },
+  overview: {
+    dietTitle: "Today's meal plan",
+    eatenOfTarget: (eaten: number, target: number) => `Eaten ${eaten} / ${target} kcal`,
+    noDietPlan: "No meal plan for today. You can make tomorrow's on the Nutrition tab.",
+    noTrainingPlan: "No training plan for today.",
+  },
   stock: {
     hint: "You can also tell the assistant in chat, e.g. \"bought a dozen eggs and 1 L of milk\".",
     autoConsume: "Take logged meals out of stock automatically",
@@ -212,7 +223,12 @@ export const en: Strings = {
     noShopping: "No plan yet. Once tomorrow's plan is made, what to buy shows up here.",
     nothingToBuy: "Your stock covers the plan; nothing to buy.",
     inStock: (amount: string) => `${amount} in stock`,
-    bought: "Bought, add to stock",
+    complete: "Done",
+    completeHint: "Bought it: adds the planned amount to stock",
+    cancel: "Cancel",
+    reopen: "Restore",
+    statusDone: "Bought",
+    statusCancelled: "Cancelled",
     recentTitle: "Recently used",
     recentEmpty: "Stock used by logged meals shows up here.",
   },
@@ -312,10 +328,13 @@ export const en: Strings = {
       hint: "Optional features appear in the sidebar and join the daily plan once turned on.",
       names: {
         training: "Training log & plan",
+        stock: "Stock",
       } as Record<string, string>,
       descriptions: {
         training:
           "Log workouts in chat and get a daily training plan from your preferences and the last 7 days. The next day's meals are planned around the training.",
+        stock:
+          "Keep track of the food at home. Logged meals take what they used out of stock, and plans use what you have first and come with a shopping list.",
       } as Record<string, string>,
     },
     language: {

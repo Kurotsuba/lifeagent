@@ -26,6 +26,7 @@ use lifeagent_plugin_diet::sources::{self, Food, SourceInfo};
 use lifeagent_plugin_diet::targets::{self, NutritionTargets};
 use lifeagent_plugin_stock::model::{StockItem, Unit};
 use lifeagent_plugin_stock::settings::StockSettings;
+use lifeagent_plugin_stock::shopping::{ShoppingLineRef, ShoppingStatus};
 use lifeagent_plugin_stock::store::{self as stock_store, NewStock};
 use lifeagent_plugin_stock::view::{self as stock_view, StockView};
 use lifeagent_plugin_training::prefs::{self as training_prefs, TrainingPreferences};
@@ -142,7 +143,7 @@ pub async fn get_plan(app: &CoreApp, date: &str) -> Result<Option<StoredPlan>, C
     Ok(app.get_plan(date).await?)
 }
 
-/// `request` is the user's optional wish for this plan only (the Today tab's request box).
+/// `request` is the user's optional wish for this plan only (the Nutrition tab's request box).
 pub async fn generate_plan(
     app: &CoreApp,
     date: Option<String>,
@@ -388,6 +389,16 @@ pub async fn save_stock_settings(
 ) -> Result<(), CommandError> {
     let ctx = app.plugin_context();
     Ok(lifeagent_plugin_stock::settings::set(&ctx, settings, app.clock().now()).await?)
+}
+
+/// Marks a shopping-list line done (bought: its planned amount goes into stock), cancelled, or
+/// open again.
+pub async fn set_shopping_status(
+    app: &CoreApp,
+    line: &ShoppingLineRef,
+    status: ShoppingStatus,
+) -> Result<(), CommandError> {
+    Ok(lifeagent_plugin_stock::shopping::set_status(&app.plugin_context(), line, status).await?)
 }
 
 /// A parsed-but-not-yet-committed import, kept between `preview_food_import` and

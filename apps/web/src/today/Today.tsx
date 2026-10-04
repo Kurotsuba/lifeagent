@@ -1,32 +1,59 @@
-import { useEffect, useState } from "react";
-import { getSettings, getToday } from "../api/commands";
+import { useEffect, useState, type ReactNode } from "react";
+import { getStock, getToday } from "../api/commands";
 import { onAppDataEvent } from "../api/events";
-import { commandErrorMessage, dietCard, type MealType, type TodayView } from "../api/types";
+import {
+  commandErrorMessage,
+  dietCard,
+  dietPlanSection,
+  trainingPlanSection,
+  type MealType,
+  type StockView,
+  type TodayView,
+} from "../api/types";
 import { strings } from "../i18n";
-import { KcalRing } from "./KcalRing";
-import { MacroBars } from "./MacroBars";
-import { MealList } from "./MealList";
-import { TodayPlanList } from "./TodayPlanList";
-import { TomorrowPlanCard } from "./TomorrowPlanCard";
-import { WeightLogDialog } from "./WeightLogDialog";
+import { ShoppingList } from "../stock/ShoppingList";
+import { TrainingPlanCard } from "../training/TrainingPlanCard";
 
-interface TodayProps {
-  onAdjustPlan: (prefillText: string) => void;
+const t = strings.overview;
+
+function Card({ title, aside, children }: { title: string; aside?: ReactNode; children: ReactNode }) {
+  return (
+    <section className="rounded-lg border border-neutral-200 p-4 dark:border-neutral-700">
+      <div className="mb-3 flex items-baseline justify-between gap-3">
+        <h2 className="text-sm font-semibold text-neutral-900 dark:text-neutral-50">{title}</h2>
+        {aside}
+      </div>
+      {children}
+    </section>
+  );
 }
 
-export function Today({ onAdjustPlan }: TodayProps) {
+function Empty({ children }: { children: ReactNode }) {
+  return <p className="text-sm text-neutral-500 dark:text-neutral-400">{children}</p>;
+}
+
+interface TodayProps {
+  /** Ids of the plugins switched on; training and stock cards show only when theirs is. */
+  enabledPlugins: string[];
+}
+
+/** The Today tab: a read-only view of the day — today's diet plan, today's training plan and
+ * the shopping list. Editing happens on each plugin's own tab (and in chat). */
+export function Today({ enabledPlugins }: TodayProps) {
+  const showTraining = enabledPlugins.includes("training");
+  const showStock = enabledPlugins.includes("stock");
   const [view, setView] = useState<TodayView | null>(null);
-  const [planTime, setPlanTime] = useState("21:00");
+  const [stock, setStock] = useState<StockView | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [showWeightDialog, setShowWeightDialog] = useState(false);
 
   async function refetch() {
     try {
-      const [nextView] = await Promise.all([
+      const [nextView, nextStock] = await Promise.all([
         getToday(),
-        getSettings().then((s) => setPlanTime(s.plan_time)),
+        showStock ? getStock() : Promise.resolve(null),
       ]);
       setView(nextView);
+      setStock(nextStock);
       setError(null);
     } catch (e) {
       setError(commandErrorMessage(e));
@@ -36,88 +63,148 @@ export function Today({ onAdjustPlan }: TodayProps) {
   useEffect(() => {
     void refetch();
     return onAppDataEvent(() => void refetch());
-  }, []);
-
-  if (error && !view) {
-    return (
-      <div className="p-4 md:p-6">
-        <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
-      </div>
-    );
-  }
+    // Refetch when the stock plugin is switched on or off.
+  }, [showStock]);
 
   if (!view) {
     return (
       <div className="p-4 md:p-6">
-        <p className="text-sm text-neutral-500 dark:text-neutral-400">{strings.common.loading}</p>
+        <p
+          className={
+            "text-sm " +
+            (error ? "text-red-600 dark:text-red-400" : "text-neutral-500 dark:text-neutral-400")
+          }
+        >
+          {error ?? strings.common.loading}
+        </p>
       </div>
     );
   }
 
-  const card = dietCard(view);
-  const loggedMealTypes = new Set<MealType>((card?.meals ?? []).map((m) => m.meal_type));
+  const training = view.today_plan ? trainingPlanSection(view.today_plan) : null;
 
   return (
     <div className="h-full overflow-y-auto p-4 md:p-6">
       <div className="mx-auto flex max-w-2xl flex-col gap-6">
-        <header className="relative flex items-center justify-between gap-3">
-          <h1 className="shrink-0 text-lg font-semibold text-neutral-900 dark:text-neutral-50">
+        <h1 className="text-lg font-semibold text-neutral-900 dark:text-neutral-50">
+          {strings.nav.today}
+          <span className="ml-2 text-sm font-normal text-neutral-500 dark:text-neutral-400">
             {view.logical_date}
-          </h1>
-          <div className="relative">
-            <button
-              type="button"
-              className="text-right text-sm text-neutral-600 underline-offset-2 hover:underline dark:text-neutral-400"
-              onClick={() => setShowWeightDialog((v) => !v)}
-            >
-              {view.latest_weight
-                ? strings.today.latestWeight(view.latest_weight.kg)
-                : strings.today.noWeightYet}{" "}
-              · {strings.today.logWeight}
-            </button>
-            {showWeightDialog ? (
-              <WeightLogDialog
-                onClose={() => setShowWeightDialog(false)}
-                onSaved={() => void refetch()}
-              />
-            ) : null}
-          </div>
-        </header>
+          </span>
+        </h1>
+        {error ? <p className="text-sm text-red-600 dark:text-red-400">{error}</p> : null}
 
-        <section className="rounded-lg border border-neutral-200 p-4 dark:border-neutral-700">
-          <h2 className="mb-3 text-sm font-semibold text-neutral-900 dark:text-neutral-50">
-            {strings.today.diet.title}
-          </h2>
-          <div className="flex flex-col items-center gap-4 sm:flex-row sm:gap-6">
-            <KcalRing
-              eatenKcal={card?.total?.kcal ?? 0}
-              targetKcal={card?.target?.kcal ?? null}
-            />
-            <MacroBars
-              eaten={card?.total ?? { kcal: 0, protein_g: 0, carbs_g: 0, fat_g: 0, fiber_g: 0 }}
-              target={card?.target ?? null}
-            />
-          </div>
-          <div className="mt-4">
-            <MealList meals={card?.meals ?? []} onDeleted={() => void refetch()} />
-          </div>
-        </section>
+        <DietPlanCard view={view} />
 
-        {view.today_plan ? (
-          <section className="rounded-lg border border-neutral-200 p-4 dark:border-neutral-700">
-            <TodayPlanList plan={view.today_plan} loggedMealTypes={loggedMealTypes} />
-          </section>
+        {showTraining ? (
+          <Card title={strings.training.todayPlan.title}>
+            {training ? (
+              <TrainingPlanCard section={training} />
+            ) : (
+              <Empty>{t.noTrainingPlan}</Empty>
+            )}
+          </Card>
         ) : null}
 
-        <section className="rounded-lg border border-neutral-200 p-4 dark:border-neutral-700">
-          <TomorrowPlanCard
-            plan={view.tomorrow_plan}
-            planTime={planTime}
-            onAdjust={onAdjustPlan}
-            onChanged={() => void refetch()}
-          />
-        </section>
+        {showStock && stock ? (
+          <Card
+            title={strings.stock.shoppingTitle}
+            aside={
+              stock.shopping ? (
+                <span className="text-xs text-neutral-500 dark:text-neutral-400">
+                  {strings.stock.shoppingFor(stock.shopping.plan_date)}
+                </span>
+              ) : null
+            }
+          >
+            {stock.shopping ? (
+              <ShoppingList shopping={stock.shopping} />
+            ) : (
+              <Empty>{strings.stock.noShopping}</Empty>
+            )}
+          </Card>
+        ) : null}
       </div>
     </div>
+  );
+}
+
+/** Today's planned meals with what's in them, a ✓ on meal types already logged (the same
+ * heuristic as the Nutrition tab's checklist), and the kcal eaten so far against the target. */
+function DietPlanCard({ view }: { view: TodayView }) {
+  const card = dietCard(view);
+  const section = view.today_plan ? dietPlanSection(view.today_plan) : null;
+  const logged = new Set<MealType>((card?.meals ?? []).map((m) => m.meal_type));
+  const eaten = Math.round(card?.total?.kcal ?? 0);
+  const target = card?.target ? Math.round(card.target.kcal) : null;
+
+  return (
+    <Card
+      title={t.dietTitle}
+      aside={
+        <span className="text-xs tabular-nums text-neutral-500 dark:text-neutral-400">
+          {target !== null
+            ? t.eatenOfTarget(eaten, target)
+            : strings.today.diet.kcalEaten(eaten)}
+        </span>
+      }
+    >
+      {!section || section.meals.length === 0 ? (
+        <Empty>{t.noDietPlan}</Empty>
+      ) : (
+        <div className="flex flex-col gap-2">
+          {section.meals.map((meal, i) => {
+            const done = logged.has(meal.meal_type);
+            return (
+              <div
+                key={i}
+                className="rounded-md border border-neutral-200 px-3 py-2 text-sm dark:border-neutral-700"
+              >
+                <p className="flex items-baseline gap-2">
+                  <span
+                    aria-hidden
+                    className={
+                      done
+                        ? "text-emerald-600 dark:text-emerald-400"
+                        : "text-neutral-300 dark:text-neutral-600"
+                    }
+                  >
+                    {done ? "✓" : "○"}
+                  </span>
+                  <span className="text-neutral-500 dark:text-neutral-400">
+                    {strings.mealType[meal.meal_type]}
+                  </span>
+                  <span className="font-medium text-neutral-900 dark:text-neutral-50">
+                    {meal.title}
+                  </span>
+                  <span className="ml-auto shrink-0 tabular-nums text-neutral-500 dark:text-neutral-400">
+                    {strings.today.diet.kcalEaten(Math.round(meal.total.kcal))}
+                  </span>
+                </p>
+                <p className="mt-1 text-neutral-600 dark:text-neutral-400">
+                  {meal.items.map((item, j) => (
+                    <span key={j}>
+                      {j > 0 ? strings.common.listSeparator : ""}
+                      {item.name} {strings.today.diet.gramsShort(Math.round(item.grams ?? 0))}
+                    </span>
+                  ))}
+                </p>
+                {meal.prep_note ? (
+                  <p className="mt-1 text-xs italic text-neutral-500 dark:text-neutral-400">
+                    {meal.prep_note}
+                  </p>
+                ) : null}
+              </div>
+            );
+          })}
+          <p className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
+            {strings.today.tomorrowPlan.dayTotal(
+              Math.round(section.total.kcal),
+              Math.round(section.targets.kcal),
+            )}
+          </p>
+        </div>
+      )}
+    </Card>
   );
 }

@@ -267,7 +267,7 @@ const PLANNER_REVISION: &str = r#"## Current plan (version {version})
 {instruction}
 Keep everything not affected by the request as close to the current plan as possible."#;
 
-/// The user's optional wishes for a newly generated plan (the Today tab's request box).
+/// The user's optional wishes for a newly generated plan (the Nutrition tab's request box).
 /// Placeholder: `{request}`.
 const PLANNER_REQUEST: &str = r#"## User's request for this plan
 {request}

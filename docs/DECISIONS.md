@@ -2586,3 +2586,27 @@ id `training`), with the next day's diet planned on top of the next day's traini
 - **Tests.** The cross-plugin case (two planner calls, raised diet targets, the brief's training
   line) lives in `crates/api/tests/training_plan.rs`, the first crate that depends on both
   plugins, so the plugins stay independent of each other.
+
+## 2026-10-04 — UI by plugin; shopping-list status; stock can be switched off
+
+- **Tabs**, in order: Today, Chat, Nutrition, Training, Stock, Settings. Each plugin has its own
+  tab (Nutrition for diet, always shown; Training and Stock while their plugin is on). The old
+  Today page, with its editing (meal delete, weight log, tomorrow's plan: generate, accept,
+  adjust), moved unchanged to Nutrition (`apps/web/src/nutrition/`). Today is now read-only:
+  today's diet plan (meals, items, kcal, ✓ on meal types already logged, eaten vs target),
+  today's training plan, and the shopping list. A tab whose plugin is switched off falls back to
+  Today.
+- **Stock switch.** The stock plugin is now `optional`, with a new `Plugin::enabled_by_default`
+  (default false) so it starts on: existing accounts keep it without a migration of the
+  `plugins_enabled` setting. It shows in Settings → Features like training.
+- **Disabled plugins and events.** The dispatcher now calls `on_event` only for enabled plugins,
+  so a switched-off stock plugin stops taking logged meals out of stock. `on_event_deleted`
+  still reaches every plugin, so deleting a meal logged while stock was on still puts it back.
+- **Shopping-list status.** Each line can be marked done or cancelled (and a cancelled line
+  restored), only on the Stock tab: the Today tab shows the status but has no buttons, to stay a
+  view. Marks are stored per plan version (`stock_shopping_marks`, stock migration 2), so a
+  regenerated plan starts with a fresh list; a mark naming a version that is no longer current is
+  `NotFound`. "Done" also adds the line's planned amount to stock (the amount is read from the
+  stored plan, not taken from the client), once: the status change is claimed atomically first,
+  so a double click can't add it twice. Reopening or cancelling a done line leaves stock as it
+  is. New command: `set_shopping_status`.

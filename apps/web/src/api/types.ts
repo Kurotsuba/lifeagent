@@ -246,6 +246,19 @@ export interface ShoppingItem {
   unit: StockUnit;
   /** How much of it is in stock now (bought since the plan was made, or never needed). */
   in_stock: number;
+  status: ShoppingStatus;
+}
+
+/** `ShoppingStatus` in `crates/plugin-stock/src/shopping.rs`: `done` put the line's amount into
+ * stock; `cancelled` dropped it from the list. */
+export type ShoppingStatus = "open" | "done" | "cancelled";
+
+/** Names one line of one plan version's shopping list. */
+export interface ShoppingLineRef {
+  plan_date: string;
+  plan_version: number;
+  name: string;
+  unit: StockUnit;
 }
 
 /** `get_stock`: everything the Stock tab shows. */
@@ -255,7 +268,7 @@ export interface StockView {
   recent_uses: StockUse[];
   settings: StockSettings;
   /** From tomorrow's plan, or else today's; `null` without one. */
-  shopping: { plan_date: string; items: ShoppingItem[] } | null;
+  shopping: { plan_date: string; plan_version: number; items: ShoppingItem[] } | null;
 }
 
 export interface NewStockItem {

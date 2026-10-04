@@ -4,22 +4,23 @@ import {
   deleteStockItem,
   getStock,
   saveStockSettings,
+  setShoppingStatus,
   setStockQuantity,
 } from "../api/commands";
 import { onAppDataEvent } from "../api/events";
 import {
   commandErrorMessage,
   type NewStockItem,
-  type ShoppingItem,
   type StockItem,
   type StockSettings,
   type StockUnit,
   type StockView,
 } from "../api/types";
-import { primaryButtonClass, secondaryButtonClass } from "../components/buttonStyles";
+import { primaryButtonClass } from "../components/buttonStyles";
 import { ConfirmDeleteButton } from "../components/ConfirmDeleteButton";
 import { Field, inputClass } from "../components/Field";
 import { strings } from "../i18n";
+import { ShoppingList } from "./ShoppingList";
 
 const t = strings.stock;
 const UNITS: StockUnit[] = ["g", "ml", "piece"];
@@ -133,22 +134,25 @@ export function Stock() {
         >
           {!view.shopping ? (
             <p className="text-sm text-neutral-500 dark:text-neutral-400">{t.noShopping}</p>
-          ) : view.shopping.items.length === 0 ? (
-            <p className="text-sm text-neutral-500 dark:text-neutral-400">{t.nothingToBuy}</p>
           ) : (
-            <ul className="space-y-2">
-              {view.shopping.items.map((s) => (
-                <ShoppingRow
-                  key={`${s.name}:${s.unit}`}
-                  item={s}
-                  onBought={() =>
-                    act(() =>
-                      addStockItem({ name: s.name, quantity: s.amount, unit: s.unit, expires_on: null }),
-                    )
-                  }
-                />
-              ))}
-            </ul>
+            <ShoppingList
+              shopping={view.shopping}
+              onSetStatus={(item, status) => {
+                const shopping = view.shopping;
+                if (!shopping) return Promise.resolve();
+                return act(() =>
+                  setShoppingStatus(
+                    {
+                      plan_date: shopping.plan_date,
+                      plan_version: shopping.plan_version,
+                      name: item.name,
+                      unit: item.unit,
+                    },
+                    status,
+                  ),
+                );
+              }}
+            />
           )}
         </Card>
 
@@ -276,48 +280,6 @@ function StockRow({
         <ConfirmDeleteButton onConfirm={onDelete} />
       </div>
     </div>
-  );
-}
-
-function ShoppingRow({ item, onBought }: { item: ShoppingItem; onBought: () => Promise<void> }) {
-  const [busy, setBusy] = useState(false);
-  const covered = item.in_stock >= item.amount;
-
-  async function handleBought() {
-    setBusy(true);
-    try {
-      await onBought();
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <li className="flex items-center justify-between gap-3 text-sm">
-      <span className={covered ? "text-neutral-400 line-through dark:text-neutral-500" : "text-neutral-900 dark:text-neutral-50"}>
-        {item.name}{" "}
-        <span className="tabular-nums text-neutral-500 dark:text-neutral-400">
-          {amountText(item.amount, item.unit)}
-        </span>
-      </span>
-      <span className="flex shrink-0 items-center gap-3">
-        {item.in_stock > 0 ? (
-          <span className="text-xs text-neutral-500 dark:text-neutral-400">
-            {t.inStock(amountText(item.in_stock, item.unit))}
-          </span>
-        ) : null}
-        {covered ? null : (
-          <button
-            type="button"
-            className={`${secondaryButtonClass} !px-2 !py-1 text-xs`}
-            disabled={busy}
-            onClick={() => void handleBought()}
-          >
-            {t.bought}
-          </button>
-        )}
-      </span>
-    </li>
   );
 }
 

@@ -19,6 +19,8 @@ import type {
   ImportReport,
   NewPreference,
   NewStockItem,
+  ShoppingLineRef,
+  ShoppingStatus,
   Preference,
   NutritionTargets,
   PluginInfo,
@@ -178,6 +180,10 @@ export function deleteStockItem(id: string): Promise<void> {
 
 export function saveStockSettings(settings: StockSettings): Promise<void> {
   return call("save_stock_settings", { settings });
+}
+
+export function setShoppingStatus(line: ShoppingLineRef, status: ShoppingStatus): Promise<void> {
+  return call("set_shopping_status", { line, status });
 }
 
 // ---- Nutrition sources / batch import (`docs/NUTRITION_SOURCES.md` §8.2) -------------------
