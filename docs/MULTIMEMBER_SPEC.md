@@ -283,6 +283,10 @@ steps (§8.10 of the Phase 1 spec):
 
   `total` is the meal total × `scale`, rounded like other totals. `portions` is
   `1 + Σ scale`, to one decimal. Both are computed in Rust.
+- Adds to each item of a shared meal `"table_grams"`: the item's `grams` × `(1 + Σ scale)`
+  (unrounded factor), to 0.1 g — the amount to cook for the whole table, so the owner needn't
+  scale the recipe. `grams`, the item's kcal/macros and the meal `total` stay the owner's own
+  portion. The UI shows `table_grams` in place of `grams` for these items, with a note.
 - Attaches at section level `"guest_estimates": { "<member_id>": { "kcal": …, "protein_g": …,
   … } }`, the maintenance estimates, for display.
 - `name` is copied in so stored plans stay readable after a member is renamed or archived.

@@ -343,7 +343,16 @@ async fn a_shared_dinner_is_planned_with_guest_constraints_and_portions() {
         dinner["portions"],
         ((1.0 + expected_scale) * 10.0).round() / 10.0
     );
+    // Ingredient amounts for the whole table; `grams` and kcal stay the owner's own.
+    let factor = 1.0 + expected_scale;
+    for item in dinner["items"].as_array().unwrap() {
+        let grams = item["grams"].as_f64().unwrap();
+        let table = item["table_grams"].as_f64().unwrap();
+        assert!((table - grams * factor).abs() <= 0.1, "{item}");
+    }
+    assert_eq!(dinner["items"][0]["grams"], 300.0);
     assert!(diet["meals"][0].get("servings").is_none());
+    assert!(diet["meals"][0]["items"][0].get("table_grams").is_none());
     assert_eq!(
         diet["guest_estimates"][aki_m.id.as_str()]["kcal"],
         aki_maintenance_kcal(tomorrow)

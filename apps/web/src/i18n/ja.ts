@@ -459,6 +459,7 @@ export const ja: Strings = {
     },
     shared: {
       with: (names: string, portions: number) => `一緒に：${names} · 計 ${portions} 人前`,
+      gramsNote: "食材のグラムは全員分の合計、カロリーはあなた自身の分です",
       guest: (name: string, kcal: number) => `${name} 約 ${kcal} kcal`,
       estimateNote: "それぞれ体重を保つのに必要な量で見積もった盛り付け量（目安）",
     },

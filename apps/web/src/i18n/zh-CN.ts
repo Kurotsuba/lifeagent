@@ -463,6 +463,7 @@ export const zhCN = {
     },
     shared: {
       with: (names: string, portions: number) => `一起吃：${names} · 共 ${portions} 人份`,
+      gramsNote: "食材克数为全部人份的总量；热量为你自己的份量",
       guest: (name: string, kcal: number) => `${name} 约 ${kcal} 千卡`,
       estimateNote: "按各自维持体重所需估算的份量（目安）",
     },

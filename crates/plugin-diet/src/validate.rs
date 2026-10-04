@@ -9,7 +9,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::intake;
-use crate::model::{ItemKind, Macros, MealItem, MealType};
+use crate::model::{round1, ItemKind, Macros, MealItem, MealType};
 use crate::resolver::{resolve_many, FoodQuery};
 use crate::shared_meals::{self, SharedMeals};
 
@@ -175,7 +175,16 @@ pub async fn finalize(
                 source_name: Some(food.source_name),
             };
             meal_total += entry.macros;
-            items_json.push(entry.to_json());
+            let mut item_json = entry.to_json();
+            // Shared meals: the whole table's amount, so the owner can cook without scaling.
+            // `grams`, kcal and macros stay the owner's own portion.
+            if let (Some((h, shared)), Some(obj)) = (shared, item_json.as_object_mut()) {
+                obj.insert(
+                    "table_grams".into(),
+                    json!(round1(item.grams * h.table_factor(shared))),
+                );
+            }
+            items_json.push(item_json);
         }
         day_total += meal_total;
         let mut meal_json = json!({

@@ -128,6 +128,9 @@ export interface DietMealItem {
   /** The winning source's display name at logging time (`docs/NUTRITION_SOURCES.md` §5), for a
    * tooltip. `null` for meals logged before this field existed. */
   source_name: string | null;
+  /** Planned items of a shared meal only: grams to cook for the whole table (computed in Rust).
+   * `grams`, `kcal` and `protein_g` stay the user's own portion. */
+  table_grams?: number;
 }
 
 /** One logged meal, as `cards.diet.meals` lists it (§8.8). */

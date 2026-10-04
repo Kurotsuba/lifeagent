@@ -180,7 +180,7 @@ function DietPlanCard({ view }: { view: TodayView }) {
                   {meal.items.map((item, j) => (
                     <span key={j}>
                       {j > 0 ? strings.common.listSeparator : ""}
-                      {item.name} {strings.today.diet.gramsShort(Math.round(item.grams ?? 0))}
+                      {item.name} {strings.today.diet.gramsShort(Math.round(item.table_grams ?? item.grams ?? 0))}
                     </span>
                   ))}
                 </p>

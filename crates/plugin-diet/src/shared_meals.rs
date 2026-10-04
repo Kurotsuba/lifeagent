@@ -5,7 +5,8 @@
 //! depends on that plugin; it reads the section's JSON. Guests have no goals: each gets a maintenance
 //! estimate from this crate's own targets engine (goal `None`), and a portion `scale` relative
 //! to the owner's, computed here. The planner only picks the dishes; `items` stay the owner's
-//! portion, so the owner's targets, validation and plan-vs-actual don't change.
+//! portion, so the owner's targets, validation and plan-vs-actual don't change; each item of a
+//! shared meal also gets `table_grams`, the amount to cook for the whole table.
 
 use chrono::NaiveDate;
 use lifeagent_core::plugin::PlanDraft;
@@ -124,9 +125,14 @@ impl SharedMeals {
             .collect()
     }
 
+    /// The whole table relative to the owner's portion: `1 + Σ scale`, unrounded.
+    pub fn table_factor(&self, meal: &SharedMeal) -> f64 {
+        1.0 + self.guests_at(meal).iter().map(|g| g.scale).sum::<f64>()
+    }
+
     /// Total portions cooked for `meal`, the owner's included: `1 + Σ scale`, to 0.1.
     pub fn portions(&self, meal: &SharedMeal) -> f64 {
-        round1(1.0 + self.guests_at(meal).iter().map(|g| g.scale).sum::<f64>())
+        round1(self.table_factor(meal))
     }
 
     /// `{member_id: estimate}`, for display.
@@ -500,6 +506,7 @@ mod tests {
         assert_eq!(h.meals.len(), 1);
         let dinner = h.meal(MealType::Dinner).unwrap();
         let scales: f64 = h.guests_at(dinner).iter().map(|g| g.scale).sum();
+        assert_eq!(h.table_factor(dinner), 1.0 + scales);
         assert_eq!(h.portions(dinner), round1(1.0 + scales));
         assert!(h.meal(MealType::Breakfast).is_none());
 

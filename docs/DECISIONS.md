@@ -2689,3 +2689,11 @@ the planner lock and generated the plan again.
 - **The web app shares one flag** (`apps/web/src/api/planGeneration.ts`) for the Nutrition and
   Training buttons: this tab's own request, or the server's flag, refetched whenever the event
   stream (re)opens.
+
+## 2026-10-04 — Shared meals show ingredient grams for the whole table
+
+The owner cooks a shared meal once, so planned items of a shared meal now carry `table_grams`
+(`grams` × `1 + Σ scale`, computed in Rust) and the Today and Tomorrow cards show it instead of
+the owner's `grams`, with a short note that kcal is still the owner's own. `grams`, kcal, macros
+and totals are unchanged (the owner's portion), so targets, validation, plan-vs-actual and
+logging a planned meal are unaffected. Meals without guests get no `table_grams`.

@@ -460,6 +460,7 @@ export const en: Strings = {
     },
     shared: {
       with: (names: string, portions: number) => `With ${names} · ${portions} portions`,
+      gramsNote: "Ingredient grams are for everyone; kcal is your own portion",
       guest: (name: string, kcal: number) => `${name} about ${kcal} kcal`,
       estimateNote: "Portions estimated to keep each person's weight",
     },
