@@ -6,6 +6,7 @@ export const ja: Strings = {
     name: "HumanHealthHandler",
   },
   common: {
+    birthDate: { year: "年", month: "月", day: "日" },
     next: "次へ",
     back: "戻る",
     finish: "完了",

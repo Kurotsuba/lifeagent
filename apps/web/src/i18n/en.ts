@@ -6,6 +6,7 @@ export const en: Strings = {
     name: "HumanHealthHandler",
   },
   common: {
+    birthDate: { year: "Year", month: "Month", day: "Day" },
     next: "Next",
     back: "Back",
     finish: "Finish",

@@ -8,6 +8,7 @@ import {
   type MemberView,
   type Sex,
 } from "../api/types";
+import { BirthDateInput } from "../components/BirthDateInput";
 import { Field, inputClass } from "../components/Field";
 import { primaryButtonClass, secondaryButtonClass } from "../components/buttonStyles";
 import { strings } from "../i18n";
@@ -131,11 +132,11 @@ export function MemberForm({ member, onDone, onCancel }: MemberFormProps) {
           </select>
         </Field>
         <Field label={p.birthDate} hint={t.ageHint}>
-          <input
-            type="date"
-            className={inputClass}
+          <BirthDateInput
             value={draft.birthDate}
-            onChange={(e) => update({ birthDate: e.target.value })}
+            onChange={(birthDate) => update({ birthDate })}
+            minAge={16}
+            maxAge={70}
           />
         </Field>
         <Field label={p.heightCm}>

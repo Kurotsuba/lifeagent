@@ -2738,3 +2738,17 @@ change and clicked Adjust lost it.
   the button can't start one while the flag is set.
 - **Placeholder.** With a plan on screen the box says what each button does with it; with no
   plan (only Generate) it keeps the old text.
+
+## 2026-10-05 — Birth date as year / month / day; list fields split on CJK commas
+
+- **Birth date picker.** A native `<input type="date">` opens on today, so on a phone a user
+  swiped back decades to reach their birth year. `BirthDateInput` is three selects, year
+  first, and the year list starts at the most recent year old enough (this year − 16) and runs
+  back to the oldest allowed age (profile 100, members 70). It reports `""` until all three
+  are picked; a day past the month's end (Feb 29 → a non-leap year) is pulled back to the last
+  day. The year range uses the browser's calendar year only; the exact age check stays the
+  server's. Used by onboarding's profile step (so Settings too) and the member form; on the
+  profile step it takes its own row, with height and weight paired below.
+- **List separators.** `splitList` (allergies, dislikes) split on `,` only, so `虾、花生`,
+  `虾，花生` and the ja hint's own `えび、ピーナッツ` were saved as one item. It now splits on
+  `,` `，` `、` `;` `；`, and the zh-CN hints say "用逗号或顿号分隔".

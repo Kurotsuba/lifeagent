@@ -1,3 +1,4 @@
+import { BirthDateInput } from "../components/BirthDateInput";
 import { Field, inputClass } from "../components/Field";
 import { strings } from "../i18n";
 import type { ActivityLevel, DietaryPattern, Sex } from "../api/types";
@@ -46,15 +47,16 @@ export function StepProfile({ draft, update, showDislikes = true }: StepProfileP
         </div>
       </fieldset>
 
+      <Field label={t.birthDate}>
+        <BirthDateInput
+          value={draft.birthDate}
+          onChange={(birthDate) => update({ birthDate })}
+          minAge={16}
+          maxAge={100}
+        />
+      </Field>
+
       <div className="grid grid-cols-2 gap-4">
-        <Field label={t.birthDate}>
-          <input
-            type="date"
-            className={inputClass}
-            value={draft.birthDate}
-            onChange={(e) => update({ birthDate: e.target.value })}
-          />
-        </Field>
         <Field label={t.heightCm}>
           <input
             type="number"
@@ -66,19 +68,18 @@ export function StepProfile({ draft, update, showDislikes = true }: StepProfileP
             onChange={(e) => update({ heightCm: e.target.value })}
           />
         </Field>
+        <Field label={t.weightKg}>
+          <input
+            type="number"
+            min={30}
+            max={300}
+            step="0.1"
+            className={inputClass}
+            value={draft.weightKg}
+            onChange={(e) => update({ weightKg: e.target.value })}
+          />
+        </Field>
       </div>
-
-      <Field label={t.weightKg}>
-        <input
-          type="number"
-          min={30}
-          max={300}
-          step="0.1"
-          className={inputClass}
-          value={draft.weightKg}
-          onChange={(e) => update({ weightKg: e.target.value })}
-        />
-      </Field>
 
       <fieldset>
         <legend className="text-sm font-medium text-neutral-700 dark:text-neutral-300">

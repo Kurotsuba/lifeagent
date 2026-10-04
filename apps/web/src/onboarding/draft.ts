@@ -47,10 +47,11 @@ export const defaultDraft: OnboardingDraft = {
   ratePerWeek: 0.5,
 };
 
-/** Splits a comma-separated field into trimmed, non-empty entries. */
+/** Splits a list field into trimmed, non-empty entries. Takes the separators each locale's hint
+ * suggests: commas (`,` `，`), the ideographic comma `、`, and semicolons (`;` `；`). */
 export function splitList(value: string): string[] {
   return value
-    .split(",")
+    .split(/[,，、;；]/)
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
 }
