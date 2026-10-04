@@ -286,7 +286,7 @@ impl MealItem {
         })
     }
 
-    /// One-line text for `intake::context_snippet`, the desktop and the CLI
+    /// One-line text for `intake::context_snippet`, the web UI and the CLI
     /// (`docs/DISH_NUTRITION.md` §6): a food reads "熟米饭 150g"; a dish reads
     /// "松屋 牛めし（並盛）×1" (no brand: "牛めし（並盛）×1").
     pub fn label(&self) -> String {

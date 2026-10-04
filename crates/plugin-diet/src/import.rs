@@ -3,7 +3,7 @@
 //! dish rows alongside per-100 g food rows.
 //!
 //! `parse` is pure (bytes in, rows and issues out); `preview` checks against the current DB
-//! without writing; `commit` writes in one transaction. This split lets the CLI and the desktop
+//! without writing; `commit` writes in one transaction. This split lets the CLI and the server
 //! share one code path for preview and commit.
 
 use std::collections::HashMap;

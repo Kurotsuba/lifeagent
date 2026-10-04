@@ -311,8 +311,8 @@ pub async fn command(
     }
 }
 
-/// The file's raw bytes as the body, its name url-encoded in `x-file-name`: the same contract
-/// as the desktop's raw IPC body (§8.2 "Getting the file to Rust").
+/// The file's raw bytes as the body, its name url-encoded in `x-file-name` (§8.2 "Getting the
+/// file to Rust").
 pub async fn preview_food_import(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
@@ -346,7 +346,7 @@ pub async fn events(
                     return Some((Ok(sse), (rx, tenant)));
                 }
                 // The UI refetches on whichever event does arrive, so skipped ones are only a
-                // delay, as on the desktop.
+                // delay.
                 Err(RecvError::Lagged(skipped)) => {
                     tracing::warn!(skipped, "event stream lagged; some AppEvents were skipped");
                 }
@@ -367,8 +367,7 @@ pub struct TickReport {
 /// to two DB connections.
 const TICK_CONCURRENCY: usize = 4;
 
-/// Runs one scheduler tick (§7.13) for every user: what the desktop does once a minute, for
-/// all accounts. Called by Cloud Scheduler through `/api/internal/tick`, or by the in-process
+/// Runs one scheduler tick (§7.13) for every user. Called by Cloud Scheduler through `/api/internal/tick`, or by the in-process
 /// loop in development.
 pub async fn tick_all(state: &Arc<AppState>) -> Result<TickReport, ApiError> {
     let schemas: Vec<String> = sqlx::query_scalar("SELECT schema_name FROM users ORDER BY id")

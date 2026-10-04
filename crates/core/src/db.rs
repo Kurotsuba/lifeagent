@@ -43,7 +43,7 @@ pub struct DbConfig {
     /// The schema holding this app's tables. Must match `[a-z_][a-z0-9_]*`, at most 63 bytes.
     pub schema: String,
     /// `Some`: tenant mode. The schema is owned by this `LOGIN` role and every connection logs
-    /// in as it. `None`: connections act as the login role itself (single-user CLI/desktop).
+    /// in as it. `None`: connections act as the login role itself (single-user CLI).
     pub role: Option<String>,
     /// Upper bound on this pool's connections. Tenant pools are small: one server holds one
     /// per active user, and Cloud SQL's smallest tier allows about 25 connections in total.

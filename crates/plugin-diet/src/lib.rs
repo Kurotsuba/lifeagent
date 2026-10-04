@@ -1,7 +1,7 @@
 //! `lifeagent-plugin-diet`: meal logging, nutrition targets and the diet plan section.
 //!
 //! Depends on `lifeagent-core` and `lifeagent-llm`; implements the `Plugin` trait from
-//! `lifeagent-core`. Registered by the composition root (`cli`, `desktop`) — `core` never
+//! `lifeagent-core`. Registered by the composition root (`cli`, `server`) — `core` never
 //! depends on this crate. Logging (`model`, `foods`, `resolver`, `parser`, `targets`,
 //! `intake`, `tools`) landed in M4 and the plan section (`plan`, `validate`) in M5, per
 //! `docs/PHASE1_SPEC.md` §8.

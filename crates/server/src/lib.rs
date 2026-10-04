@@ -1,9 +1,9 @@
 //! `lifeagent-server`: the HTTP backend of the web build, a composition root next to the CLI
-//! and the desktop shell (`docs/HACKATHON.md` §1).
+//! (`docs/HACKATHON.md` §1).
 //!
 //! - `auth`: accounts and cookie sessions in the `auth` schema.
 //! - `tenants`: one `CoreApp` per logged-in user, in that user's own schema and role.
-//! - `routes`: the command API (`lifeagent_api::ops`, shared with the desktop), the event
+//! - `routes`: the command API (`lifeagent_api::ops`), the event
 //!   stream and the scheduler tick.
 //!
 //! Optionally serves the built UI from `LIFEAGENT_STATIC_DIR`, so one container serves both.

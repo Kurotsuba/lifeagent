@@ -1319,7 +1319,7 @@ mod tests {
         }
     }
 
-    /// A composition root (M7's desktop shell, in particular) must be able to start even when a
+    /// A composition root (the server, in particular) must be able to start even when a
     /// previously-saved `models` config can't build right now — e.g. the OS keyring is
     /// unreachable at this exact moment, though the key was set successfully before. `build()`
     /// itself must still succeed; `models_configured` just reports `false`, same as "never

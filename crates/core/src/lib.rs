@@ -1,7 +1,7 @@
 //! `lifeagent-core`: storage, plugin API, orchestrator, planner and scheduler.
 //!
 //! Depends on `lifeagent-llm` only — never on a plugin crate (see the dependency rule in
-//! `CLAUDE.md`). Plugins are registered by the composition root (`cli`, `desktop`) via
+//! `CLAUDE.md`). Plugins are registered by the composition root (`cli`, `server`) via
 //! `CoreAppBuilder::plugin`. Modules are filled in milestone by milestone per
 //! `docs/PHASE1_SPEC.md` §7: foundations (`clock`, `time`, `db`, `error`, `settings`,
 //! `secrets`, `profile`, `goals`, `events`, `memory`, `conversation`) landed in M1 (`memory` later became

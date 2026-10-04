@@ -7,7 +7,7 @@
 //! `diet_food_aliases` / `diet_name_aliases` / `diet_dishes` / `diet_dish_source_aliases` /
 //! `diet_dish_name_aliases` tables, the `FoodSource` trait and its `TableSource` implementation,
 //! `SourceChain` resolution, and the management operations behind the CLI's `foods source …`
-//! commands and the desktop's 食物数据 settings section.
+//! commands and the web UI's 食物数据 settings section.
 
 use std::collections::HashSet;
 

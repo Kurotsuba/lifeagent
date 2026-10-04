@@ -1,4 +1,4 @@
-//! `ApiError`: a `CommandError` (`lifeagent-api`, shared with the desktop) plus the HTTP status
+//! `ApiError`: a `CommandError` (`lifeagent-api`) plus the HTTP status
 //! it is sent with. The body is always `{ "code": ..., "message": ..., "detail": ... }`.
 
 use axum::http::StatusCode;
