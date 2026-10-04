@@ -8,12 +8,15 @@
 
 pub mod context;
 pub mod model;
+pub mod section;
 pub mod store;
 pub mod tools;
 
 use async_trait::async_trait;
 use chrono::NaiveDate;
-use lifeagent_core::plugin::{Plugin, PluginContext, PluginError, PluginManifest, ToolOutput};
+use lifeagent_core::plugin::{
+    PlanDraft, PlanSection, Plugin, PluginContext, PluginError, PluginManifest, ToolOutput,
+};
 use lifeagent_llm::types::ToolSpec;
 use serde_json::Value;
 
@@ -36,6 +39,19 @@ impl Plugin for MultimemberPlugin {
 
     fn optional(&self) -> bool {
         true
+    }
+
+    fn computes_plan_section(&self) -> bool {
+        true
+    }
+
+    async fn computed_plan_section(
+        &self,
+        ctx: &PluginContext,
+        date: NaiveDate,
+        _prior: &PlanDraft,
+    ) -> Result<Option<PlanSection>, PluginError> {
+        section::computed_section(ctx, date).await
     }
 
     fn tools(&self) -> Vec<ToolSpec> {

@@ -8,6 +8,7 @@ use lifeagent_core::plugin::{PlanDraft, PlanSection, PluginContext, PluginError}
 use serde::Deserialize;
 use serde_json::{json, Value};
 
+use crate::household::{self, Household};
 use crate::intake;
 use crate::model::{ItemKind, Macros, MealItem, MealType};
 use crate::resolver::{resolve_many, FoodQuery};
@@ -91,6 +92,7 @@ pub async fn finalize(
         .await?
         .ok_or_else(|| PluginError::Other("no profile".into()))?;
     let dislikes = ctx.preferences.dislikes_on(date).await?;
+    let household = Household::from_draft(prior, targets.kcal);
 
     let names: Vec<FoodQuery> = planned
         .meals
@@ -107,6 +109,18 @@ pub async fn finalize(
     for meal in &planned.meals {
         let mut meal_total = Macros::default();
         let mut items_json = Vec::new();
+        let shared = household
+            .as_ref()
+            .and_then(|h| Some((h, h.meal(meal.meal_type)?)));
+        let table = shared.map(|(h, shared)| {
+            let guests = h.guests_at(shared);
+            let pattern = household::strictest(
+                std::iter::once(profile.dietary_pattern)
+                    .chain(guests.iter().map(|g| g.guest.dietary_pattern)),
+            );
+            (guests, pattern)
+        });
+        let meal_label = format!("{}“{}”", meal.meal_type.zh_label(), meal.title);
         for item in &meal.items {
             let food = foods
                 .next()
@@ -134,6 +148,18 @@ pub async fn finalize(
                     warnings.push(format!("“{planned_name}”含不喜欢的“{dislike}”"));
                 }
             }
+            if let Some((guests, pattern)) = &table {
+                let (v, w) = household::check_item(
+                    guests,
+                    *pattern,
+                    &meal_label,
+                    planned_name,
+                    &names,
+                    matches_term,
+                );
+                violations.extend(v);
+                warnings.extend(w);
+            }
 
             let entry = MealItem {
                 macros: food.per_100g.for_grams(item.grams),
@@ -152,13 +178,18 @@ pub async fn finalize(
             items_json.push(entry.to_json());
         }
         day_total += meal_total;
-        meals_json.push(json!({
+        let mut meal_json = json!({
             "meal_type": meal.meal_type,
             "title": meal.title,
             "prep_note": meal.prep_note,
             "items": items_json,
             "total": meal_total.to_json(),
-        }));
+        });
+        if let (Some((h, shared)), Some(obj)) = (shared, meal_json.as_object_mut()) {
+            obj.insert("servings".into(), h.servings_json(shared, meal_total));
+            obj.insert("portions".into(), json!(h.portions(shared)));
+        }
+        meals_json.push(meal_json);
     }
 
     let main_meals = planned
@@ -214,14 +245,19 @@ pub async fn finalize(
         ));
     }
 
+    let mut data = json!({
+        "targets": t.as_macros().to_json(),
+        "exercise_kcal_added": crate::targets::exercise_credit(exercise_kcal),
+        "total": day_total.to_json(),
+        "meals": meals_json,
+        "tips": planned.tips,
+    });
+    if let (Some(h), Some(obj)) = (&household, data.as_object_mut()) {
+        obj.insert("guest_estimates".into(), h.estimates_json());
+        warnings.extend(household::clamp_warnings(h));
+    }
     Ok(PlanSection {
-        data: json!({
-            "targets": t.as_macros().to_json(),
-            "exercise_kcal_added": crate::targets::exercise_credit(exercise_kcal),
-            "total": day_total.to_json(),
-            "meals": meals_json,
-            "tips": planned.tips,
-        }),
+        data,
         warnings,
         violations,
     })

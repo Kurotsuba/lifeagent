@@ -4,6 +4,7 @@ use chrono::{Days, NaiveDate};
 use lifeagent_core::plugin::{PlanDraft, PlanInput, PluginContext, PluginError};
 use serde_json::{json, Value};
 
+use crate::household::{self, Household};
 use crate::intake::{self, TRAINING_SECTION};
 use crate::targets;
 
@@ -76,6 +77,13 @@ pub async fn plan_input(
     ];
     if let Some(line) = training_line(prior, exercise_kcal) {
         brief.push(line);
+    }
+    if let Some(household) = Household::from_draft(prior, targets.kcal) {
+        brief.extend(household::brief_lines(
+            &household,
+            &profile.allergies,
+            profile.dietary_pattern,
+        ));
     }
 
     let mut adherence_lines = Vec::new();

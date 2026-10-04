@@ -128,18 +128,18 @@ impl Plugin for StockPlugin {
     }
 
     /// Stock builds the diet section's meals in the same planner call, so it goes in diet's
-    /// stage: after the day's training, when the training plugin is on.
+    /// stage: after the day's training and the multimember section, when those plugins are on.
     fn plan_after(&self) -> &'static [&'static str] {
-        &["training"]
+        &["training", plan::MULTIMEMBER_SECTION]
     }
 
     async fn plan_input(
         &self,
         ctx: &PluginContext,
         date: NaiveDate,
-        _prior: &PlanDraft,
+        prior: &PlanDraft,
     ) -> Result<Option<PlanInput>, PluginError> {
-        plan::plan_input(ctx, date).await
+        plan::plan_input(ctx, date, prior).await
     }
 
     async fn finalize_plan_section(

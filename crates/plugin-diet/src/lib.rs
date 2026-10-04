@@ -9,6 +9,7 @@
 pub mod dish_resolver;
 pub mod food_matcher;
 pub mod foods;
+pub mod household;
 pub mod import;
 pub mod intake;
 pub mod model;
@@ -76,9 +77,10 @@ impl Plugin for DietPlugin {
         Ok(Some(intake::today_card(ctx, date).await?))
     }
 
-    /// Diet is planned after the day's training, so meals can fuel and follow the session.
+    /// Diet is planned after the day's training, so meals can fuel and follow the session, and
+    /// after the multimember section, so shared meals suit everyone at the table.
     fn plan_after(&self) -> &'static [&'static str] {
-        &[intake::TRAINING_SECTION]
+        &[intake::TRAINING_SECTION, household::MULTIMEMBER_SECTION]
     }
 
     async fn plan_input(

@@ -5,7 +5,7 @@
 //! plan leaves unused.
 
 use chrono::NaiveDate;
-use lifeagent_core::plugin::{PlanInput, PlanSection, PluginContext, PluginError};
+use lifeagent_core::plugin::{PlanDraft, PlanInput, PlanSection, PluginContext, PluginError};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -13,6 +13,8 @@ use crate::model::{name_key, round_amount, StockItem, Unit};
 use crate::{settings, store};
 
 pub const SECTION: &str = "stock";
+/// The multimember plugin's computed section, read only for whether it is there.
+pub const MULTIMEMBER_SECTION: &str = "multimember";
 
 /// An item expiring within this many days of the plan date, left unused, gets a warning.
 const EXPIRY_WARNING_DAYS: i64 = 1;
@@ -43,6 +45,7 @@ pub fn output_schema() -> Value {
 pub async fn plan_input(
     ctx: &PluginContext,
     date: NaiveDate,
+    prior: &PlanDraft,
 ) -> Result<Option<PlanInput>, PluginError> {
     if !settings::get(ctx).await?.plan_from_stock
         || ctx.profile.get().await?.is_none()
@@ -66,7 +69,7 @@ pub async fn plan_input(
             .collect::<Vec<_>>()
             .join("\n")
     };
-    let brief = format!(
+    let mut brief = format!(
         "Food the user already has at home on {date} (name: amount left, unit):\n{stock_lines}\n\
          - Build the diet section's meals from this stock first, soonest best-before first, as \
            long as the meals stay balanced and meet the diet targets. When a meal uses a stocked \
@@ -77,6 +80,11 @@ pub async fn plan_input(
            in g, ml or piece. The user wants to buy as little as possible: prefer meals that need \
            few purchases, but never at the cost of a balanced diet."
     );
+    if prior.contains_key(MULTIMEMBER_SECTION) {
+        brief.push_str(
+            "\n- Some meals are shared with other household members: \"uses\" and              \"shopping_list\" must cover every portion of those meals (the diet brief gives the              portion count), not only the user's own.",
+        );
+    }
     Ok(Some(PlanInput {
         section: SECTION.into(),
         brief,
@@ -344,7 +352,10 @@ mod tests {
     #[tokio::test]
     async fn plan_input_needs_a_profile_and_weight_and_the_switch_on() {
         let env = env().await;
-        assert!(plan_input(&env.ctx, DAY).await.unwrap().is_none());
+        assert!(plan_input(&env.ctx, DAY, &PlanDraft::new())
+            .await
+            .unwrap()
+            .is_none());
 
         seed_person(&env.ctx).await;
         store::add(
@@ -358,11 +369,18 @@ mod tests {
         )
         .await
         .unwrap();
-        let input = plan_input(&env.ctx, DAY).await.unwrap().unwrap();
+        let input = plan_input(&env.ctx, DAY, &PlanDraft::new())
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(input.section, "stock");
         assert!(input
             .brief
             .contains("- 鸡蛋: 6 piece, best before 2026-10-08"));
+        assert!(!input.brief.contains("shared"));
+        let shared = PlanDraft::from([(MULTIMEMBER_SECTION.to_string(), json!({"meals": []}))]);
+        let input = plan_input(&env.ctx, DAY, &shared).await.unwrap().unwrap();
+        assert!(input.brief.contains("cover every portion"));
 
         settings::set(
             &env.ctx,
@@ -374,7 +392,10 @@ mod tests {
         )
         .await
         .unwrap();
-        assert!(plan_input(&env.ctx, DAY).await.unwrap().is_none());
+        assert!(plan_input(&env.ctx, DAY, &PlanDraft::new())
+            .await
+            .unwrap()
+            .is_none());
     }
 
     #[tokio::test]
