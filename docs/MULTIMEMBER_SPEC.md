@@ -10,7 +10,8 @@ order, each closed only when its "done when" criteria hold.
 
 ## 1. Purpose and scope
 
-The owner of an account cooks for other people (a partner, flatmates, adult children). The
+The owner of an account shares meals with other people. The app assumes nothing about how they
+are related to the owner (family, roommates and colleagues are all the same to it). The
 `multimember` plugin lets the owner describe those people and who eats which meal, so the daily
 diet plan becomes **one set of shared dishes** that:
 
@@ -22,7 +23,7 @@ diet plan becomes **one set of shared dishes** that:
 
 ### In scope
 
-- Profiles for other household members (up to 7 besides the owner).
+- Profiles for other members (up to 7 besides the owner).
 - Weekly default attendance per member and meal, plus one-off overrides per date.
 - Per-member dislikes.
 - A computed `multimember` plan section, and diet plan integration (constraints, servings,
@@ -49,7 +50,7 @@ diet plan becomes **one set of shared dishes** that:
 | Term | Meaning |
 |---|---|
 | Owner | The account holder. Their profile, goals, weight and preferences stay in core, unchanged. |
-| Member | Another person in the household, stored by this plugin. Never the owner. |
+| Member | Another person who shares meals with the owner, stored by this plugin. Never the owner. No relationship is recorded or assumed. |
 | Attendee / guest | A member who eats a given main meal on a given date. |
 | Main meal | `breakfast`, `lunch` or `dinner`. Snacks are always the owner's alone. |
 | Maintenance estimate | A member's daily kcal and macros from the diet targets engine with no goal (Maintain). Labelled 目安 / estimate in the UI. |
@@ -315,7 +316,7 @@ briefs.
 ## 7. Tools
 
 All take and return `snake_case` JSON. The chat always speaks as the owner. These tools are how
-the owner tells the assistant about the others ("my partner is out for dinner on Friday").
+the owner tells the assistant about the others ("Aki is out for dinner on Friday").
 
 | Tool | Arguments | Effect |
 |---|---|---|
@@ -346,17 +347,17 @@ members. Anything else is `NotFound`, listing the known names so the model can a
 
 ## 9. API, server and UI
 
-**Commands** (`crates/api/src/ops.rs`, routes in `crates/server`): `get_household_view`,
+**Commands** (`crates/api/src/ops.rs`, routes in `crates/server`): `get_members_view`,
 `add_member`, `update_member`, `archive_member`, `set_attendance_default`,
 `set_attendance_override`, `clear_attendance_override`, `add_member_dislike`,
 `remove_member_dislike`. Errors leave Rust as `ErrorDetail`.
 
-`get_household_view` returns the members (profile, age, the 21 weekly default slots, current
+`get_members_view` returns the members (profile, age, the 21 weekly default slots, current
 dislikes), the one-off changes for the next 7 days, and those 7 days **resolved** (`week`: for
 each date, every member × main meal with `present` and whether an override decides it), so the
 UI never re-implements attendance resolution.
 
-**Web UI** (`apps/web`): a new **Household** tab (家族 / Household / 家庭), shown while the plugin is
+**Web UI** (`apps/web`): a new **Members** tab (メンバー / Members / 成员), shown while the plugin is
 on, after Training:
 - Member list with an add/edit form (all §5 fields, inline validation messages from
   `errors`), archive button.
@@ -400,7 +401,7 @@ present and computed in Rust; no `multimember` section → diet output identical
 71-year-old member left out with a warning.
 
 ### MM5 — API and web UI
-§9 commands, routes, Household tab, shared-meal display, feature switch, three locales.
+§9 commands, routes, Members tab, shared-meal display, feature switch, three locales.
 **Done when:** server route tests for each command; `tsc --noEmit` passes; manually: add two
 members, set attendance, generate tomorrow's plan, see shared meals with portions on Today.
 

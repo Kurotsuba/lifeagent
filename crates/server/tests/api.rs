@@ -600,9 +600,9 @@ async fn stock_items_can_be_added_changed_and_removed() {
 }
 
 #[tokio::test]
-async fn household_members_attendance_and_dislikes_over_http() {
+async fn members_attendance_and_dislikes_over_http() {
     let server = start().await;
-    let session = server.register("family").await;
+    let session = server.register("sharing").await;
     let profile = json!({
         "display_name": "Aki", "sex": "female", "birth_date": "1992-05-10",
         "height_cm": 160, "weight_kg": 52, "activity_level": "light",
@@ -645,7 +645,7 @@ async fn household_members_attendance_and_dislikes_over_http() {
     assert_eq!(status, StatusCode::OK);
 
     let (_, view) = server
-        .post(&session, "/api/get_household_view", json!({}))
+        .post(&session, "/api/get_members_view", json!({}))
         .await;
     let today = view["today"].as_str().unwrap().to_string();
     let (status, _) = server
@@ -676,7 +676,7 @@ async fn household_members_attendance_and_dislikes_over_http() {
     assert_eq!(status, StatusCode::OK);
 
     let (_, view) = server
-        .post(&session, "/api/get_household_view", json!({}))
+        .post(&session, "/api/get_members_view", json!({}))
         .await;
     let m = &view["members"][0];
     assert_eq!(m["weight_kg"], 53.5);
@@ -702,7 +702,7 @@ async fn household_members_attendance_and_dislikes_over_http() {
         assert_eq!(status, StatusCode::OK, "{path}");
     }
     let (_, view) = server
-        .post(&session, "/api/get_household_view", json!({}))
+        .post(&session, "/api/get_members_view", json!({}))
         .await;
     assert_eq!(view["members"], json!([]));
     assert_eq!(view["overrides"], json!([]));

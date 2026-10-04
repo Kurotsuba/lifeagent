@@ -16,7 +16,7 @@ import type {
   Food,
   HistoryMessage,
   AttendanceSlot,
-  HouseholdView,
+  MembersView,
   MainMealType,
   Member,
   MemberDislike,
@@ -152,10 +152,10 @@ export function saveTrainingDayPreference(text: string, date?: string): Promise<
   return call("save_training_day_preference", { text, date: date ?? null });
 }
 
-// ---- Household -----------------------------------------------------------------------------
+// ---- Members -------------------------------------------------------------------------------
 
-export function getHouseholdView(): Promise<HouseholdView> {
-  return call("get_household_view");
+export function getMembersView(): Promise<MembersView> {
+  return call("get_members_view");
 }
 
 /** Without `attendance`, the new member eats dinner with the user every day. */

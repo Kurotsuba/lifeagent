@@ -26,7 +26,7 @@ use lifeagent_plugin_diet::sources::{self, Food, SourceInfo};
 use lifeagent_plugin_diet::targets::{self, NutritionTargets};
 use lifeagent_plugin_multimember::model::{DefaultSlot, Dislike, MealType, Member, MemberProfile};
 use lifeagent_plugin_multimember::store as members;
-use lifeagent_plugin_multimember::view::{self as household_view, HouseholdView};
+use lifeagent_plugin_multimember::view::{self as members_view, MembersView};
 use lifeagent_plugin_stock::model::{StockItem, Unit};
 use lifeagent_plugin_stock::settings::StockSettings;
 use lifeagent_plugin_stock::shopping::{ShoppingLineRef, ShoppingStatus};
@@ -118,10 +118,10 @@ pub async fn save_training_day_preference(
     Ok(training_prefs::set_day_preference(&app.plugin_context(), date, text).await?)
 }
 
-// ---- Household (`lifeagent-plugin-multimember`) ------------------------------------------------
+// ---- Members (`lifeagent-plugin-multimember`) --------------------------------------------------
 
-pub async fn get_household_view(app: &CoreApp) -> Result<HouseholdView, CommandError> {
-    Ok(household_view::household_view(&app.plugin_context()).await?)
+pub async fn get_members_view(app: &CoreApp) -> Result<MembersView, CommandError> {
+    Ok(members_view::members_view(&app.plugin_context()).await?)
 }
 
 /// `attendance` gives the new member's weekly defaults; `None`: dinner every day.

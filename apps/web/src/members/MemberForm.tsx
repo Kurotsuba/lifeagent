@@ -13,7 +13,7 @@ import { primaryButtonClass, secondaryButtonClass } from "../components/buttonSt
 import { strings } from "../i18n";
 import { splitList } from "../onboarding/draft";
 
-const t = strings.household.form;
+const t = strings.members.form;
 const p = strings.onboarding.profile;
 
 const ACTIVITY_LEVELS: ActivityLevel[] = ["sedentary", "light", "moderate", "active", "very_active"];
@@ -61,7 +61,7 @@ interface MemberFormProps {
   onCancel: () => void;
 }
 
-/** Adds or edits a household member. Age, height and weight bounds are checked by the backend,
+/** Adds or edits a member. Age, height and weight bounds are checked by the backend,
  * whose message is shown as is. */
 export function MemberForm({ member, onDone, onCancel }: MemberFormProps) {
   const [draft, setDraft] = useState(() => draftFrom(member));

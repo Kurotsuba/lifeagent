@@ -29,7 +29,7 @@ crates/llm/             # lifeagent-llm: model abstraction, providers, router (n
 crates/core/            # lifeagent-core: storage, plugin API, orchestrator, planner, scheduler
 crates/plugin-diet/     # lifeagent-plugin-diet: diet tracking + diet plan section
 crates/plugin-training/ # lifeagent-plugin-training: optional training log + training plan section
-crates/plugin-multimember/ # lifeagent-plugin-multimember: optional household members + shared-meal section
+crates/plugin-multimember/ # lifeagent-plugin-multimember: optional other members + shared-meal section
 crates/api/             # lifeagent-api: command surface + error mapping used by the server
 crates/cli/             # lifeagent-cli: developer harness (chat, plan, inspect data)
 crates/server/          # lifeagent-server: HTTP backend for the web build (accounts, per-user apps)

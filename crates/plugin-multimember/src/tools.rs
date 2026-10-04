@@ -1,5 +1,5 @@
 //! Multimember tools (`docs/MULTIMEMBER_SPEC.md` §7). The chat always speaks as the owner; these
-//! let the owner tell the assistant about the other people they cook for.
+//! let the owner tell the assistant about the other people they share meals with.
 
 use chrono::NaiveDate;
 use lifeagent_core::plugin::{PluginContext, PluginError, ToolOutput};
@@ -54,7 +54,7 @@ pub fn specs() -> Vec<ToolSpec> {
         ToolSpec {
             name: "multimember_list_members".into(),
             description: format!(
-                "List the other household members the owner cooks for, with their profile, \
+                "List the other members who share meals with the owner, with their profile, \
                  usual meal attendance and dislikes. {NOT_FOR_LOGGING}"
             ),
             parameters: json!({"type": "object", "properties": {}}),
@@ -62,8 +62,8 @@ pub fn specs() -> Vec<ToolSpec> {
         ToolSpec {
             name: "multimember_add_member".into(),
             description: format!(
-                "Add a household member who shares the owner's meals (a partner, flatmate, \
-                 adult child). Members must be aged 16–70; ask for every required field you \
+                "Add a member: another person who regularly shares meals with the owner. Don't \
+                 assume or ask how they are related to the owner. Members must be aged 16–70; ask for every required field you \
                  don't know rather than guessing. `attendance` sets which main meals they \
                  usually eat with the owner; without it, dinner every day. {NOT_FOR_LOGGING}"
             ),

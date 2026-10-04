@@ -125,7 +125,7 @@ async fn members_are_managed_from_chat_once_the_plugin_is_on() {
     ]));
     mock.push_response(text_response("登録しました"));
     let turn = app
-        .send_message("妻のAkiも一緒に食べます。明日の夜は飲み会。セロリが苦手。")
+        .send_message("Akiも一緒に食べます。明日の夜は飲み会。セロリが苦手。")
         .await
         .unwrap();
     assert_eq!(turn.reply, "登録しました");
@@ -144,7 +144,7 @@ async fn members_are_managed_from_chat_once_the_plugin_is_on() {
         vec!["セロリ"]
     );
 
-    // The next turn's system prompt carries the household, without body measurements.
+    // The next turn's system prompt carries the members, without body measurements.
     mock.push_response(text_response("ok"));
     app.send_message("明日の予定は？").await.unwrap();
     let system = format!("{:?}", mock.received_requests().last().unwrap().messages[0]);

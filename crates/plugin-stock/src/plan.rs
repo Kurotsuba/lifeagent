@@ -82,7 +82,7 @@ pub async fn plan_input(
     );
     if prior.contains_key(MULTIMEMBER_SECTION) {
         brief.push_str(
-            "\n- Some meals are shared with other household members: \"uses\" and              \"shopping_list\" must cover every portion of those meals (the diet brief gives the              portion count), not only the user's own.",
+            "\n- Some meals are shared with other members: \"uses\" and              \"shopping_list\" must cover every portion of those meals (the diet brief gives the              portion count), not only the user's own.",
         );
     }
     Ok(Some(PlanInput {

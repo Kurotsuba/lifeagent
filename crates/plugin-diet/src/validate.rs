@@ -8,10 +8,10 @@ use lifeagent_core::plugin::{PlanDraft, PlanSection, PluginContext, PluginError}
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::household::{self, Household};
 use crate::intake;
 use crate::model::{ItemKind, Macros, MealItem, MealType};
 use crate::resolver::{resolve_many, FoodQuery};
+use crate::shared_meals::{self, SharedMeals};
 
 const KCAL_TOLERANCE: f64 = 0.08;
 const MIN_PROTEIN_SHARE: f64 = 0.9;
@@ -92,7 +92,7 @@ pub async fn finalize(
         .await?
         .ok_or_else(|| PluginError::Other("no profile".into()))?;
     let dislikes = ctx.preferences.dislikes_on(date).await?;
-    let household = Household::from_draft(prior, targets.kcal);
+    let sharing = SharedMeals::from_draft(prior, targets.kcal);
 
     let names: Vec<FoodQuery> = planned
         .meals
@@ -109,12 +109,12 @@ pub async fn finalize(
     for meal in &planned.meals {
         let mut meal_total = Macros::default();
         let mut items_json = Vec::new();
-        let shared = household
+        let shared = sharing
             .as_ref()
             .and_then(|h| Some((h, h.meal(meal.meal_type)?)));
         let table = shared.map(|(h, shared)| {
             let guests = h.guests_at(shared);
-            let pattern = household::strictest(
+            let pattern = shared_meals::strictest(
                 std::iter::once(profile.dietary_pattern)
                     .chain(guests.iter().map(|g| g.guest.dietary_pattern)),
             );
@@ -149,7 +149,7 @@ pub async fn finalize(
                 }
             }
             if let Some((guests, pattern)) = &table {
-                let (v, w) = household::check_item(
+                let (v, w) = shared_meals::check_item(
                     guests,
                     *pattern,
                     &meal_label,
@@ -252,9 +252,9 @@ pub async fn finalize(
         "meals": meals_json,
         "tips": planned.tips,
     });
-    if let (Some(h), Some(obj)) = (&household, data.as_object_mut()) {
+    if let (Some(h), Some(obj)) = (&sharing, data.as_object_mut()) {
         obj.insert("guest_estimates".into(), h.estimates_json());
-        warnings.extend(household::clamp_warnings(h));
+        warnings.extend(shared_meals::clamp_warnings(h));
     }
     Ok(PlanSection {
         data,

@@ -1,9 +1,9 @@
 import type { DietPlanMeal } from "../api/types";
 import { strings } from "../i18n";
 
-const t = strings.household.shared;
+const t = strings.members.shared;
 
-/** Under a planned meal shared with household members: who joins and how many portions to
+/** Under a planned meal shared with other members: who joins and how many portions to
  * cook, with each guest's portion kcal (computed in Rust) on expand. Nothing for other meals. */
 export function SharedMeal({ meal }: { meal: DietPlanMeal }) {
   if (!meal.servings || meal.servings.length === 0) return null;

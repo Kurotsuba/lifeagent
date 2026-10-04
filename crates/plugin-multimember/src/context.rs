@@ -100,11 +100,11 @@ fn attendance_line(
 pub async fn context_snippet(ctx: &PluginContext, date: NaiveDate) -> Result<String, PluginError> {
     let members = store::list_members(ctx).await?;
     if members.is_empty() {
-        return Ok("Household members: none yet (the owner eats alone).".into());
+        return Ok("Other members: none yet (the owner eats alone).".into());
     }
     let mut lines = vec![
-        "Household members who share the owner's main meals (no goals; planned to maintain \
-         weight):"
+        "Other members who share some of the owner's main meals (no goals; planned to maintain \
+         weight). Don't assume how they are related to the owner:"
             .to_string(),
     ];
     for m in &members {

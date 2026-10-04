@@ -1,8 +1,8 @@
 //! Shared meals (`docs/MULTIMEMBER_SPEC.md` §6.2–6.4): the diet side of the multimember plugin.
 //!
 //! The multimember plugin plans first and leaves a computed `multimember` section in the draft:
-//! which main meals other household members share, and each guest's profile. Diet never depends
-//! on that plugin; it reads the section's JSON. Guests have no goals: each gets a maintenance
+//! which main meals other members share with the owner, and each guest's profile. Diet never
+//! depends on that plugin; it reads the section's JSON. Guests have no goals: each gets a maintenance
 //! estimate from this crate's own targets engine (goal `None`), and a portion `scale` relative
 //! to the owner's, computed here. The planner only picks the dishes; `items` stay the owner's
 //! portion, so the owner's targets, validation and plan-vs-actual don't change.
@@ -60,15 +60,15 @@ pub struct GuestPlan {
 
 /// Who shares which meals on the plan date, with each guest's estimate and scale.
 #[derive(Debug, Clone)]
-pub struct Household {
+pub struct SharedMeals {
     pub meals: Vec<SharedMeal>,
     pub guests: Vec<GuestPlan>,
 }
 
-impl Household {
+impl SharedMeals {
     /// From the draft's `multimember` section, given the owner's day kcal target. `None` when
     /// the section is absent, malformed, or shares no meal: diet then plans for the owner alone.
-    pub fn from_draft(prior: &PlanDraft, owner_kcal: f64) -> Option<Household> {
+    pub fn from_draft(prior: &PlanDraft, owner_kcal: f64) -> Option<SharedMeals> {
         let raw = prior.get(MULTIMEMBER_SECTION)?;
         let section: Section = match serde_json::from_value(raw.clone()) {
             Ok(s) => s,
@@ -110,7 +110,7 @@ impl Household {
         if meals.is_empty() {
             return None;
         }
-        Some(Household { meals, guests })
+        Some(SharedMeals { meals, guests })
     }
 
     pub fn meal(&self, meal_type: MealType) -> Option<&SharedMeal> {
@@ -320,19 +320,19 @@ pub fn forbidden_terms(pattern: DietaryPattern) -> Vec<&'static str> {
 /// The planner brief's lines for shared meals (§6.2). `owner_allergies` and `owner_pattern`
 /// are the owner's, who is at every meal.
 pub fn brief_lines(
-    household: &Household,
+    shared: &SharedMeals,
     owner_allergies: &[String],
     owner_pattern: DietaryPattern,
 ) -> Vec<String> {
     let mut lines = vec![
-        "Shared meals: other household members eat some main meals with the owner. Plan ONE \
+        "Shared meals: other people eat some main meals with the owner. Plan ONE \
          set of dishes for everyone at such a meal; `items` stay the owner's own portion in \
          grams (the app sizes the others' portions). The others aim to keep their current \
          weight: keep shared meals balanced (protein, vegetables, moderate fat and salt)."
             .to_string(),
     ];
-    for meal in &household.meals {
-        let guests = household.guests_at(meal);
+    for meal in &shared.meals {
+        let guests = shared.guests_at(meal);
         let names: Vec<&str> = guests.iter().map(|g| g.guest.name.as_str()).collect();
         let mut allergies: Vec<String> = owner_allergies.to_vec();
         let mut dislikes: Vec<String> = Vec::new();
@@ -356,7 +356,7 @@ pub fn brief_lines(
             "- Shared {meal_name} with {}: cook about {:.1} portions in total. Dietary pattern \
              at this meal: {}.",
             names.join(", "),
-            household.portions(meal),
+            shared.portions(meal),
             pattern_name(pattern)
         );
         if !allergies.is_empty() {
@@ -420,8 +420,8 @@ pub fn check_item(
 }
 
 /// One warning per guest whose scale was clamped.
-pub fn clamp_warnings(household: &Household) -> Vec<String> {
-    household
+pub fn clamp_warnings(shared: &SharedMeals) -> Vec<String> {
+    shared
         .guests
         .iter()
         .filter(|g| g.clamped)
@@ -496,18 +496,18 @@ mod tests {
             ],
             "guests": [guest("a", Sex::Female, 55.0), guest("b", Sex::Male, 70.0)]
         });
-        let h = Household::from_draft(&draft(section), 2000.0).unwrap();
+        let h = SharedMeals::from_draft(&draft(section), 2000.0).unwrap();
         assert_eq!(h.meals.len(), 1);
         let dinner = h.meal(MealType::Dinner).unwrap();
         let scales: f64 = h.guests_at(dinner).iter().map(|g| g.scale).sum();
         assert_eq!(h.portions(dinner), round1(1.0 + scales));
         assert!(h.meal(MealType::Breakfast).is_none());
 
-        assert!(Household::from_draft(&PlanDraft::new(), 2000.0).is_none());
+        assert!(SharedMeals::from_draft(&PlanDraft::new(), 2000.0).is_none());
         assert!(
-            Household::from_draft(&draft(json!({"meals": [], "guests": []})), 2000.0).is_none()
+            SharedMeals::from_draft(&draft(json!({"meals": [], "guests": []})), 2000.0).is_none()
         );
-        assert!(Household::from_draft(&draft(json!({"bad": true})), 2000.0).is_none());
+        assert!(SharedMeals::from_draft(&draft(json!({"bad": true})), 2000.0).is_none());
     }
 
     #[test]
@@ -516,7 +516,7 @@ mod tests {
             "meals": [{"meal_type": "dinner", "guest_ids": ["a"]}],
             "guests": [guest("a", Sex::Female, 55.0)]
         });
-        let h = Household::from_draft(&draft(section), 2000.0).unwrap();
+        let h = SharedMeals::from_draft(&draft(section), 2000.0).unwrap();
         let s = h.guests[0].scale;
         let total = Macros {
             kcal: 600.0,
@@ -542,7 +542,7 @@ mod tests {
             "meals": [{"meal_type": "dinner", "guest_ids": ["v"]}],
             "guests": [veg]
         });
-        let h = Household::from_draft(&draft(section), 2000.0).unwrap();
+        let h = SharedMeals::from_draft(&draft(section), 2000.0).unwrap();
         let guests = h.guests_at(&h.meals[0]);
         let contains = |n: &str, t: &str| n.contains(t);
         let check = |name: &str| {
@@ -573,7 +573,7 @@ mod tests {
             "meals": [{"meal_type": "dinner", "guest_ids": ["big"]}],
             "guests": [guest("big", Sex::Male, 150.0)]
         });
-        let h = Household::from_draft(&draft(section), 1200.0).unwrap();
+        let h = SharedMeals::from_draft(&draft(section), 1200.0).unwrap();
         assert_eq!(h.guests[0].scale, MAX_SCALE);
         assert_eq!(clamp_warnings(&h).len(), 1);
     }

@@ -1,4 +1,4 @@
-//! The Household page's data (`docs/MULTIMEMBER_SPEC.md` §9): members with their weekly
+//! The Members page's data (`docs/MULTIMEMBER_SPEC.md` §9): members with their weekly
 //! attendance and dislikes, and the one-off changes for the coming week.
 
 use chrono::{Days, NaiveDate};
@@ -40,7 +40,7 @@ pub struct DayAttendance {
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct HouseholdView {
+pub struct MembersView {
     pub today: NaiveDate,
     pub members: Vec<MemberView>,
     /// From today through `today + OVERRIDE_DAYS − 1`.
@@ -49,7 +49,7 @@ pub struct HouseholdView {
     pub week: Vec<DayAttendance>,
 }
 
-pub async fn household_view(ctx: &PluginContext) -> Result<HouseholdView, PluginError> {
+pub async fn members_view(ctx: &PluginContext) -> Result<MembersView, PluginError> {
     let today = ctx.today().await?;
     let mut members = Vec::new();
     for member in store::list_members(ctx).await? {
@@ -93,7 +93,7 @@ pub async fn household_view(ctx: &PluginContext) -> Result<HouseholdView, Plugin
         }
         week.push(DayAttendance { date, slots });
     }
-    Ok(HouseholdView {
+    Ok(MembersView {
         today,
         members,
         overrides,
@@ -128,7 +128,7 @@ mod tests {
             .await
             .unwrap();
 
-        let view = household_view(ctx).await.unwrap();
+        let view = members_view(ctx).await.unwrap();
         assert_eq!(view.today, day);
         assert_eq!(view.members.len(), 1);
         let mv = &view.members[0];

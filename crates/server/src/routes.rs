@@ -287,7 +287,7 @@ pub async fn command(
             let a: DayPreference = args(&body)?;
             reply(ops::save_training_day_preference(app, a.date, &a.text).await)
         }
-        "get_household_view" => reply(ops::get_household_view(app).await),
+        "get_members_view" => reply(ops::get_members_view(app).await),
         "add_member" => {
             let a: AddMemberArg = args(&body)?;
             reply(ops::add_member(app, &a.profile, a.attendance.as_deref()).await)

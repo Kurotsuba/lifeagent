@@ -10,7 +10,7 @@ import { inputClass } from "../components/Field";
 import { primaryButtonClass, secondaryButtonClass } from "../components/buttonStyles";
 import { strings } from "../i18n";
 
-const t = strings.household;
+const t = strings.members;
 const p = strings.onboarding.profile;
 const MEALS: MainMealType[] = ["breakfast", "lunch", "dinner"];
 

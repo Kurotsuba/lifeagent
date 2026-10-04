@@ -154,13 +154,13 @@ export interface DietPlanMeal {
   prep_note: string | null;
   items: DietMealItem[];
   total: DietMacros;
-  /** Shared meals only: each household member's portion (`docs/MULTIMEMBER_SPEC.md` §6.3). */
+  /** Shared meals only: each other member's portion (`docs/MULTIMEMBER_SPEC.md` §6.3). */
   servings?: GuestServing[];
   /** Shared meals only: portions cooked in total, the user's included. */
   portions?: number;
 }
 
-/** One household member's portion of a shared meal; `total` is computed in Rust. */
+/** One other member's portion of a shared meal; `total` is computed in Rust. */
 export interface GuestServing {
   member_id: string;
   name: string;
@@ -224,11 +224,11 @@ export function dietPlanSection(plan: StoredPlan): DietPlanSection | null {
   return (section as DietPlanSection | undefined) ?? null;
 }
 
-// ---- Household (`crates/plugin-multimember`) -------------------------------------------------
+// ---- Members (`crates/plugin-multimember`) ---------------------------------------------------
 
 export type MainMealType = "breakfast" | "lunch" | "dinner";
 
-/** `MemberProfile`: everything the user enters about another household member. */
+/** `MemberProfile`: everything the user enters about another member. */
 export interface MemberProfile {
   display_name: string;
   sex: Sex;
@@ -279,7 +279,7 @@ export interface DaySlot {
   note: string | null;
 }
 
-export interface HouseholdView {
+export interface MembersView {
   today: string;
   members: MemberView[];
   /** The next 7 days, today first, resolved. */

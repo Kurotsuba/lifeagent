@@ -48,7 +48,7 @@ export const ja: Strings = {
     stock: "在庫",
     settings: "設定",
     training: "トレーニング",
-    household: "家族",
+    members: "メンバー",
   },
   guide: {
     open: "使い方ガイド",
@@ -328,7 +328,7 @@ export const ja: Strings = {
       names: {
         training: "トレーニング記録とプラン",
         stock: "在庫管理",
-        multimember: "家族の食事",
+        multimember: "一緒に食べる食事",
       } as Record<string, string>,
       descriptions: {
         training:
@@ -336,7 +336,7 @@ export const ja: Strings = {
         stock:
           "家にある食材を記録します。記録した食事は在庫から自動で差し引かれ、プランは在庫を優先して使い、買い物リストも作ります。",
         multimember:
-          "一緒に食べる家族や同居人（16〜70歳）を登録します。一緒に食べる食事は全員分を同じ献立で作り、それぞれのアレルギーと苦手な食べ物を避け、体重を保つのに必要な量で一人ずつ盛り付け量を決めます。",
+          "一緒に食べる人（16〜70歳）を登録します。一緒に食べる食事は全員分を同じ献立で作り、それぞれのアレルギーと苦手な食べ物を避け、体重を保つのに必要な量で一人ずつ盛り付け量を決めます。",
       } as Record<string, string>,
     },
     language: {
@@ -418,9 +418,9 @@ export const ja: Strings = {
       deleteConfirm: "削除しても記録済みの食事には影響しません",
     },
   },
-  // Household page (`crates/plugin-multimember`).
-  household: {
-    title: "家族",
+  // Members page (`crates/plugin-multimember`).
+  members: {
+    title: "メンバー",
     intro:
       "一緒に食べる人（16〜70歳）。一緒に食べる食事は全員分を同じ献立で作り、それぞれのアレルギーと苦手な食べ物を避け、体重を保つのに必要な量で一人ずつ盛り付け量を決めます。",
     noMembers: "まだメンバーがいません。追加すると、プランが食卓の全員に合わせて作られます。",

@@ -1,7 +1,7 @@
-//! `lifeagent-plugin-multimember`: the other people the owner cooks for, and shared meals.
+//! `lifeagent-plugin-multimember`: the other people the owner shares meals with.
 //!
-//! Optional and off by default (`docs/MULTIMEMBER_SPEC.md`). The owner describes household
-//! members (16–70, no goals, no logins) and who eats which main meal; the plugin turns that into
+//! Optional and off by default (`docs/MULTIMEMBER_SPEC.md`). The owner describes the other
+//! members (16–70, no goals, no logins; any relationship to the owner) and who eats which main meal; the plugin turns that into
 //! a computed `multimember` plan section that the diet plugin reads to plan shared dishes with a
 //! portion for each guest. Like every plugin, it depends only on `lifeagent-core` and
 //! `lifeagent-llm`; diet knows it only through that section's JSON.

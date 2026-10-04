@@ -9,7 +9,6 @@
 pub mod dish_resolver;
 pub mod food_matcher;
 pub mod foods;
-pub mod household;
 pub mod import;
 pub mod intake;
 pub mod model;
@@ -17,6 +16,7 @@ pub mod parser;
 pub mod plan;
 pub mod prompts;
 pub mod resolver;
+pub mod shared_meals;
 pub mod sources;
 pub mod targets;
 pub mod tools;
@@ -80,7 +80,7 @@ impl Plugin for DietPlugin {
     /// Diet is planned after the day's training, so meals can fuel and follow the session, and
     /// after the multimember section, so shared meals suit everyone at the table.
     fn plan_after(&self) -> &'static [&'static str] {
-        &[intake::TRAINING_SECTION, household::MULTIMEMBER_SECTION]
+        &[intake::TRAINING_SECTION, shared_meals::MULTIMEMBER_SECTION]
     }
 
     async fn plan_input(

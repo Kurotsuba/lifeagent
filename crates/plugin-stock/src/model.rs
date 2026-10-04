@@ -57,7 +57,7 @@ pub struct StockUse {
 /// Longest item name accepted, in characters.
 pub const MAX_NAME_CHARS: usize = 60;
 /// Largest quantity accepted for one item (100 kg / 100 L / 100000 pieces is already absurd
-/// for a household; anything above is a unit mix-up).
+/// for home use; anything above is a unit mix-up).
 pub const MAX_QUANTITY: f64 = 100_000.0;
 
 /// The lookup key for an item name: whitespace collapsed, ASCII lowercased and full-width ASCII

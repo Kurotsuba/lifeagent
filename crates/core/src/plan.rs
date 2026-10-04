@@ -928,8 +928,8 @@ mod tests {
         ));
 
         let plan = PlanService::new(vec![
-            staged("diet", &["household"], false),
-            computed("household", serde_json::json!({"secret_weight": 52})),
+            staged("diet", &["guests"], false),
+            computed("guests", serde_json::json!({"secret_weight": 52})),
         ])
         .generate(&ctx, DAY, PlanTrigger::Manual, None)
         .await
@@ -939,16 +939,16 @@ mod tests {
         let requests = mock.received_requests();
         assert_eq!(requests.len(), 1);
         let prompt = last_user_message(&requests[0]);
-        assert!(prompt.contains("diet sees [\"household\"]"));
+        assert!(prompt.contains("diet sees [\"guests\"]"));
         assert!(!prompt.contains("secret_weight"), "{prompt}");
         assert!(!prompt.contains("## Already planned"));
 
         assert_eq!(
-            plan.content.sections["household"],
+            plan.content.sections["guests"],
             serde_json::json!({"secret_weight": 52})
         );
         assert_eq!(
-            plan.content.sections["diet"]["prior"]["household"]["secret_weight"],
+            plan.content.sections["diet"]["prior"]["guests"]["secret_weight"],
             52
         );
         assert_eq!(
@@ -962,8 +962,8 @@ mod tests {
             serde_json::json!({"diet": {"meals": []}}),
         ));
         PlanService::new(vec![
-            staged("diet", &["household"], false),
-            computed("household", serde_json::json!({"secret_weight": 52})),
+            staged("diet", &["guests"], false),
+            computed("guests", serde_json::json!({"secret_weight": 52})),
         ])
         .revise(&ctx, DAY, "lighter")
         .await
@@ -971,15 +971,15 @@ mod tests {
         let prompt = last_user_message(mock.received_requests().last().unwrap());
         assert!(prompt.contains("lighter"));
         // The test diet section echoes its draft, so the data shows up inside it; the stored
-        // "household" section itself (which would follow "diet") must be gone.
+        // "guests" section itself (which would follow "diet") must be gone.
         assert!(prompt.contains(r#""sections":{"diet":"#), "{prompt}");
-        assert!(!prompt.contains(r#"},"household":"#), "{prompt}");
+        assert!(!prompt.contains(r#"},"guests":"#), "{prompt}");
     }
 
     #[tokio::test]
     async fn computed_sections_alone_are_nothing_to_plan() {
         let (ctx, mock, _dir) = crate::test_support::context().await;
-        let result = PlanService::new(vec![computed("household", serde_json::json!({"x": 1}))])
+        let result = PlanService::new(vec![computed("guests", serde_json::json!({"x": 1}))])
             .generate(&ctx, DAY, PlanTrigger::Manual, None)
             .await;
         assert!(matches!(result, Err(CoreError::NothingToPlan)));
@@ -994,13 +994,13 @@ mod tests {
             serde_json::json!({"diet": {"meals": []}}),
         ));
         let plan = PlanService::new(vec![
-            staged("diet", &["household"], false),
-            computed("household", Value::Null),
+            staged("diet", &["guests"], false),
+            computed("guests", Value::Null),
         ])
         .generate(&ctx, DAY, PlanTrigger::Manual, None)
         .await
         .unwrap();
-        assert!(!plan.content.sections.contains_key("household"));
+        assert!(!plan.content.sections.contains_key("guests"));
         assert_eq!(plan.warnings, Vec::<String>::new());
     }
 

@@ -1,14 +1,14 @@
 import { useEffect, useState } from "react";
-import { getHouseholdView } from "../api/commands";
+import { getMembersView } from "../api/commands";
 import { onAppDataEvent } from "../api/events";
-import { commandErrorMessage, type HouseholdView, type MemberView } from "../api/types";
+import { commandErrorMessage, type MembersView, type MemberView } from "../api/types";
 import { primaryButtonClass } from "../components/buttonStyles";
 import { strings } from "../i18n";
 import { MemberCard } from "./MemberCard";
 import { MemberForm } from "./MemberForm";
 import { WeekAttendance } from "./WeekAttendance";
 
-const t = strings.household;
+const t = strings.members;
 
 function Card({ children }: { children: React.ReactNode }) {
   return (
@@ -18,18 +18,18 @@ function Card({ children }: { children: React.ReactNode }) {
   );
 }
 
-/** The multimember plugin's page: the other people the user cooks for, when they usually eat
+/** The multimember plugin's page: the other people the user shares meals with, when they usually eat
  * together, one-off changes for the coming week, and their dislikes. All data from
- * `get_household_view`; refetched on every app data event (a member added in chat, ...). */
-export function Household() {
-  const [view, setView] = useState<HouseholdView | null>(null);
+ * `get_members_view`; refetched on every app data event (a member added in chat, ...). */
+export function Members() {
+  const [view, setView] = useState<MembersView | null>(null);
   const [error, setError] = useState<string | null>(null);
   // null: no form; "new": adding; otherwise the member being edited.
   const [editing, setEditing] = useState<MemberView | "new" | null>(null);
 
   async function refetch() {
     try {
-      setView(await getHouseholdView());
+      setView(await getMembersView());
       setError(null);
     } catch (e) {
       setError(commandErrorMessage(e));

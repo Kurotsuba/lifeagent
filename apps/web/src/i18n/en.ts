@@ -48,7 +48,7 @@ export const en: Strings = {
     stock: "Stock",
     settings: "Settings",
     training: "Training",
-    household: "Household",
+    members: "Members",
   },
   guide: {
     open: "Guide",
@@ -329,7 +329,7 @@ export const en: Strings = {
       names: {
         training: "Training log & plan",
         stock: "Stock",
-        multimember: "Household meals",
+        multimember: "Shared meals",
       } as Record<string, string>,
       descriptions: {
         training:
@@ -337,7 +337,7 @@ export const en: Strings = {
         stock:
           "Keep track of the food at home. Logged meals take what they used out of stock, and plans use what you have first and come with a shopping list.",
         multimember:
-          "Add the family members or flatmates you cook for (aged 16–70). Shared meals become one set of dishes that avoids everyone's allergies and dislikes, with a portion for each person sized to keep their weight.",
+          "Add the people you share meals with (aged 16–70). Shared meals become one set of dishes that avoids everyone's allergies and dislikes, with a portion for each person sized to keep their weight.",
       } as Record<string, string>,
     },
     language: {
@@ -419,9 +419,9 @@ export const en: Strings = {
       deleteConfirm: "Meals already logged are not affected",
     },
   },
-  // Household page (`crates/plugin-multimember`).
-  household: {
-    title: "Household",
+  // Members page (`crates/plugin-multimember`).
+  members: {
+    title: "Members",
     intro:
       "The people who eat with you (aged 16–70). Shared meals are planned as one set of dishes that avoids everyone's allergies and dislikes, with a portion for each person sized to keep their weight.",
     noMembers: "No members yet. Once added, plans take everyone at the table into account.",

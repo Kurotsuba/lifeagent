@@ -2,7 +2,7 @@
 name = "lifeagent-plugin-multimember"
 version = "0.1.0"
 edition = "2021"
-description = "Multimember plugin: household members, meal attendance, shared-meal plan section."
+description = "Multimember plugin: other members, meal attendance, shared-meal plan section."
 
 [dependencies]
 lifeagent-core = { workspace = true }

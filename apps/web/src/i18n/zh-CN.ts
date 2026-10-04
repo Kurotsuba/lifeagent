@@ -54,7 +54,7 @@ export const zhCN = {
     stock: "库存",
     settings: "设置",
     training: "训练",
-    household: "家庭",
+    members: "成员",
   },
   guide: {
     open: "使用指南",
@@ -334,7 +334,7 @@ export const zhCN = {
       names: {
         training: "训练记录与计划",
         stock: "库存管理",
-        multimember: "家庭共餐",
+        multimember: "共餐",
       } as Record<string, string>,
       descriptions: {
         training:
@@ -342,7 +342,7 @@ export const zhCN = {
         stock:
           "记录家里的食材；记录饮食时自动扣减，计划优先使用库存并列出购物清单。",
         multimember:
-          "登记和你一起吃饭的家人或室友（16–70 岁）。共餐时计划为同桌的人做同一套菜，避开每个人的过敏和不喜欢的食物，并按各自维持体重所需的量分配份量。",
+          "登记和你一起吃饭的人（16–70 岁）。共餐时计划为同桌的人做同一套菜，避开每个人的过敏和不喜欢的食物，并按各自维持体重所需的量分配份量。",
       } as Record<string, string>,
     },
     language: {
@@ -422,9 +422,9 @@ export const zhCN = {
       deleteConfirm: "删除后已记录的饮食不受影响",
     },
   },
-  // Household page (`crates/plugin-multimember`).
-  household: {
-    title: "家庭",
+  // Members page (`crates/plugin-multimember`).
+  members: {
+    title: "成员",
     intro:
       "和你一起吃饭的人（16–70 岁）。共餐时计划会为同桌的人做同一套菜，避开每个人的过敏和不喜欢的食物，并按各自维持体重所需的量分配份量。",
     noMembers: "还没有成员。添加后，计划会照顾到同桌每个人。",

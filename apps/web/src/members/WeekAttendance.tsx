@@ -1,9 +1,9 @@
 import { useState } from "react";
 import { clearAttendanceOverride, setAttendanceOverride } from "../api/commands";
-import { commandErrorMessage, type DaySlot, type HouseholdView } from "../api/types";
+import { commandErrorMessage, type DaySlot, type MembersView } from "../api/types";
 import { strings } from "../i18n";
 
-const t = strings.household;
+const t = strings.members;
 
 /** "10-05 (Sun)": the date without the year and its weekday, for labels only. */
 function dayLabel(date: string): string {
@@ -12,7 +12,7 @@ function dayLabel(date: string): string {
 }
 
 interface WeekAttendanceProps {
-  view: HouseholdView;
+  view: MembersView;
   onChanged: () => void;
 }
 

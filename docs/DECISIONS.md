@@ -2660,3 +2660,13 @@ Implemented per `docs/MULTIMEMBER_SPEC.md` (MM1–MM5). Where the code refines t
   at lunch" is one call.
 - **No owner row.** The owner eats every main meal by definition (diet requires all three), so
   attendance covers other members only.
+
+## 2026-10-04 — Members, not households
+
+The multimember plugin assumes nothing about how members are related to the owner: family,
+roommates and colleagues are all just members. No user-visible text, prompt or tool description
+says "household", "family" or names a relationship, and the chat model is told not to assume
+one. Names follow: the tab is Members (メンバー / 成员), the feature is Shared meals
+(一緒に食べる食事 / 共餐), the command is `get_members_view` (was `get_household_view`), the diet
+module is `shared_meals` (was `household`), and the web page lives in `apps/web/src/members/`.
+Earlier entries above that say "household" describe the same feature.
