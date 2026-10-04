@@ -196,7 +196,6 @@ export const en: Strings = {
   },
   overview: {
     dietTitle: "Today's meal plan",
-    eatenOfTarget: (eaten: number, target: number) => `Eaten ${eaten} / ${target} kcal`,
     noDietPlan: "No meal plan for today. You can make tomorrow's on the Nutrition tab.",
     noTrainingPlan: "No training plan for today.",
   },

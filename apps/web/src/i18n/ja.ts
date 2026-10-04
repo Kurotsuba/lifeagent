@@ -196,7 +196,6 @@ export const ja: Strings = {
   },
   overview: {
     dietTitle: "今日の食事プラン",
-    eatenOfTarget: (eaten: number, target: number) => `摂取 ${eaten} / ${target} kcal`,
     noDietPlan: "今日の食事プランはありません。「栄養」画面で明日のプランを作れます。",
     noTrainingPlan: "今日のトレーニングプランはありません。",
   },

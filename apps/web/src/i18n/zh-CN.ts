@@ -202,7 +202,6 @@ export const zhCN = {
   },
   overview: {
     dietTitle: "今日饮食计划",
-    eatenOfTarget: (eaten: number, target: number) => `已摄入 ${eaten} / ${target} 千卡`,
     noDietPlan: "今天没有饮食计划。可以在“营养”页生成明天的计划。",
     noTrainingPlan: "今天没有训练计划。",
   },

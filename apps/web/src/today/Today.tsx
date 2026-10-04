@@ -11,6 +11,7 @@ import {
   type TodayView,
 } from "../api/types";
 import { strings } from "../i18n";
+import { IntakeSummary } from "../nutrition/IntakeSummary";
 import { ShoppingList } from "../stock/ShoppingList";
 import { TrainingPlanCard } from "../training/TrainingPlanCard";
 
@@ -37,8 +38,8 @@ interface TodayProps {
   enabledPlugins: string[];
 }
 
-/** The Today tab: a read-only view of the day — today's diet plan, today's training plan and
- * the shopping list. Editing happens on each plugin's own tab (and in chat). */
+/** The Today tab: a read-only view of the day — today's intake (kcal ring and macro bars),
+ * today's diet plan, today's training plan and the shopping list. Editing happens on each plugin's own tab (and in chat). */
 export function Today({ enabledPlugins }: TodayProps) {
   const showTraining = enabledPlugins.includes("training");
   const showStock = enabledPlugins.includes("stock");
@@ -94,6 +95,10 @@ export function Today({ enabledPlugins }: TodayProps) {
         </h1>
         {error ? <p className="text-sm text-red-600 dark:text-red-400">{error}</p> : null}
 
+        <Card title={strings.today.diet.title}>
+          <IntakeSummary card={dietCard(view)} />
+        </Card>
+
         <DietPlanCard view={view} />
 
         {showTraining ? (
@@ -129,26 +134,15 @@ export function Today({ enabledPlugins }: TodayProps) {
   );
 }
 
-/** Today's planned meals with what's in them, a ✓ on meal types already logged (the same
- * heuristic as the Nutrition tab's checklist), and the kcal eaten so far against the target. */
+/** Today's planned meals with what's in them and a ✓ on meal types already logged (the same
+ * heuristic as the Nutrition tab's checklist). */
 function DietPlanCard({ view }: { view: TodayView }) {
   const card = dietCard(view);
   const section = view.today_plan ? dietPlanSection(view.today_plan) : null;
   const logged = new Set<MealType>((card?.meals ?? []).map((m) => m.meal_type));
-  const eaten = Math.round(card?.total?.kcal ?? 0);
-  const target = card?.target ? Math.round(card.target.kcal) : null;
 
   return (
-    <Card
-      title={t.dietTitle}
-      aside={
-        <span className="text-xs tabular-nums text-neutral-500 dark:text-neutral-400">
-          {target !== null
-            ? t.eatenOfTarget(eaten, target)
-            : strings.today.diet.kcalEaten(eaten)}
-        </span>
-      }
-    >
+    <Card title={t.dietTitle}>
       {!section || section.meals.length === 0 ? (
         <Empty>{t.noDietPlan}</Empty>
       ) : (

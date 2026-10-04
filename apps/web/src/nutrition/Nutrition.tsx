@@ -3,8 +3,7 @@ import { getSettings, getToday } from "../api/commands";
 import { onAppDataEvent } from "../api/events";
 import { commandErrorMessage, dietCard, type MealType, type TodayView } from "../api/types";
 import { strings } from "../i18n";
-import { KcalRing } from "./KcalRing";
-import { MacroBars } from "./MacroBars";
+import { IntakeSummary } from "./IntakeSummary";
 import { MealList } from "./MealList";
 import { TodayPlanList } from "./TodayPlanList";
 import { TomorrowPlanCard } from "./TomorrowPlanCard";
@@ -94,16 +93,7 @@ export function Nutrition({ onAdjustPlan }: NutritionProps) {
           <h2 className="mb-3 text-sm font-semibold text-neutral-900 dark:text-neutral-50">
             {strings.today.diet.title}
           </h2>
-          <div className="flex flex-col items-center gap-4 sm:flex-row sm:gap-6">
-            <KcalRing
-              eatenKcal={card?.total?.kcal ?? 0}
-              targetKcal={card?.target?.kcal ?? null}
-            />
-            <MacroBars
-              eaten={card?.total ?? { kcal: 0, protein_g: 0, carbs_g: 0, fat_g: 0, fiber_g: 0 }}
-              target={card?.target ?? null}
-            />
-          </div>
+          <IntakeSummary card={card} />
           <div className="mt-4">
             <MealList meals={card?.meals ?? []} onDeleted={() => void refetch()} />
           </div>

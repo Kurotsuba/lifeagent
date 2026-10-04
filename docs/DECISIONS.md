@@ -2593,8 +2593,9 @@ id `training`), with the next day's diet planned on top of the next day's traini
   tab (Nutrition for diet, always shown; Training and Stock while their plugin is on). The old
   Today page, with its editing (meal delete, weight log, tomorrow's plan: generate, accept,
   adjust), moved unchanged to Nutrition (`apps/web/src/nutrition/`). Today is now read-only:
-  today's diet plan (meals, items, kcal, ✓ on meal types already logged, eaten vs target),
-  today's training plan, and the shopping list. A tab whose plugin is switched off falls back to
+  today's intake (the same kcal ring and macro bars as Nutrition, `IntakeSummary`), today's
+  diet plan (meals, items, kcal, ✓ on meal types already logged), today's training plan, and
+  the shopping list. A tab whose plugin is switched off falls back to
   Today.
 - **Stock switch.** The stock plugin is now `optional`, with a new `Plugin::enabled_by_default`
   (default false) so it starts on: existing accounts keep it without a migration of the
