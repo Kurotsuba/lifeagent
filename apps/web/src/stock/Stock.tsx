@@ -21,6 +21,7 @@ import { ConfirmDeleteButton } from "../components/ConfirmDeleteButton";
 import { Field, inputClass } from "../components/Field";
 import { strings } from "../i18n";
 import { ShoppingList } from "./ShoppingList";
+import { STOCK_CHANGED_EVENT } from "./StockUseToast";
 
 const t = strings.stock;
 const UNITS: StockUnit[] = ["g", "ml", "piece"];
@@ -58,8 +59,15 @@ export function Stock() {
 
   useEffect(() => {
     void refetch();
-    // A meal logged in chat takes stock out on the server; follow along.
-    return onAppDataEvent(() => void refetch());
+    // A meal logged in chat takes stock out on the server, and the notice's undo puts it
+    // back; follow along.
+    const onStockChanged = () => void refetch();
+    window.addEventListener(STOCK_CHANGED_EVENT, onStockChanged);
+    const unsubscribe = onAppDataEvent(() => void refetch());
+    return () => {
+      window.removeEventListener(STOCK_CHANGED_EVENT, onStockChanged);
+      unsubscribe();
+    };
   }, []);
 
   /** Runs an edit, then refetches; a failure is shown above the page. */

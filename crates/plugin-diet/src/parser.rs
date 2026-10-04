@@ -56,6 +56,10 @@ pub struct ParsedDish {
     pub servings: f64,
     #[serde(default)]
     pub grams: Option<f64>,
+    /// Bought ready to eat (restaurant, canteen, convenience store, takeout, delivery) rather
+    /// than made at home, so it never comes out of the user's home stock.
+    #[serde(default)]
+    pub eaten_out: bool,
     pub components: Vec<ParsedComponent>,
 }
 
@@ -188,6 +192,7 @@ pub fn validate_dishes(dishes: Vec<ParsedDish>) -> Result<Vec<ParsedDish>, Plugi
                 .filter(|s| !s.is_empty()),
             servings: dish.servings,
             grams: dish.grams,
+            eaten_out: dish.eaten_out,
             components,
         });
     }
@@ -232,6 +237,7 @@ mod tests {
             size: None,
             servings: 1.0,
             grams: None,
+            eaten_out: false,
             components: vec![ParsedComponent {
                 name: name.into(),
                 grams,

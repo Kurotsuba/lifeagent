@@ -35,6 +35,9 @@ struct MealItemPayload {
     kind: Option<String>,
     #[serde(default)]
     grams: Option<f64>,
+    /// Bought ready to eat or from a branded dish (the parser's call); absent on old events.
+    #[serde(default)]
+    eaten_out: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -67,7 +70,8 @@ Rules:
 Return JSON: {"uses": [{"stock": <index>, "amount": <number>}]}"#;
 
 /// Handles one `diet.meal_logged` event. Does nothing when auto-consume is off, stock is empty,
-/// the meal has only restaurant/menu dishes, or the event was already handled.
+/// the meal has only restaurant/menu dishes or food eaten out (a chain item split into its
+/// ingredients included), or the event was already handled.
 pub async fn on_meal_logged(
     ctx: &PluginContext,
     event: &Event,
@@ -80,7 +84,7 @@ pub async fn on_meal_logged(
     let foods: Vec<&MealItemPayload> = meal
         .items
         .iter()
-        .filter(|i| i.kind.as_deref() != Some("dish"))
+        .filter(|i| i.kind.as_deref() != Some("dish") && !i.eaten_out)
         .collect();
     if foods.is_empty() {
         return Ok(Vec::new());
@@ -225,7 +229,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn skips_the_model_when_off_empty_or_dishes_only() {
+    async fn skips_the_model_when_off_empty_dishes_only_or_eaten_out() {
         let env = env().await;
         // Empty stock.
         let event = meal_event(&env.ctx, "米饭", &[("熟米饭", 200.0)]).await;
@@ -239,6 +243,18 @@ mod tests {
         )
         .await;
         assert!(on_meal_logged(&env.ctx, &dish).await.unwrap().is_empty());
+
+        // A chain item with no menu record, split into ingredients the diet plugin marked as
+        // eaten out.
+        let split = crate::testutil::event_with_payload(
+            &env.ctx,
+            json!({"raw_text": "マクドナルドでビッグマック", "items": [
+                {"name": "牛肉(熟)", "kind": "food", "grams": 90, "eaten_out": true},
+                {"name": "バンズ", "kind": "food", "grams": 70, "eaten_out": true}
+            ]}),
+        )
+        .await;
+        assert!(on_meal_logged(&env.ctx, &split).await.unwrap().is_empty());
 
         // Switched off.
         settings::set(

@@ -392,6 +392,10 @@ pub async fn command(
             let a: Id = args(&body)?;
             reply(ops::delete_stock_item(app, &a.id).await)
         }
+        "undo_stock_use" => {
+            let a: Id = args(&body)?;
+            reply(ops::undo_stock_use(app, &a.id).await)
+        }
         "save_stock_settings" => {
             let a: StockSettingsArg = args(&body)?;
             reply(ops::save_stock_settings(app, &a.settings).await)

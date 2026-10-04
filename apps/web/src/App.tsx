@@ -13,6 +13,7 @@ import { Nutrition } from "./nutrition/Nutrition";
 import { Onboarding } from "./onboarding/Onboarding";
 import { Settings } from "./settings/Settings";
 import { Stock } from "./stock/Stock";
+import { StockUseToast } from "./stock/StockUseToast";
 import { Today } from "./today/Today";
 import { Training } from "./training/Training";
 
@@ -191,6 +192,7 @@ function MainShell({ username }: { username: string | null }) {
           <Settings onPluginsChanged={() => void refreshPlugins()} />
         ) : null}
       </main>
+      {enabledPlugins?.includes("stock") ? <StockUseToast /> : null}
       {showGuide ? <Guide username={username} onClose={() => setShowGuide(false)} /> : null}
     </div>
   );

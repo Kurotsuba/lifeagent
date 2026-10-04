@@ -480,6 +480,14 @@ pub async fn delete_stock_item(app: &CoreApp, id: &str) -> Result<(), CommandErr
     Ok(stock_store::delete(&app.plugin_context(), id).await?)
 }
 
+/// Puts back what one logged meal took out of stock, keeping the meal (the undo in the web
+/// app's "taken from stock" notice). A no-op if it was already put back. The meal is never
+/// matched against stock again, and deleting it later puts nothing back twice.
+pub async fn undo_stock_use(app: &CoreApp, event_id: &str) -> Result<(), CommandError> {
+    stock_store::restore(&app.plugin_context(), event_id).await?;
+    Ok(())
+}
+
 pub async fn save_stock_settings(
     app: &CoreApp,
     settings: &StockSettings,

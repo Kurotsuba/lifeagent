@@ -173,6 +173,7 @@ pub async fn finalize(
                 source: food.source_kind,
                 source_id: Some(food.source_id),
                 source_name: Some(food.source_name),
+                eaten_out: false,
             };
             meal_total += entry.macros;
             let mut item_json = entry.to_json();

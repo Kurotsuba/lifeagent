@@ -265,6 +265,12 @@ pub struct MealItem {
     pub source_id: Option<String>,
     #[serde(default)]
     pub source_name: Option<String>,
+    /// Comes from a dish bought ready to eat (restaurant, takeout, convenience store) or one
+    /// with a brand, including each component of such a dish when it had no per-serving
+    /// record. Other plugins (stock) read it from the `diet.meal_logged` payload to tell meals
+    /// eaten out from home cooking. `false` on events logged before this field existed.
+    #[serde(default)]
+    pub eaten_out: bool,
     /// For this portion.
     pub macros: Macros,
 }
@@ -464,6 +470,7 @@ mod tests {
             source: SourceKind::Manual,
             source_id: None,
             source_name: None,
+            eaten_out: false,
             macros: Macros::default(),
         };
         assert_eq!(item.label(), "熟米饭 150g");
@@ -482,6 +489,7 @@ mod tests {
             source: SourceKind::Dataset,
             source_id: None,
             source_name: None,
+            eaten_out: false,
             macros: dish_macros(),
         };
         assert_eq!(item.label(), "松屋 牛めし（並盛）×1");
@@ -500,6 +508,7 @@ mod tests {
             source: SourceKind::Dataset,
             source_id: None,
             source_name: None,
+            eaten_out: false,
             macros: dish_macros(),
         };
         assert_eq!(item.label(), "A定食（大）×1");

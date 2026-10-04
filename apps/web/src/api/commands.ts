@@ -245,6 +245,11 @@ export function deleteStockItem(id: string): Promise<void> {
   return call("delete_stock_item", { id });
 }
 
+/** Puts back what one logged meal took out of stock; the meal stays logged. */
+export function undoStockUse(eventId: string): Promise<void> {
+  return call("undo_stock_use", { id: eventId });
+}
+
 export function saveStockSettings(settings: StockSettings): Promise<void> {
   return call("save_stock_settings", { settings });
 }

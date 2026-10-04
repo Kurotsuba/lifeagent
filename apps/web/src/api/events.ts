@@ -20,6 +20,21 @@ export function onAppDataEvent(onEvent: () => void): () => void {
   return () => source.close();
 }
 
+/** Calls `onChange` with the `event_type` of every `data-changed` event (e.g.
+ * `"diet.meal_logged"`), for the few views that care which data changed. Returns an
+ * unsubscribe function. */
+export function onDataChanged(onChange: (eventType: string) => void): () => void {
+  const source = new EventSource("/api/events");
+  source.addEventListener("data-changed", (e) => {
+    try {
+      onChange((JSON.parse(e.data) as { event_type: string }).event_type);
+    } catch {
+      // A malformed payload is not worth surfacing; the next event carries on.
+    }
+  });
+  return () => source.close();
+}
+
 /** Calls `onChange` with the server's `plan-generating` flag whenever it changes, and with
  * `null` whenever the stream (re)opens, since changes made while it was closed were missed.
  * Returns an unsubscribe function. */

@@ -174,6 +174,14 @@ async fn log_meal(ctx: &PluginContext, args: Value) -> Result<ToolOutput, Plugin
     };
 
     let parsed = parse_meal(ctx, description, args.meal_type, eaten_at).await?;
+    // Per parsed dish, in the order `resolve_dishes` keeps. A branded dish counts as eaten out
+    // even if the parser missed it, so a chain item split into ingredients (no menu record)
+    // still never comes out of home stock.
+    let eaten_out: Vec<bool> = parsed
+        .dishes
+        .iter()
+        .map(|d| d.eaten_out || d.brand.is_some())
+        .collect();
     let outcomes = dish_resolver::resolve_dishes(ctx, parsed.dishes).await?;
 
     // Stage 4 (§5.5): every unmatched dish's components go through the food resolver in one
@@ -191,7 +199,7 @@ async fn log_meal(ctx: &PluginContext, args: Value) -> Result<ToolOutput, Plugin
 
     let chain = SourceChain::load(ctx).await?;
     let mut items = Vec::with_capacity(outcomes.len());
-    for outcome in outcomes {
+    for (outcome, eaten_out) in outcomes.into_iter().zip(eaten_out) {
         match outcome {
             DishOutcome::Matched(m) => {
                 chain.record_dish_use(&m.dish).await?;
@@ -209,6 +217,7 @@ async fn log_meal(ctx: &PluginContext, args: Value) -> Result<ToolOutput, Plugin
                     source: dish.source_kind,
                     source_id: Some(dish.source_id),
                     source_name: Some(dish.source_name),
+                    eaten_out,
                 });
             }
             DishOutcome::Unmatched(pd) => {
@@ -228,6 +237,7 @@ async fn log_meal(ctx: &PluginContext, args: Value) -> Result<ToolOutput, Plugin
                         source: food.source_kind,
                         source_id: Some(food.source_id),
                         source_name: Some(food.source_name),
+                        eaten_out,
                     });
                 }
             }

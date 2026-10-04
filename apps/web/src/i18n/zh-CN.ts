@@ -237,6 +237,11 @@ export const zhCN = {
     statusCancelled: "已取消",
     recentTitle: "最近的扣减",
     recentEmpty: "记录饮食后，用掉的库存会显示在这里。",
+    usedToast: "刚记录的饮食已从库存扣减：",
+    undo: "撤销",
+    undoing: "撤销中…",
+    undoHint: "放回库存，饮食记录保留",
+    dismiss: "关闭",
   },
   training: {
     title: "训练",

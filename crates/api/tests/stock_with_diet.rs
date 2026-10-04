@@ -161,3 +161,132 @@ async fn a_meal_logged_in_chat_uses_stock_and_deleting_it_puts_it_back() {
     );
     assert!(ops::get_stock(&app).await.unwrap().recent_uses.is_empty());
 }
+
+/// Like `route`, for a chain item with no menu record: the parser names the brand but misses
+/// `eaten_out`, and the stock matcher must never be asked.
+fn route_chain_item(req: &ChatRequest) -> Result<ChatResponse, LlmError> {
+    let text = format!("{:?}", req.messages);
+    assert!(
+        !text.contains("Home stock"),
+        "stock matcher was called: {text}"
+    );
+    if text.contains("Food: ") {
+        return Ok(json_response(
+            json!({"kcal": 250, "protein_g": 26, "carbs_g": 0, "fat_g": 15, "fiber_g": 0}),
+        ));
+    }
+    if !req.tools.is_empty() {
+        return Ok(if text.contains("Tool {") {
+            response(Some("記録しました。".into()), vec![])
+        } else {
+            response(
+                None,
+                vec![ToolCall {
+                    id: "call_1".into(),
+                    name: "diet_log_meal".into(),
+                    arguments: json!({"description": "マクドナルドでビッグマック"}),
+                    provider_extra: None,
+                }],
+            )
+        });
+    }
+    Ok(json_response(json!({
+        "meal_type": "lunch",
+        "dishes": [{
+            "name": "ビッグマック",
+            "brand": "マクドナルド",
+            "eaten_out": false,
+            "components": [
+                {"name": "牛肉(熟)", "grams": 90},
+                {"name": "バンズ", "grams": 70}
+            ]
+        }]
+    })))
+}
+
+#[tokio::test]
+async fn a_chain_item_split_into_ingredients_leaves_stock_alone() {
+    let mock = Arc::new(MockChatModel::new());
+    for _ in 0..6 {
+        mock.push_closure(route_chain_item);
+    }
+    let (app, _dir) = app(mock.clone()).await;
+    ops::add_stock_item(
+        &app,
+        &NewStockDto {
+            name: "牛肉".into(),
+            quantity: 500.0,
+            unit: Unit::G,
+            expires_on: None,
+        },
+    )
+    .await
+    .unwrap();
+    let mut rx = app.subscribe();
+
+    app.send_message("マクドナルドでビッグマック")
+        .await
+        .unwrap();
+    next_meal_change(&mut rx).await;
+
+    let meal = app
+        .events()
+        .latest("diet.meal_logged")
+        .await
+        .unwrap()
+        .unwrap();
+    let items = meal.payload["items"].as_array().unwrap();
+    assert_eq!(items.len(), 2);
+    assert!(items.iter().all(|i| i["eaten_out"] == true), "{items:?}");
+    assert_eq!(left(&app).await, vec![("牛肉".to_string(), 500.0)]);
+    assert!(ops::get_stock(&app).await.unwrap().recent_uses.is_empty());
+}
+
+#[tokio::test]
+async fn undo_puts_stock_back_and_keeps_the_meal() {
+    let mock = Arc::new(MockChatModel::new());
+    for _ in 0..6 {
+        mock.push_closure(route);
+    }
+    let (app, _dir) = app(mock.clone()).await;
+    for (name, quantity, unit) in [("米", 2000.0, Unit::G), ("鸡蛋", 6.0, Unit::Piece)] {
+        ops::add_stock_item(
+            &app,
+            &NewStockDto {
+                name: name.into(),
+                quantity,
+                unit,
+                expires_on: None,
+            },
+        )
+        .await
+        .unwrap();
+    }
+    let mut rx = app.subscribe();
+    app.send_message("午饭在家做了米饭和两个煎蛋")
+        .await
+        .unwrap();
+    next_meal_change(&mut rx).await;
+    let entry_id = ops::get_stock(&app).await.unwrap().recent_uses[0]
+        .event_id
+        .clone();
+
+    ops::undo_stock_use(&app, &entry_id).await.unwrap();
+    // Undoing twice is harmless.
+    ops::undo_stock_use(&app, &entry_id).await.unwrap();
+
+    let restored = vec![("米".to_string(), 2000.0), ("鸡蛋".to_string(), 6.0)];
+    assert_eq!(left(&app).await, restored);
+    assert!(ops::get_stock(&app).await.unwrap().recent_uses.is_empty());
+    assert!(app
+        .events()
+        .latest("diet.meal_logged")
+        .await
+        .unwrap()
+        .is_some());
+
+    // Deleting the meal afterwards puts nothing back a second time.
+    ops::delete_entry(&app, &entry_id).await.unwrap();
+    next_meal_change(&mut rx).await;
+    assert_eq!(left(&app).await, restored);
+}

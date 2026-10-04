@@ -11,7 +11,8 @@ brand/size — the breakdown is the fallback when the brand/size doesn't match a
 
 Return JSON: {"meal_type": "breakfast|lunch|dinner|snack|null", "dishes": [
   {"name": string, "brand": string|null, "size": string|null, "servings": number,
-   "grams": number|null, "components": [{"name": string, "grams": number, "alt_names": [string]}]}
+   "grams": number|null, "eaten_out": boolean,
+   "components": [{"name": string, "grams": number, "alt_names": [string]}]}
 ]}
 
 Rules:
@@ -22,6 +23,9 @@ Rules:
 - `size`: the size or variant as the user said it (並盛, 大盛, M, 2ピース), else null.
 - A brandless item that is one of KNOWN_DISHES: copy that name exactly (it already includes any
   size, e.g. "A定食（大）") and set size to null.
+- `eaten_out`: true if the item was bought ready to eat (restaurant, fast food, canteen,
+  convenience store, takeout, delivery) or the user ate it out; false if made at home or not
+  said. Always true when `brand` is a restaurant chain.
 - `servings`: the count of that item (default 1). `grams`: only if the user states the weight of
   the whole item.
 - `components`: what the item consists of, with grams for everything eaten (servings already

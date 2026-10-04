@@ -299,6 +299,7 @@ mod tests {
             size: size.map(String::from),
             servings,
             grams,
+            eaten_out: false,
             components: vec![ParsedComponent {
                 name: "米饭".into(),
                 grams: 200.0,

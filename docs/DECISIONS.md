@@ -2697,3 +2697,24 @@ The owner cooks a shared meal once, so planned items of a shared meal now carry 
 the owner's `grams`, with a short note that kcal is still the owner's own. `grams`, kcal, macros
 and totals are unchanged (the owner's portion), so targets, validation, plan-vs-actual and
 logging a planned meal are unaffected. Meals without guests get no `table_grams`.
+
+## 2026-10-04 — Meals eaten out never come out of stock; undo notice
+
+Manual test: "マクドナルドでビッグマック" with no McDonald's source split the burger into
+ingredients (`kind: "food"`), and the stock matcher took the user's own beef. The only guard was
+the matcher prompt's "ate out → no uses", which the model missed.
+
+- **`eaten_out` per meal item, decided in the diet plugin.** The meal parser returns
+  `eaten_out` per dish (bought ready to eat: restaurant, canteen, convenience store, takeout,
+  delivery); Rust also sets it for any dish with a `brand`, so a chain item counts even when the
+  parser misses the flag. Every `MealItem` from that dish carries it, including the
+  ingredients of an unmatched chain item. Old events default to `false`. Per item rather than
+  per meal, so "convenience-store onigiri plus eggs from home" still takes the eggs.
+- **Stock skips `eaten_out` items in Rust**, like dish items, before any model call; a meal
+  with nothing else left makes no matcher call. The prompt rule stays as a second line.
+- **Undo notice (web).** After a `data-changed` for `diet.meal_logged`, the shell reads
+  `get_stock` and, for a meal whose uses weren't there before, shows what it took with an undo
+  (`undo_stock_use`, which is `store::restore`): stock goes back, the meal stays logged, and
+  since its uses are kept (marked restored) the meal is never matched again and a later delete
+  puts nothing back twice. Uses already present when the page opened are never announced. The
+  notice closes after 15 s (not while hovered); the Stock tab's recent list remains the record.

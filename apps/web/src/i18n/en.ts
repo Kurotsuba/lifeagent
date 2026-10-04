@@ -231,6 +231,11 @@ export const en: Strings = {
     statusCancelled: "Cancelled",
     recentTitle: "Recently used",
     recentEmpty: "Stock used by logged meals shows up here.",
+    usedToast: "The meal you just logged took this from stock:",
+    undo: "Undo",
+    undoing: "Undoing…",
+    undoHint: "Put it back in stock; the meal stays logged",
+    dismiss: "Close",
   },
   training: {
     title: "Training",

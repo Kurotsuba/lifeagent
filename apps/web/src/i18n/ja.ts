@@ -231,6 +231,11 @@ export const ja: Strings = {
     statusCancelled: "キャンセル済み",
     recentTitle: "最近使った分",
     recentEmpty: "食事を記録すると、使った在庫がここに表示されます。",
+    usedToast: "記録した食事の分を在庫から差し引きました：",
+    undo: "元に戻す",
+    undoing: "元に戻しています…",
+    undoHint: "在庫に戻します（食事の記録はそのまま残ります）",
+    dismiss: "閉じる",
   },
   training: {
     title: "トレーニング",
