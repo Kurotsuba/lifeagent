@@ -187,6 +187,28 @@ pub trait Plugin: Send + Sync {
         &[]
     }
 
+    /// Whether this plugin's plan section is built from stored data, without the planner LLM
+    /// (`docs/MULTIMEMBER_SPEC.md` §3.1). Such a plugin implements
+    /// [`Plugin::computed_plan_section`] instead of `plan_input`/`finalize_plan_section`. Its
+    /// section is handed to later stages in the [`PlanDraft`] and stored with the plan, but never
+    /// shown to the planner LLM (not in "already planned", not in a revision's previous plan):
+    /// a plugin that reads it puts what the model needs into its own brief.
+    fn computes_plan_section(&self) -> bool {
+        false
+    }
+
+    /// The section for `date`, for a plugin whose [`Plugin::computes_plan_section`] is true.
+    /// `None`: no section that day. Called in the plugin's planning stage before any LLM call.
+    /// There is nothing to retry, so any `violations` are kept as warnings.
+    async fn computed_plan_section(
+        &self,
+        _ctx: &PluginContext,
+        _date: NaiveDate,
+        _prior: &PlanDraft,
+    ) -> Result<Option<PlanSection>, PluginError> {
+        Ok(None)
+    }
+
     async fn plan_input(
         &self,
         _ctx: &PluginContext,

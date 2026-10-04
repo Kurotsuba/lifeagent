@@ -1,7 +1,7 @@
 //! Plan types, storage (`PlanStore`) and the plan service (`PlanService`: generate, retry,
 //! revise), per `docs/PHASE1_SPEC.md` §7.12 and the planner prompt in §9.4.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 
 use chrono::{DateTime, NaiveDate, Utc};
@@ -356,9 +356,38 @@ impl PlanService {
         let mut draft = PlanDraft::new();
         let mut sections: Vec<(String, PlanSection)> = Vec::new();
         let mut summary = None;
+        // Computed sections are for plugins only; the planner LLM never sees them.
+        let hidden: HashSet<&str> = self
+            .plugins
+            .iter()
+            .filter(|p| p.computes_plan_section())
+            .map(|p| p.manifest().id)
+            .collect();
         for stage in plan_stages(&plugins) {
+            let (computed, planned): (Vec<_>, Vec<_>) =
+                stage.into_iter().partition(|p| p.computes_plan_section());
+            for plugin in computed {
+                let id = plugin.manifest().id;
+                let section = plugin
+                    .computed_plan_section(ctx, date, &draft)
+                    .await
+                    .map_err(|e| CoreError::Plugin(format!("{id}: {e}")))?;
+                if let Some(section) = section {
+                    let mut warnings = section.warnings;
+                    warnings.extend(section.violations);
+                    draft.insert(id.to_string(), section.data.clone());
+                    sections.push((
+                        id.to_string(),
+                        PlanSection {
+                            data: section.data,
+                            warnings,
+                            violations: Vec::new(),
+                        },
+                    ));
+                }
+            }
             let mut inputs: Vec<(Arc<dyn Plugin>, PlanInput)> = Vec::new();
-            for plugin in stage {
+            for plugin in planned {
                 let input = plugin
                     .plan_input(ctx, date, &draft)
                     .await
@@ -371,7 +400,7 @@ impl PlanService {
                 continue;
             }
             let (output, stage_sections) =
-                plan_stage(ctx, date, &inputs, &draft, revision, request).await?;
+                plan_stage(ctx, date, &inputs, &draft, &hidden, revision, request).await?;
             for (id, section) in &stage_sections {
                 draft.insert(id.clone(), section.data.clone());
             }
@@ -463,10 +492,11 @@ async fn plan_stage(
     date: NaiveDate,
     inputs: &[(Arc<dyn Plugin>, PlanInput)],
     draft: &PlanDraft,
+    hidden: &HashSet<&str>,
     revision: Option<(&StoredPlan, &str)>,
     request: Option<&str>,
 ) -> Result<(PlannerOutput, Vec<(String, PlanSection)>), CoreError> {
-    let prompt = planner_prompt(ctx, date, inputs, draft, revision, request).await?;
+    let prompt = planner_prompt(ctx, date, inputs, draft, hidden, revision, request).await?;
     let mut messages = vec![Message::User { content: prompt }];
     let mut output: PlannerOutput =
         complete_json(&ctx.llm, Role::Planner, messages.clone()).await?;
@@ -491,6 +521,7 @@ async fn planner_prompt(
     date: NaiveDate,
     inputs: &[(Arc<dyn Plugin>, PlanInput)],
     draft: &PlanDraft,
+    hidden: &HashSet<&str>,
     revision: Option<(&StoredPlan, &str)>,
     request: Option<&str>,
 ) -> Result<String, CoreError> {
@@ -521,10 +552,15 @@ async fn planner_prompt(
         .replace("{weekday}", &date.format("%A").to_string())
         .replace("{profile_summary}", &profile_summary)
         .replace("{preferences}", &preferences)];
-    if !draft.is_empty() {
+    let visible: PlanDraft = draft
+        .iter()
+        .filter(|(id, _)| !hidden.contains(id.as_str()))
+        .map(|(id, data)| (id.clone(), data.clone()))
+        .collect();
+    if !visible.is_empty() {
         parts.push(format!(
             "{PLANNER_ALREADY_PLANNED}\n{}",
-            serde_json::to_string(draft)?
+            serde_json::to_string(&visible)?
         ));
     }
     for (_, input) in inputs {
@@ -537,12 +573,16 @@ async fn planner_prompt(
         );
     }
     if let Some((previous, instruction)) = revision {
+        let mut previous_content = previous.content.clone();
+        previous_content
+            .sections
+            .retain(|id, _| !hidden.contains(id.as_str()));
         parts.push(
             PLANNER_REVISION
                 .replace("{version}", &previous.version.to_string())
                 .replace(
                     "{previous_content_json}",
-                    &serde_json::to_string(&previous.content)?,
+                    &serde_json::to_string(&previous_content)?,
                 )
                 .replace("{instruction}", instruction),
         );
@@ -827,6 +867,141 @@ mod tests {
         assert!(second.contains("## Already planned"));
         assert!(second.contains(r#"{"training":{"prior":{},"raw":{"kind":"run"}}}"#));
         assert!(!second.contains("## Section \"training\""));
+    }
+
+    /// A computed section `id` with `data` (none when `data` is null), one warning and one
+    /// violation, which core must keep as a warning.
+    struct ComputedPlugin {
+        id: &'static str,
+        data: Value,
+    }
+
+    #[async_trait::async_trait]
+    impl Plugin for ComputedPlugin {
+        fn manifest(&self) -> crate::plugin::PluginManifest {
+            crate::plugin::PluginManifest {
+                id: self.id,
+                name: self.id,
+                version: "0.1.0",
+                event_types: vec![],
+                migrations: vec![],
+            }
+        }
+        fn tools(&self) -> Vec<lifeagent_llm::types::ToolSpec> {
+            vec![]
+        }
+        async fn call_tool(
+            &self,
+            _ctx: &PluginContext,
+            _name: &str,
+            _args: Value,
+        ) -> Result<crate::plugin::ToolOutput, crate::plugin::PluginError> {
+            unreachable!()
+        }
+        fn computes_plan_section(&self) -> bool {
+            true
+        }
+        async fn computed_plan_section(
+            &self,
+            _ctx: &PluginContext,
+            _date: NaiveDate,
+            _prior: &PlanDraft,
+        ) -> Result<Option<PlanSection>, crate::plugin::PluginError> {
+            Ok((!self.data.is_null()).then(|| PlanSection {
+                data: self.data.clone(),
+                warnings: vec!["computed warning".into()],
+                violations: vec!["computed violation".into()],
+            }))
+        }
+    }
+
+    fn computed(id: &'static str, data: Value) -> Arc<dyn Plugin> {
+        Arc::new(ComputedPlugin { id, data })
+    }
+
+    #[tokio::test]
+    async fn a_computed_section_reaches_later_stages_but_never_the_planner() {
+        let (ctx, mock, _dir) = crate::test_support::context().await;
+        mock.push_response(planner_reply(
+            "whole plan",
+            serde_json::json!({"diet": {"meals": []}}),
+        ));
+
+        let plan = PlanService::new(vec![
+            staged("diet", &["household"], false),
+            computed("household", serde_json::json!({"secret_weight": 52})),
+        ])
+        .generate(&ctx, DAY, PlanTrigger::Manual, None)
+        .await
+        .unwrap();
+
+        // One LLM call: the computed stage needs none.
+        let requests = mock.received_requests();
+        assert_eq!(requests.len(), 1);
+        let prompt = last_user_message(&requests[0]);
+        assert!(prompt.contains("diet sees [\"household\"]"));
+        assert!(!prompt.contains("secret_weight"), "{prompt}");
+        assert!(!prompt.contains("## Already planned"));
+
+        assert_eq!(
+            plan.content.sections["household"],
+            serde_json::json!({"secret_weight": 52})
+        );
+        assert_eq!(
+            plan.content.sections["diet"]["prior"]["household"]["secret_weight"],
+            52
+        );
+        assert_eq!(
+            plan.warnings,
+            vec!["computed warning", "computed violation"]
+        );
+
+        // A revision's previous plan leaves the computed section out too.
+        mock.push_response(planner_reply(
+            "revised",
+            serde_json::json!({"diet": {"meals": []}}),
+        ));
+        PlanService::new(vec![
+            staged("diet", &["household"], false),
+            computed("household", serde_json::json!({"secret_weight": 52})),
+        ])
+        .revise(&ctx, DAY, "lighter")
+        .await
+        .unwrap();
+        let prompt = last_user_message(mock.received_requests().last().unwrap());
+        assert!(prompt.contains("lighter"));
+        // The test diet section echoes its draft, so the data shows up inside it; the stored
+        // "household" section itself (which would follow "diet") must be gone.
+        assert!(prompt.contains(r#""sections":{"diet":"#), "{prompt}");
+        assert!(!prompt.contains(r#"},"household":"#), "{prompt}");
+    }
+
+    #[tokio::test]
+    async fn computed_sections_alone_are_nothing_to_plan() {
+        let (ctx, mock, _dir) = crate::test_support::context().await;
+        let result = PlanService::new(vec![computed("household", serde_json::json!({"x": 1}))])
+            .generate(&ctx, DAY, PlanTrigger::Manual, None)
+            .await;
+        assert!(matches!(result, Err(CoreError::NothingToPlan)));
+        assert!(mock.received_requests().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_computed_plugin_with_no_section_that_day_is_left_out() {
+        let (ctx, mock, _dir) = crate::test_support::context().await;
+        mock.push_response(planner_reply(
+            "s",
+            serde_json::json!({"diet": {"meals": []}}),
+        ));
+        let plan = PlanService::new(vec![
+            staged("diet", &["household"], false),
+            computed("household", Value::Null),
+        ])
+        .generate(&ctx, DAY, PlanTrigger::Manual, None)
+        .await
+        .unwrap();
+        assert!(!plan.content.sections.contains_key("household"));
+        assert_eq!(plan.warnings, Vec::<String>::new());
     }
 
     #[tokio::test]
