@@ -6,10 +6,13 @@
 //! portion for each guest. Like every plugin, it depends only on `lifeagent-core` and
 //! `lifeagent-llm`; diet knows it only through that section's JSON.
 
+pub mod context;
 pub mod model;
 pub mod store;
+pub mod tools;
 
 use async_trait::async_trait;
+use chrono::NaiveDate;
 use lifeagent_core::plugin::{Plugin, PluginContext, PluginError, PluginManifest, ToolOutput};
 use lifeagent_llm::types::ToolSpec;
 use serde_json::Value;
@@ -36,16 +39,32 @@ impl Plugin for MultimemberPlugin {
     }
 
     fn tools(&self) -> Vec<ToolSpec> {
-        Vec::new()
+        tools::specs()
     }
 
     async fn call_tool(
         &self,
-        _ctx: &PluginContext,
+        ctx: &PluginContext,
         name: &str,
-        _args: Value,
+        args: Value,
     ) -> Result<ToolOutput, PluginError> {
-        Err(PluginError::NotFound(format!("unknown tool {name:?}")))
+        tools::call(ctx, name, args).await
+    }
+
+    async fn context_snippet(
+        &self,
+        ctx: &PluginContext,
+        date: NaiveDate,
+    ) -> Result<Option<String>, PluginError> {
+        Ok(Some(context::context_snippet(ctx, date).await?))
+    }
+
+    async fn today_card(
+        &self,
+        ctx: &PluginContext,
+        date: NaiveDate,
+    ) -> Result<Option<Value>, PluginError> {
+        Ok(Some(context::today_card(ctx, date).await?))
     }
 }
 
