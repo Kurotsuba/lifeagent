@@ -16,7 +16,7 @@ use crate::profile::Profile;
 use crate::time::age_years;
 
 const SYSTEM_PROMPT_TEMPLATE: &str = "\
-You are LifeAgent, a personal assistant running on the user's computer. You help the user
+You are HumanHealthHandler (HHH), a personal assistant running on the user's computer. You help the user
 track daily life and follow plans that move them toward their goals.
 
 Rules:
@@ -378,7 +378,7 @@ mod tests {
         let (ctx, _mock, _dir) = crate::test_support::context().await;
         let prompt = build_system_prompt(&ctx, &[]).await.unwrap();
 
-        assert!(prompt.contains("You are LifeAgent"));
+        assert!(prompt.contains("You are HumanHealthHandler"));
         assert!(prompt.contains("Profile not set yet."));
         assert!(prompt.contains("No active goals."));
         assert!(prompt.contains("(no data yet)"));

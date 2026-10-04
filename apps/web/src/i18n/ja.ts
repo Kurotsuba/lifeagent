@@ -3,7 +3,7 @@ import type { Strings } from "./index";
 /** Japanese UI strings (the default locale). Same keys as `./zh-CN.ts`. */
 export const ja: Strings = {
   app: {
-    name: "LifeAgent",
+    name: "HumanHealthHandler",
   },
   common: {
     next: "次へ",
@@ -57,8 +57,8 @@ export const ja: Strings = {
     stepCounter: (n: number, total: number) => `${n} / ${total}`,
     steps: [
       {
-        title: "LifeAgent へようこそ",
-        body: "LifeAgent は食事とトレーニングを記録し、あなたの目標に合わせて毎日翌日のプランを作ります。各画面を簡単にご紹介します。",
+        title: "HumanHealthHandler へようこそ",
+        body: "HHH は食事とトレーニングを記録し、あなたの目標に合わせて毎日翌日のプランを作ります。各画面を簡単にご紹介します。",
       },
       {
         title: "今日：今日をひと目で",

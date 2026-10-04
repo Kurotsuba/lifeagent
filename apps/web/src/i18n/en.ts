@@ -3,7 +3,7 @@ import type { Strings } from "./index";
 /** English UI strings. Same keys as `./zh-CN.ts`. */
 export const en: Strings = {
   app: {
-    name: "LifeAgent",
+    name: "HumanHealthHandler",
   },
   common: {
     next: "Next",
@@ -57,8 +57,8 @@ export const en: Strings = {
     stepCounter: (n: number, total: number) => `${n} / ${total}`,
     steps: [
       {
-        title: "Welcome to LifeAgent",
-        body: "LifeAgent logs what you eat and how you train, and every day makes a plan for the next one from your goals. Here's a quick look at each tab.",
+        title: "Welcome to HumanHealthHandler",
+        body: "HHH logs what you eat and how you train, and every day makes a plan for the next one from your goals. Here's a quick look at each tab.",
       },
       {
         title: "Today: your day at a glance",

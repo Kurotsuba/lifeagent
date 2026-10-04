@@ -8,7 +8,7 @@
  */
 export const zhCN = {
   app: {
-    name: "LifeAgent",
+    name: "HumanHealthHandler",
   },
   common: {
     next: "下一步",
@@ -63,8 +63,8 @@ export const zhCN = {
     stepCounter: (n: number, total: number) => `${n} / ${total}`,
     steps: [
       {
-        title: "欢迎使用 LifeAgent",
-        body: "LifeAgent 帮你记录饮食和训练，并根据你的目标每天制定第二天的计划。花几秒钟了解一下各个页面吧。",
+        title: "欢迎使用 HumanHealthHandler",
+        body: "HHH 帮你记录饮食和训练，并根据你的目标每天制定第二天的计划。花几秒钟了解一下各个页面吧。",
       },
       {
         title: "今日：一眼看清今天",

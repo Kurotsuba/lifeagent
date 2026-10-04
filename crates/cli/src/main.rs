@@ -33,7 +33,7 @@ use output::{print_json, print_turn};
 /// `foods list`'s default `--limit` when none is given.
 const DEFAULT_FOODS_LIMIT: u32 = 50;
 
-/// LifeAgent developer CLI.
+/// HumanHealthHandler developer CLI.
 #[derive(Parser)]
 #[command(name = "lifeagent-cli", version, about)]
 struct Cli {
@@ -279,7 +279,7 @@ async fn main() -> Result<()> {
 }
 
 async fn chat(app: &CoreApp, mock: bool, mock_model: &MockChatModel) -> Result<()> {
-    println!("LifeAgent chat. Type a message (Ctrl+D or \"exit\" to quit).\n");
+    println!("HumanHealthHandler chat. Type a message (Ctrl+D or \"exit\" to quit).\n");
     let stdin = io::stdin();
     loop {
         print!("> ");
