@@ -576,6 +576,12 @@ export type ErrorDetail =
   | { kind: "instruction_empty" }
   | { kind: "preference_dates_reversed"; valid_from: string; valid_until: string }
   | { kind: "food_data"; detail: ImportMessage }
+  | { kind: "member_name_invalid" }
+  | { kind: "member_name_taken" }
+  | { kind: "member_age_out_of_range"; got: number }
+  | { kind: "member_allergies_invalid" }
+  | { kind: "too_many_members"; max: number }
+  | { kind: "attendance_invalid" }
   | { kind: "unauthorized" }
   | { kind: "invalid_username" }
   | { kind: "invalid_password" }

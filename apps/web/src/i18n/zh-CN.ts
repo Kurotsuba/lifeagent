@@ -449,6 +449,13 @@ export const zhCN = {
     instruction_empty: "调整要求不能为空，请描述需要怎么调整。",
     preference_dates_reversed: (d: { valid_from: string; valid_until: string }) =>
       `开始日期（${d.valid_from}）不能晚于结束日期（${d.valid_until}）。`,
+    member_name_invalid: "名字需为 1–40 个字符。",
+    member_name_taken: "已有同名的成员。",
+    member_age_out_of_range: (d: { got: number }) =>
+      `成员年龄需在 16–70 岁之间，当前的出生日期对应 ${d.got} 岁。`,
+    member_allergies_invalid: "过敏最多 20 项，每项 1–40 个字符。",
+    too_many_members: (d: { max: number }) => `除本人外最多 ${d.max} 名成员。`,
+    attendance_invalid: "用餐安排有误：日期不能早于今天，备注最多 100 字。",
     unauthorized: "请先登录。",
     invalid_username: "用户名需为 3–32 位英文字母、数字或 _ - . 组成。",
     invalid_password: "密码需为 8–128 位。",

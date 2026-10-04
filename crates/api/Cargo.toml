@@ -10,6 +10,7 @@ lifeagent-llm = { workspace = true }
 lifeagent-plugin-diet = { workspace = true }
 lifeagent-plugin-stock = { workspace = true }
 lifeagent-plugin-training = { workspace = true }
+lifeagent-plugin-multimember = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 chrono = { workspace = true }

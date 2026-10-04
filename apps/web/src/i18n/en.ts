@@ -445,6 +445,13 @@ export const en: Strings = {
     instruction_empty: "Describe how the plan should be adjusted.",
     preference_dates_reversed: (d: { valid_from: string; valid_until: string }) =>
       `The start date (${d.valid_from}) can't be after the end date (${d.valid_until}).`,
+    member_name_invalid: "Name must be 1–40 characters.",
+    member_name_taken: "Another member already has this name.",
+    member_age_out_of_range: (d: { got: number }) =>
+      `Members must be aged 16–70; this birth date gives ${d.got}.`,
+    member_allergies_invalid: "Up to 20 allergies, each 1–40 characters.",
+    too_many_members: (d: { max: number }) => `Up to ${d.max} members besides you.`,
+    attendance_invalid: "Invalid attendance: the date can't be in the past, and notes are up to 100 characters.",
     unauthorized: "Please log in.",
     invalid_username: "Usernames are 3–32 letters, digits or _ - .",
     invalid_password: "Passwords are 8–128 characters.",

@@ -1,0 +1,21 @@
+[package]
+name = "lifeagent-plugin-multimember"
+version = "0.1.0"
+edition = "2021"
+description = "Multimember plugin: household members, meal attendance, shared-meal plan section."
+
+[dependencies]
+lifeagent-core = { workspace = true }
+lifeagent-llm = { workspace = true }
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sqlx = { workspace = true }
+chrono = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+lifeagent-core = { workspace = true, features = ["test-support"] }
+tokio = { workspace = true }

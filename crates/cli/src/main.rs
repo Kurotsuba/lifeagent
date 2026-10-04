@@ -1,8 +1,8 @@
 //! `lifeagent-cli`: developer harness (chat, plan, inspect data).
 //!
 //! The command tree matches `docs/PHASE1_SPEC.md` §11. This crate is a composition root
-//! (`CLAUDE.md`): it registers the diet and training plugins and builds `CoreApp`, since `lifeagent-core`
-//! never depends on a plugin crate itself.
+//! (`CLAUDE.md`): it registers the diet, stock, training and multimember plugins and builds
+//! `CoreApp`, since `lifeagent-core` never depends on a plugin crate itself.
 
 mod mock;
 mod output;
@@ -24,6 +24,7 @@ use lifeagent_llm::router::ModelsConfig;
 use lifeagent_plugin_diet::import::{self, ImportFormat, ImportTarget};
 use lifeagent_plugin_diet::sources;
 use lifeagent_plugin_diet::{intake, DietPlugin};
+use lifeagent_plugin_multimember::MultimemberPlugin;
 use lifeagent_plugin_stock::StockPlugin;
 use lifeagent_plugin_training::TrainingPlugin;
 
@@ -247,7 +248,8 @@ async fn main() -> Result<()> {
     let mut builder = CoreAppBuilder::new(db)
         .plugin(Arc::new(DietPlugin))
         .plugin(Arc::new(StockPlugin))
-        .plugin(Arc::new(TrainingPlugin));
+        .plugin(Arc::new(TrainingPlugin))
+        .plugin(Arc::new(MultimemberPlugin));
     if cli.mock {
         builder = builder.chat_model_override(mock.clone());
     }

@@ -444,6 +444,13 @@ export const ja: Strings = {
     instruction_empty: "調整内容を入力してください。どのように調整するかを書いてください。",
     preference_dates_reversed: (d: { valid_from: string; valid_until: string }) =>
       `開始日（${d.valid_from}）は終了日（${d.valid_until}）より後にできません。`,
+    member_name_invalid: "名前は1〜40文字で入力してください。",
+    member_name_taken: "同じ名前のメンバーがすでにいます。",
+    member_age_out_of_range: (d: { got: number }) =>
+      `メンバーの年齢は16〜70歳です。この生年月日では${d.got}歳になります。`,
+    member_allergies_invalid: "アレルギーは20件まで、各1〜40文字です。",
+    too_many_members: (d: { max: number }) => `メンバーはご本人以外に${d.max}人までです。`,
+    attendance_invalid: "食事の予定が正しくありません。過去の日付は指定できず、メモは100文字までです。",
     unauthorized: "ログインしてください。",
     invalid_username: "ユーザー名は半角英数字と _ - . で 3〜32 文字にしてください。",
     invalid_password: "パスワードは 8〜128 文字にしてください。",

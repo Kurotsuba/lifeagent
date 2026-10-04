@@ -28,6 +28,7 @@ use lifeagent_core::db::validate_identifier;
 use lifeagent_core::plugin::Plugin;
 use lifeagent_llm::types::ChatModel;
 use lifeagent_plugin_diet::DietPlugin;
+use lifeagent_plugin_multimember::MultimemberPlugin;
 use lifeagent_plugin_stock::StockPlugin;
 use lifeagent_plugin_training::TrainingPlugin;
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
@@ -95,6 +96,7 @@ impl AppState {
             Arc::new(DietPlugin),
             Arc::new(StockPlugin),
             Arc::new(TrainingPlugin),
+            Arc::new(MultimemberPlugin),
         ];
         let tenants = Tenants::new(AppFactory {
             database_url: config.database_url.clone(),

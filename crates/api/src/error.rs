@@ -17,6 +17,7 @@ use lifeagent_core::plugin::PluginError;
 use lifeagent_core::time::format_hhmm;
 use lifeagent_llm::error::LlmError;
 use lifeagent_plugin_diet::import::{FoodDataError, ImportMessage};
+use lifeagent_plugin_multimember::model::{MemberError, MemberRule};
 use serde::Serialize;
 
 #[derive(Debug, Clone, Serialize)]
@@ -90,6 +91,17 @@ pub enum ErrorDetail {
     FoodData {
         detail: ImportMessage,
     },
+    // ---- Multimember plugin (`MemberError`); height, weight and dislikes reuse the above ----
+    MemberNameInvalid,
+    MemberNameTaken,
+    MemberAgeOutOfRange {
+        got: i32,
+    },
+    MemberAllergiesInvalid,
+    TooManyMembers {
+        max: usize,
+    },
+    AttendanceInvalid,
     // ---- Web server (`crates/server`): accounts and routing ----
     Unauthorized,
     InvalidUsername,
@@ -154,6 +166,17 @@ impl std::fmt::Display for ErrorDetail {
                 "开始日期（{valid_from}）不能晚于结束日期（{valid_until}）。"
             ),
             FoodData { detail } => write!(f, "{detail}"),
+            MemberNameInvalid => write!(f, "名字需为 1–40 个字符。"),
+            MemberNameTaken => write!(f, "已有同名的成员。"),
+            MemberAgeOutOfRange { got } => {
+                write!(
+                    f,
+                    "成员年龄需在 16–70 岁之间，当前的出生日期对应 {got} 岁。"
+                )
+            }
+            MemberAllergiesInvalid => write!(f, "过敏最多 20 项，每项 1–40 个字符。"),
+            TooManyMembers { max } => write!(f, "除本人外最多 {max} 名成员。"),
+            AttendanceInvalid => write!(f, "用餐安排有误：日期不能早于今天，备注最多 100 字。"),
             Unauthorized => write!(f, "请先登录。"),
             InvalidUsername => write!(f, "用户名需为 3–32 位英文字母、数字或 _ - . 组成。"),
             InvalidPassword => write!(f, "密码需为 8–128 位。"),
@@ -252,6 +275,44 @@ impl From<PluginError> for CommandError {
 /// Batch-import commands (`docs/NUTRITION_SOURCES.md` §6, §8.2). Unlike `PluginError` above,
 /// `FoodDataError::Invalid`/`NotFound` carry an `ImportMessage` built for the user (§6.2), so it
 /// is passed through rather than replaced with a generic detail.
+impl From<MemberError> for CommandError {
+    fn from(err: MemberError) -> Self {
+        match err {
+            MemberError::Invalid(rule) => {
+                tracing::debug!(error = %rule, "member validation error");
+                CommandError::new("invalid_input", member_rule_detail(rule))
+            }
+            MemberError::NotFound(msg) => {
+                tracing::debug!(error = %msg, "command not-found error");
+                CommandError::new("not_found", ErrorDetail::NotFound)
+            }
+            MemberError::Plugin(e) => e.into(),
+        }
+    }
+}
+
+fn member_rule_detail(rule: MemberRule) -> ErrorDetail {
+    match rule {
+        MemberRule::NameInvalid => ErrorDetail::MemberNameInvalid,
+        MemberRule::NameTaken => ErrorDetail::MemberNameTaken,
+        MemberRule::AgeOutOfRange { got } => ErrorDetail::MemberAgeOutOfRange { got },
+        MemberRule::HeightOutOfRange { got } => ErrorDetail::HeightOutOfRange { got },
+        MemberRule::WeightOutOfRange { got } => ErrorDetail::WeightOutOfRange { got },
+        MemberRule::AllergiesInvalid => ErrorDetail::MemberAllergiesInvalid,
+        MemberRule::TooManyMembers { max } => ErrorDetail::TooManyMembers { max },
+        MemberRule::DislikeEmpty => ErrorDetail::NoteEmpty,
+        MemberRule::DislikeTooLong { got, max } => ErrorDetail::NoteTooLong { got, max },
+        MemberRule::DatesReversed {
+            valid_from,
+            valid_until,
+        } => ErrorDetail::PreferenceDatesReversed {
+            valid_from: valid_from.to_string(),
+            valid_until: valid_until.to_string(),
+        },
+        MemberRule::AttendanceInvalid => ErrorDetail::AttendanceInvalid,
+    }
+}
+
 impl From<FoodDataError> for CommandError {
     fn from(err: FoodDataError) -> Self {
         match err {
@@ -396,6 +457,18 @@ mod tests {
         let json = serde_json::to_value(&err).unwrap();
         assert_eq!(json["detail"]["kind"], "food_data");
         assert_eq!(json["detail"]["detail"]["kind"], "import_expired");
+    }
+
+    #[test]
+    fn member_rules_map_to_their_own_or_the_owners_detail() {
+        let err: CommandError = MemberError::Invalid(MemberRule::AgeOutOfRange { got: 71 }).into();
+        assert_eq!(err.code, "invalid_input");
+        assert_eq!(err.detail, ErrorDetail::MemberAgeOutOfRange { got: 71 });
+        let err: CommandError =
+            MemberError::Invalid(MemberRule::HeightOutOfRange { got: 100.0 }).into();
+        assert_eq!(err.detail, ErrorDetail::HeightOutOfRange { got: 100.0 });
+        let err: CommandError = MemberError::NotFound("member x".into()).into();
+        assert_eq!(err.code, "not_found");
     }
 
     #[test]
