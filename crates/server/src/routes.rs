@@ -68,6 +68,11 @@ struct GeneratePlanArg {
     request: Option<String>,
 }
 #[derive(Deserialize)]
+struct RevisePlanArg {
+    date: String,
+    instruction: String,
+}
+#[derive(Deserialize)]
 struct PreferenceArg {
     preference: lifeagent_core::preferences::NewPreference,
 }
@@ -224,6 +229,10 @@ pub async fn command(
         "generate_plan" => {
             let a: GeneratePlanArg = args(&body)?;
             reply(ops::generate_plan(app, a.date, a.request).await)
+        }
+        "revise_plan" => {
+            let a: RevisePlanArg = args(&body)?;
+            reply(ops::revise_plan(app, &a.date, &a.instruction).await)
         }
         "is_plan_generating" => reply(Ok(ops::is_plan_generating(app))),
         "accept_plan" => {

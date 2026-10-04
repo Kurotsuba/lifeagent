@@ -183,6 +183,7 @@ export const en: Strings = {
       accept: "Accept plan",
       regenerate: "Regenerate",
       adjust: "Adjust",
+      adjusting: "Adjusting…",
       adjustPrefill: "Adjust tomorrow's plan: ",
       warningsTitle: "Notes",
       dayTotal: (kcal: number, target: number) => `Day total ${kcal} / ${target} kcal`,
@@ -192,6 +193,8 @@ export const en: Strings = {
       generateFailed: "Couldn't create the plan. Please try again.",
       requestLabel: "Requests for this plan",
       requestPlaceholder: "Requests for this plan (optional), e.g. working late tomorrow, convenience-store food only",
+      requestPlaceholderWithPlan:
+        "Requests (optional), e.g. working late tomorrow, convenience-store food only. Regenerate makes a new plan with them; Adjust changes the current one.",
     },
     deleteMealConfirm: "Delete this entry?",
   },

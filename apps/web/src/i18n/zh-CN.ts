@@ -189,6 +189,7 @@ export const zhCN = {
       accept: "接受计划",
       regenerate: "重新生成",
       adjust: "调整",
+      adjusting: "调整中…",
       adjustPrefill: "调整明天的计划：",
       warningsTitle: "提示",
       dayTotal: (kcal: number, target: number) => `全天合计 ${kcal} / ${target} 千卡`,
@@ -198,6 +199,8 @@ export const zhCN = {
       generateFailed: "生成计划失败，请重试。",
       requestLabel: "对本次计划的要求",
       requestPlaceholder: "对本次计划的要求（可选），例如：明天加班，只能买便利店的东西",
+      requestPlaceholderWithPlan:
+        "要求（可选），例如：明天加班，只能买便利店的东西。「重新生成」会按要求做新计划，「调整」会修改当前计划。",
     },
     deleteMealConfirm: "确定删除这条记录吗？",
   },

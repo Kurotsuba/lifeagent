@@ -2718,3 +2718,23 @@ the matcher prompt's "ate out → no uses", which the model missed.
   since its uses are kept (marked restored) the meal is never matched again and a later delete
   puts nothing back twice. Uses already present when the page opened are never announced. The
   notice closes after 15 s (not while hovered); the Stock tab's recent list remains the record.
+
+## 2026-10-04 — Adjust uses the typed request
+
+The Nutrition tab's plan card has one request box above Accept / Regenerate / Adjust. Only
+Regenerate read it: Adjust always opened the chat with a fixed prefill, so a user who typed a
+change and clicked Adjust lost it.
+
+- **Adjust with text revises in place.** It calls the new `revise_plan` command
+  (`{ date, instruction }`, a thin wrapper over `CoreApp::revise_plan`) and stays on the page;
+  the box clears on success and `plan-ready` refreshes the card. Regenerate with text still
+  makes a new plan from scratch with the wishes; Adjust changes the current one.
+- **Adjust with an empty box opens the chat** with the prefill, as before, for talking a change
+  through.
+- **One busy flag.** The web runs the revision under the same shared flag as a generation
+  (`startPlanRevision` in `planGeneration.ts`), which also records which of the two this tab
+  started so only the clicked button says "Adjusting…". The core revision stays non-exclusive
+  (it waits for the planner lock rather than failing `plan_busy`), as the chat's revision does;
+  the button can't start one while the flag is set.
+- **Placeholder.** With a plan on screen the box says what each button does with it; with no
+  plan (only Generate) it keeps the old text.

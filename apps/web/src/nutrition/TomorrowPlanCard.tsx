@@ -1,6 +1,10 @@
 import { useState } from "react";
 import { acceptPlan } from "../api/commands";
-import { startPlanGeneration, usePlanGeneration } from "../api/planGeneration";
+import {
+  startPlanGeneration,
+  startPlanRevision,
+  usePlanGeneration,
+} from "../api/planGeneration";
 import {
   commandErrorMessage,
   dietPlanSection,
@@ -30,15 +34,37 @@ export function TomorrowPlanCard({ plan, planTime, onAdjust, onChanged }: Tomorr
   // Shared with the Training tab and kept across page switches, so a running generation can't
   // be started twice by leaving and coming back.
   const generation = usePlanGeneration();
-  const busy = generation.pending ? "generate" : accepting ? "accept" : null;
+  const busy = generation.revising
+    ? "revise"
+    : generation.pending
+      ? "generate"
+      : accepting
+        ? "accept"
+        : null;
   const shownError = error ?? generation.error;
-  // Optional wishes for the next generation only ("working late, convenience-store food").
-  // Saying them up front saves a revision round trip, and its tokens.
+  // Optional wishes for this plan ("working late, convenience-store food"): Regenerate makes a
+  // new plan with them, Adjust changes the current one. Saying them up front saves a chat round
+  // trip, and its tokens.
   const [request, setRequest] = useState("");
 
   async function handleGenerate(date?: string) {
     setError(null);
     if (await startPlanGeneration(date, request.trim() || undefined)) {
+      setRequest("");
+      onChanged();
+    }
+  }
+
+  /** With wishes typed, Adjust applies them right here; without, it opens the chat to talk the
+   * change through. */
+  async function handleAdjust(date: string) {
+    const instruction = request.trim();
+    if (!instruction) {
+      onAdjust(t.adjustPrefill);
+      return;
+    }
+    setError(null);
+    if (await startPlanRevision(date, instruction)) {
       setRequest("");
       onChanged();
     }
@@ -62,7 +88,7 @@ export function TomorrowPlanCard({ plan, planTime, onAdjust, onChanged }: Tomorr
       className={inputClass + " mb-3 resize-y"}
       rows={2}
       value={request}
-      placeholder={t.requestPlaceholder}
+      placeholder={plan ? t.requestPlaceholderWithPlan : t.requestPlaceholder}
       aria-label={t.requestLabel}
       disabled={busy !== null}
       onChange={(e) => setRequest(e.target.value)}
@@ -196,9 +222,9 @@ export function TomorrowPlanCard({ plan, planTime, onAdjust, onChanged }: Tomorr
           type="button"
           className={secondaryButtonClass}
           disabled={busy !== null}
-          onClick={() => onAdjust(t.adjustPrefill)}
+          onClick={() => handleAdjust(plan.plan_date)}
         >
-          {t.adjust}
+          {busy === "revise" ? t.adjusting : t.adjust}
         </button>
       </div>
     </div>

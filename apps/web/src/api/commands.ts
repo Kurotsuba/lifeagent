@@ -109,6 +109,12 @@ export function generatePlan(date?: string, request?: string): Promise<StoredPla
   return call("generate_plan", { date: date ?? null, request: request ?? null });
 }
 
+/** Revises the current plan for `date` (`YYYY-MM-DD`) following `instruction`; stored as a new
+ * version. */
+export function revisePlan(date: string, instruction: string): Promise<StoredPlan> {
+  return call("revise_plan", { date, instruction });
+}
+
 /** Whether a plan generation is under way (from any page, tab, the chat or the scheduler);
  * `plan-generating` events report the changes after that. */
 export function isPlanGenerating(): Promise<boolean> {

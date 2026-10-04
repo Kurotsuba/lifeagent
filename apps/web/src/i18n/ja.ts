@@ -183,6 +183,7 @@ export const ja: Strings = {
       accept: "プランを採用",
       regenerate: "作り直す",
       adjust: "調整",
+      adjusting: "調整中…",
       adjustPrefill: "明日のプランを調整してください：",
       warningsTitle: "注意",
       dayTotal: (kcal: number, target: number) => `1 日の合計 ${kcal} / ${target} kcal`,
@@ -192,6 +193,8 @@ export const ja: Strings = {
       generateFailed: "プランの作成に失敗しました。もう一度お試しください。",
       requestLabel: "今回のプランへの要望",
       requestPlaceholder: "今回のプランへの要望（任意）例：明日は残業なのでコンビニで買えるものに",
+      requestPlaceholderWithPlan:
+        "要望（任意）例：明日は残業なのでコンビニで買えるものに。「作り直す」は新しいプランを作り、「調整」は今のプランを直します。",
     },
     deleteMealConfirm: "この記録を削除しますか？",
   },

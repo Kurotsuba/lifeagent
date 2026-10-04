@@ -246,6 +246,17 @@ pub async fn generate_plan(
         .await?)
 }
 
+/// Revises the current plan for `date` following `instruction` (the Nutrition tab's request
+/// box with Adjust). Blank is `instruction_empty`; no plan for `date` is `not_found`.
+pub async fn revise_plan(
+    app: &CoreApp,
+    date: &str,
+    instruction: &str,
+) -> Result<StoredPlan, CommandError> {
+    let date = parse_date(date)?;
+    Ok(app.revise_plan(date, instruction).await?)
+}
+
 /// Whether a plan generation is under way, for a page opened mid-way; `plan-generating`
 /// events report the changes after that.
 pub fn is_plan_generating(app: &CoreApp) -> bool {
