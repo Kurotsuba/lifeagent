@@ -46,6 +46,7 @@ pub enum ErrorDetail {
     InvalidInput,
     NotFound,
     NothingToPlan,
+    PlanBusy,
     Internal,
     // ---- Model provider (`LlmError`) ----
     LlmAuth,
@@ -121,6 +122,7 @@ impl std::fmt::Display for ErrorDetail {
             InvalidInput => write!(f, "输入内容有误，请检查后重试。"),
             NotFound => write!(f, "未找到对应的数据。"),
             NothingToPlan => write!(f, "请先完善个人档案并记录一次体重，再生成计划。"),
+            PlanBusy => write!(f, "计划正在生成中，请等待完成。"),
             Internal => write!(f, "发生内部错误，请重试。"),
             LlmAuth => write!(f, "模型鉴权失败，请检查 API Key 是否正确。"),
             LlmRateLimited => write!(f, "请求过于频繁，请稍后再试。"),
@@ -210,6 +212,7 @@ impl From<CoreError> for CommandError {
                 CommandError::new(code, ErrorDetail::NotFound)
             }
             CoreError::NothingToPlan => CommandError::new(code, ErrorDetail::NothingToPlan),
+            CoreError::PlanBusy => CommandError::new(code, ErrorDetail::PlanBusy),
             CoreError::Llm(e) => e.into(),
             other => {
                 tracing::error!(error = %other, "internal command error");
@@ -481,6 +484,13 @@ mod tests {
     fn nothing_to_plan_maps_to_invalid_input() {
         let err: CommandError = CoreError::NothingToPlan.into();
         assert_eq!(err.code, "invalid_input");
+    }
+
+    #[test]
+    fn plan_busy_maps_to_busy() {
+        let err: CommandError = CoreError::PlanBusy.into();
+        assert_eq!(err.code, "busy");
+        assert_eq!(err.detail, ErrorDetail::PlanBusy);
     }
 
     #[test]

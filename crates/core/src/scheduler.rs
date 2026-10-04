@@ -75,7 +75,9 @@ impl Scheduler {
         let Some(tomorrow) = today.succ_opt() else {
             return Ok(());
         };
-        if self.app.get_plan(tomorrow).await?.is_some() {
+        // A generation already under way (most likely tomorrow's, from the UI or chat) is
+        // waited out rather than queued behind: the next tick sees its plan.
+        if self.app.plan_generating() || self.app.get_plan(tomorrow).await?.is_some() {
             return Ok(());
         }
         if let Some(attempts) = self.attempts.get(&tomorrow) {

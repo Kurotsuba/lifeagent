@@ -72,6 +72,10 @@ pub enum AppEvent {
         /// Lets shells notify only for scheduled plans (§10.1).
         trigger: PlanTrigger,
     },
+    /// A plan generation or revision started (`true`, none was active before) or the last
+    /// active one ended, however it ended (`false`), so every open page can disable its
+    /// generate buttons meanwhile.
+    PlanGenerating { generating: bool },
     PlanFailed {
         date: NaiveDate,
         error: String,

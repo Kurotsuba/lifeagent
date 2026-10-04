@@ -2,7 +2,7 @@
 //! revise), per `docs/PHASE1_SPEC.md` §7.12 and the planner prompt in §9.4.
 
 use std::collections::{BTreeMap, HashSet};
-use std::sync::Arc;
+use std::sync::{Arc, PoisonError};
 
 use chrono::{DateTime, NaiveDate, Utc};
 use lifeagent_llm::json::complete_json;
@@ -14,7 +14,7 @@ use tokio::sync::Mutex;
 
 use crate::clock::Clock;
 use crate::error::{CoreError, ValidationRule};
-use crate::events::AppEvent;
+use crate::events::{AppEvent, EventStore};
 use crate::plugin::{enabled_plugins, PlanDraft, PlanInput, PlanSection, Plugin, PluginContext};
 use crate::preferences::PreferenceKind;
 
@@ -288,10 +288,33 @@ struct PlannerOutput {
     sections: BTreeMap<String, Value>,
 }
 
-/// Generates and revises plans. One generation runs at a time; a second request waits.
+/// Generates and revises plans. One generation runs at a time; a second request waits, except
+/// a manual generation, which is turned away while another one is queued or running (a second
+/// click would only produce the same plan again).
 pub struct PlanService {
     plugins: Vec<Arc<dyn Plugin>>,
     lock: Mutex<()>,
+    /// Generations queued or running. `std::sync::Mutex`: never held across an `.await`.
+    active: std::sync::Mutex<usize>,
+}
+
+/// Counts one generation as active until dropped, which also covers a caller that gives up
+/// mid-way (an HTTP request whose client went away). Shells hear `PlanGenerating` when the
+/// count leaves and returns to zero.
+struct ActiveGeneration<'a> {
+    active: &'a std::sync::Mutex<usize>,
+    events: EventStore,
+}
+
+impl Drop for ActiveGeneration<'_> {
+    fn drop(&mut self) {
+        let mut active = self.active.lock().unwrap_or_else(PoisonError::into_inner);
+        *active -= 1;
+        if *active == 0 {
+            self.events
+                .publish(AppEvent::PlanGenerating { generating: false });
+        }
+    }
 }
 
 impl PlanService {
@@ -299,11 +322,38 @@ impl PlanService {
         Self {
             plugins,
             lock: Mutex::new(()),
+            active: std::sync::Mutex::new(0),
         }
     }
 
+    /// Whether a generation or revision is queued or running.
+    pub fn is_generating(&self) -> bool {
+        *self.active.lock().unwrap_or_else(PoisonError::into_inner) > 0
+    }
+
+    /// Counts a generation as active, or fails with `PlanBusy` if `exclusive` and one already is.
+    fn enter(
+        &self,
+        events: &EventStore,
+        exclusive: bool,
+    ) -> Result<ActiveGeneration<'_>, CoreError> {
+        let mut active = self.active.lock().unwrap_or_else(PoisonError::into_inner);
+        if exclusive && *active > 0 {
+            return Err(CoreError::PlanBusy);
+        }
+        *active += 1;
+        if *active == 1 {
+            events.publish(AppEvent::PlanGenerating { generating: true });
+        }
+        Ok(ActiveGeneration {
+            active: &self.active,
+            events: events.clone(),
+        })
+    }
+
     /// Generates a new plan version for `date` (§7.12). `request` is the user's optional
-    /// wish for this plan only; it is stored as the version's `instruction`.
+    /// wish for this plan only; it is stored as the version's `instruction`. A manual one fails
+    /// with `PlanBusy` while another generation is active.
     pub async fn generate(
         &self,
         ctx: &PluginContext,
@@ -339,6 +389,7 @@ impl PlanService {
         instruction: Option<&str>,
         request: Option<&str>,
     ) -> Result<StoredPlan, CoreError> {
+        let _active = self.enter(&ctx.events, trigger == PlanTrigger::Manual)?;
         let _guard = self.lock.lock().await;
 
         let previous = match instruction {
@@ -1060,6 +1111,10 @@ mod tests {
         ));
         assert!(matches!(
             rx.try_recv().unwrap(),
+            AppEvent::PlanGenerating { generating: true }
+        ));
+        assert!(matches!(
+            rx.try_recv().unwrap(),
             AppEvent::PlanReady {
                 date: DAY,
                 version: 1,
@@ -1114,6 +1169,51 @@ mod tests {
             .unwrap_err();
         assert!(matches!(err, CoreError::NothingToPlan));
         assert!(mock.received_requests().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_manual_generation_is_busy_while_another_is_active() {
+        let (ctx, _mock, _dir) = crate::test_support::context().await;
+        let planner = PlanService::new(vec![]);
+
+        let held = planner.enter(&ctx.events, false).unwrap();
+        assert!(planner.is_generating());
+        assert!(matches!(
+            planner.generate(&ctx, DAY, PlanTrigger::Manual, None).await,
+            Err(CoreError::PlanBusy)
+        ));
+        // Other triggers queue up instead (this one then finds nothing to plan).
+        assert!(matches!(
+            planner
+                .generate(&ctx, DAY, PlanTrigger::Schedule, None)
+                .await,
+            Err(CoreError::NothingToPlan)
+        ));
+
+        drop(held);
+        assert!(!planner.is_generating());
+        assert!(matches!(
+            planner.generate(&ctx, DAY, PlanTrigger::Manual, None).await,
+            Err(CoreError::NothingToPlan)
+        ));
+    }
+
+    #[tokio::test]
+    async fn a_generation_publishes_its_start_and_end_even_when_it_fails() {
+        let (ctx, _mock, _dir) = crate::test_support::context().await;
+        let mut rx = ctx.events.subscribe();
+
+        let _ = PlanService::new(vec![])
+            .generate(&ctx, DAY, PlanTrigger::Manual, None)
+            .await;
+
+        let mut seen = Vec::new();
+        while let Ok(event) = rx.try_recv() {
+            if let AppEvent::PlanGenerating { generating } = event {
+                seen.push(generating);
+            }
+        }
+        assert_eq!(seen, vec![true, false]);
     }
 
     #[tokio::test]

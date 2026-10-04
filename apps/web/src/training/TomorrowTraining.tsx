@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { generatePlan, saveTrainingDayPreference } from "../api/commands";
+import { saveTrainingDayPreference } from "../api/commands";
+import { startPlanGeneration, usePlanGeneration } from "../api/planGeneration";
 import { commandErrorMessage, type TrainingView } from "../api/types";
 import { inputClass } from "../components/Field";
 import { primaryButtonClass, secondaryButtonClass } from "../components/buttonStyles";
@@ -17,8 +18,14 @@ interface TomorrowTrainingProps {
  * that request. Generating makes the whole plan, so the diet follows the training. */
 export function TomorrowTraining({ view, onChanged }: TomorrowTrainingProps) {
   const [draft, setDraft] = useState(view.tomorrow_preference ?? "");
-  const [busy, setBusy] = useState<"save" | "generate" | null>(null);
+  const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<{ ok: boolean; message: string } | null>(null);
+  // Shared with the Nutrition tab and kept across page switches, so a running generation can't
+  // be started twice by leaving and coming back.
+  const generation = usePlanGeneration();
+  const busy = generation.pending ? "generate" : saving ? "save" : null;
+  const shownStatus =
+    status ?? (generation.error ? { ok: false, message: generation.error } : null);
 
   // A new day (or a request saved from chat) replaces the draft.
   useEffect(() => {
@@ -27,37 +34,31 @@ export function TomorrowTraining({ view, onChanged }: TomorrowTrainingProps) {
 
   const dirty = draft.trim() !== (view.tomorrow_preference ?? "");
 
-  async function save(): Promise<boolean> {
+  async function handleSave() {
+    setSaving(true);
+    setStatus(null);
     try {
       await saveTrainingDayPreference(draft, view.tomorrow_date);
-      return true;
-    } catch (e) {
-      setStatus({ ok: false, message: commandErrorMessage(e) });
-      return false;
-    }
-  }
-
-  async function handleSave() {
-    setBusy("save");
-    setStatus(null);
-    if (await save()) {
       setStatus({ ok: true, message: t.preferenceSaved });
-      onChanged();
-    }
-    setBusy(null);
-  }
-
-  async function handleGenerate() {
-    setBusy("generate");
-    setStatus(null);
-    try {
-      if (dirty && !(await save())) return;
-      await generatePlan(view.tomorrow_date);
       onChanged();
     } catch (e) {
       setStatus({ ok: false, message: commandErrorMessage(e) });
     } finally {
-      setBusy(null);
+      setSaving(false);
+    }
+  }
+
+  async function handleGenerate() {
+    setStatus(null);
+    // The unsaved request is saved inside the generation, so the button stays disabled
+    // throughout and a failed save is reported like a failed generation.
+    const pending = dirty ? draft : null;
+    const saveFirst =
+      pending === null
+        ? undefined
+        : () => saveTrainingDayPreference(pending, view.tomorrow_date);
+    if (await startPlanGeneration(view.tomorrow_date, undefined, saveFirst)) {
+      onChanged();
     }
   }
 
@@ -109,16 +110,16 @@ export function TomorrowTraining({ view, onChanged }: TomorrowTrainingProps) {
         >
           {t.savePreference}
         </button>
-        {status ? (
+        {shownStatus ? (
           <span
             className={
               "text-sm " +
-              (status.ok
+              (shownStatus.ok
                 ? "text-green-700 dark:text-green-400"
                 : "text-red-600 dark:text-red-400")
             }
           >
-            {status.message}
+            {shownStatus.message}
           </span>
         ) : null}
       </div>

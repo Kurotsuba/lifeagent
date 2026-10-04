@@ -452,6 +452,12 @@ impl CoreApp {
             .await
     }
 
+    /// Whether a plan generation or revision is queued or running; `AppEvent::PlanGenerating`
+    /// reports each change.
+    pub fn plan_generating(&self) -> bool {
+        self.0.planner.is_generating()
+    }
+
     /// Revises the current plan for `date` following the user's `instruction`.
     pub async fn revise_plan(
         &self,

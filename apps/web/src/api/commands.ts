@@ -109,6 +109,12 @@ export function generatePlan(date?: string, request?: string): Promise<StoredPla
   return call("generate_plan", { date: date ?? null, request: request ?? null });
 }
 
+/** Whether a plan generation is under way (from any page, tab, the chat or the scheduler);
+ * `plan-generating` events report the changes after that. */
+export function isPlanGenerating(): Promise<boolean> {
+  return call("is_plan_generating");
+}
+
 export function acceptPlan(date: string): Promise<void> {
   return call("accept_plan", { date });
 }

@@ -57,6 +57,10 @@ pub enum CoreError {
     /// code without matching on message text.
     #[error("models are not configured yet")]
     NotConfigured,
+
+    /// A manual plan generation was asked for while another generation is queued or running.
+    #[error("a plan is already being generated")]
+    PlanBusy,
 }
 
 impl CoreError {
@@ -72,6 +76,7 @@ impl CoreError {
                 "invalid_input"
             }
             CoreError::NotFound(_) => "not_found",
+            CoreError::PlanBusy => "busy",
             CoreError::Llm(e) => e.code(),
             CoreError::Db(_) | CoreError::Migrate(_) | CoreError::Json(_) | CoreError::Io(_) => {
                 "internal"

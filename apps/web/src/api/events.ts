@@ -3,7 +3,8 @@
  * `docs/PHASE1_SPEC.md` §10.1): `data-changed`, `plan-ready`, `plan-failed`, delivered as
  * Server-Sent Events from `/api/events`. Today and Chat both just want to know "something
  * changed, go refetch" — neither needs the payload, so this collapses all three into one
- * callback.
+ * callback. `plan-generating` is the exception, with its own subscription: its payload is the
+ * state the generate buttons show.
  */
 
 const EVENT_NAMES = ["data-changed", "plan-ready", "plan-failed"] as const;
@@ -16,5 +17,21 @@ export function onAppDataEvent(onEvent: () => void): () => void {
   for (const name of EVENT_NAMES) {
     source.addEventListener(name, onEvent);
   }
+  return () => source.close();
+}
+
+/** Calls `onChange` with the server's `plan-generating` flag whenever it changes, and with
+ * `null` whenever the stream (re)opens, since changes made while it was closed were missed.
+ * Returns an unsubscribe function. */
+export function onPlanGenerating(onChange: (generating: boolean | null) => void): () => void {
+  const source = new EventSource("/api/events");
+  source.addEventListener("open", () => onChange(null));
+  source.addEventListener("plan-generating", (e) => {
+    try {
+      onChange((JSON.parse(e.data) as { generating: boolean }).generating);
+    } catch {
+      onChange(null);
+    }
+  });
   return () => source.close();
 }

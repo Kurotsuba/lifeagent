@@ -473,6 +473,7 @@ export const zhCN = {
     invalid_input: "输入内容有误，请检查后重试。",
     not_found: "未找到对应的数据。",
     nothing_to_plan: "请先完善个人档案并记录一次体重，再生成计划。",
+    plan_busy: "计划正在生成中，请等待完成。",
     internal: "发生内部错误，请重试。",
     llm_auth: "模型鉴权失败，请检查 API Key 是否正确。",
     llm_rate_limited: "请求过于频繁，请稍后再试。",

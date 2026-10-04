@@ -2670,3 +2670,22 @@ one. Names follow: the tab is Members (メンバー / 成员), the feature is Sh
 (一緒に食べる食事 / 共餐), the command is `get_members_view` (was `get_household_view`), the diet
 module is `shared_meals` (was `household`), and the web page lives in `apps/web/src/members/`.
 Earlier entries above that say "household" describe the same feature.
+
+## 2026-10-04 — One manual plan generation at a time
+
+The generate buttons used to keep "generating" in component state, so leaving the page and
+coming back (or reloading, or a second tab) re-enabled them, and a second request queued behind
+the planner lock and generated the plan again.
+
+- **The planner counts active generations** (queued or running). A manual one (button or the
+  chat's `generate_plan` tool) is turned away with `CoreError::PlanBusy` (code `busy`, detail
+  `plan_busy`) while any is active; revisions still queue behind the lock, and the scheduler
+  skips a tick instead of queueing.
+- **New `AppEvent::PlanGenerating { generating }`** (SSE `plan-generating`) when the count leaves
+  or returns to zero, published from a drop guard so a request abandoned mid-way still ends it.
+  `is_plan_generating` reads the flag for a page opened mid-way.
+- **In memory, per user app.** Correct because the demo deploys one instance
+  (`docs/HACKATHON.md`); several instances would need the flag in the database.
+- **The web app shares one flag** (`apps/web/src/api/planGeneration.ts`) for the Nutrition and
+  Training buttons: this tab's own request, or the server's flag, refetched whenever the event
+  stream (re)opens.

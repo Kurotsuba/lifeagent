@@ -246,6 +246,12 @@ pub async fn generate_plan(
         .await?)
 }
 
+/// Whether a plan generation is under way, for a page opened mid-way; `plan-generating`
+/// events report the changes after that.
+pub fn is_plan_generating(app: &CoreApp) -> bool {
+    app.plan_generating()
+}
+
 pub async fn accept_plan(app: &CoreApp, date: &str) -> Result<(), CommandError> {
     let date = parse_date(date)?;
     Ok(app.accept_plan(date).await?)

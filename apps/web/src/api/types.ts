@@ -635,6 +635,7 @@ export type ErrorDetail =
   | { kind: "invalid_input" }
   | { kind: "not_found" }
   | { kind: "nothing_to_plan" }
+  | { kind: "plan_busy" }
   | { kind: "internal" }
   | { kind: "llm_auth" }
   | { kind: "llm_rate_limited" }

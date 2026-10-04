@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { acceptPlan, generatePlan } from "../api/commands";
+import { acceptPlan } from "../api/commands";
+import { startPlanGeneration, usePlanGeneration } from "../api/planGeneration";
 import {
   commandErrorMessage,
   dietPlanSection,
@@ -24,28 +25,27 @@ interface TomorrowPlanCardProps {
 }
 
 export function TomorrowPlanCard({ plan, planTime, onAdjust, onChanged }: TomorrowPlanCardProps) {
-  const [busy, setBusy] = useState<"generate" | "accept" | null>(null);
+  const [accepting, setAccepting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Shared with the Training tab and kept across page switches, so a running generation can't
+  // be started twice by leaving and coming back.
+  const generation = usePlanGeneration();
+  const busy = generation.pending ? "generate" : accepting ? "accept" : null;
+  const shownError = error ?? generation.error;
   // Optional wishes for the next generation only ("working late, convenience-store food").
   // Saying them up front saves a revision round trip, and its tokens.
   const [request, setRequest] = useState("");
 
   async function handleGenerate(date?: string) {
-    setBusy("generate");
     setError(null);
-    try {
-      await generatePlan(date, request.trim() || undefined);
+    if (await startPlanGeneration(date, request.trim() || undefined)) {
       setRequest("");
       onChanged();
-    } catch (e) {
-      setError(commandErrorMessage(e));
-    } finally {
-      setBusy(null);
     }
   }
 
   async function handleAccept(date: string) {
-    setBusy("accept");
+    setAccepting(true);
     setError(null);
     try {
       await acceptPlan(date);
@@ -53,7 +53,7 @@ export function TomorrowPlanCard({ plan, planTime, onAdjust, onChanged }: Tomorr
     } catch (e) {
       setError(commandErrorMessage(e));
     } finally {
-      setBusy(null);
+      setAccepting(false);
     }
   }
 
@@ -78,7 +78,9 @@ export function TomorrowPlanCard({ plan, planTime, onAdjust, onChanged }: Tomorr
         <p className="mb-3 text-sm text-neutral-500 dark:text-neutral-400">
           {t.noPlanYet(planTime)}
         </p>
-        {error ? <p className="mb-2 text-sm text-red-600 dark:text-red-400">{error}</p> : null}
+        {shownError ? (
+        <p className="mb-2 text-sm text-red-600 dark:text-red-400">{shownError}</p>
+      ) : null}
         {requestBox}
         <button
           type="button"
@@ -168,7 +170,9 @@ export function TomorrowPlanCard({ plan, planTime, onAdjust, onChanged }: Tomorr
         </p>
       ) : null}
 
-      {error ? <p className="mb-2 text-sm text-red-600 dark:text-red-400">{error}</p> : null}
+      {shownError ? (
+        <p className="mb-2 text-sm text-red-600 dark:text-red-400">{shownError}</p>
+      ) : null}
 
       {requestBox}
       <div className="flex flex-wrap items-center gap-2">

@@ -1,5 +1,5 @@
 //! The event names and JSON payloads every shell pushes to its UI, per `docs/PHASE1_SPEC.md`
-//! §10.1: `data-changed`, `plan-ready`, `plan-failed`. The web server sends them as
+//! §10.1: `data-changed`, `plan-ready`, `plan-failed`, plus `plan-generating`. The web server sends them as
 //! Server-Sent Events.
 
 use lifeagent_core::events::AppEvent;
@@ -23,6 +23,9 @@ pub fn payload_for(event: &AppEvent) -> (&'static str, serde_json::Value) {
             "plan-ready",
             json!({ "date": date, "version": version, "trigger": trigger }),
         ),
+        AppEvent::PlanGenerating { generating } => {
+            ("plan-generating", json!({ "generating": generating }))
+        }
         AppEvent::PlanFailed { date, error, code } => (
             "plan-failed",
             json!({ "date": date, "error": error, "code": code }),
@@ -71,6 +74,14 @@ mod tests {
             payload,
             json!({ "date": "2026-09-26", "version": 2, "trigger": "schedule" })
         );
+    }
+
+    #[test]
+    fn plan_generating_maps_to_plan_generating_event_name_and_payload() {
+        let (name, payload) = payload_for(&AppEvent::PlanGenerating { generating: true });
+
+        assert_eq!(name, "plan-generating");
+        assert_eq!(payload, json!({ "generating": true }));
     }
 
     #[test]

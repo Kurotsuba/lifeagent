@@ -225,6 +225,7 @@ pub async fn command(
             let a: GeneratePlanArg = args(&body)?;
             reply(ops::generate_plan(app, a.date, a.request).await)
         }
+        "is_plan_generating" => reply(Ok(ops::is_plan_generating(app))),
         "accept_plan" => {
             let a: Date = args(&body)?;
             reply(ops::accept_plan(app, &a.date).await)

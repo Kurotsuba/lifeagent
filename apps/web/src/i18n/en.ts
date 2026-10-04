@@ -469,6 +469,7 @@ export const en: Strings = {
     invalid_input: "Something in the input isn't valid. Check it and try again.",
     not_found: "That item couldn't be found.",
     nothing_to_plan: "Complete your profile and log your weight once, then create a plan.",
+    plan_busy: "A plan is already being created. Please wait for it to finish.",
     internal: "Something went wrong. Please try again.",
     llm_auth: "The model rejected the API key. Check that it's correct.",
     llm_rate_limited: "Too many requests. Please wait a moment and try again.",
