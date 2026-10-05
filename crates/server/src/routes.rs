@@ -202,12 +202,23 @@ struct CommitImport {
     replace_source_id: Option<String>,
 }
 
+/// Commands that call the model directly. Each user may send `LLM_REQUESTS_PER_WINDOW` of
+/// them per `LLM_REQUEST_WINDOW`; the daily token budget (`ServerConfig::daily_token_budget`)
+/// caps what they, the scheduler and event hooks spend together.
+pub const LLM_COMMANDS: &[&str] = &["send_message", "generate_plan", "revise_plan"];
+pub const LLM_REQUESTS_PER_WINDOW: u32 = 30;
+pub const LLM_REQUEST_WINDOW: Duration = Duration::from_secs(10 * 60);
+
 pub async fn command(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
     Path(command): Path<String>,
     body: Bytes,
 ) -> Result<Response, ApiError> {
+    if LLM_COMMANDS.contains(&command.as_str()) && !state.llm_limiter.allow(user.id.clone()) {
+        tracing::warn!(user_id = %user.id, command, "model request rate limit hit");
+        return Err(ApiError::new("rate_limited", ErrorDetail::TooManyRequests));
+    }
     let tenant = state.tenants.get(&user.schema).await?;
     let app = &tenant.app;
     match command.as_str() {
@@ -220,6 +231,15 @@ pub async fn command(
         "get_history" => {
             let a: Limit = args(&body)?;
             reply(ops::get_history(app, a.limit).await)
+        }
+        "get_pending_actions" => reply(ops::get_pending_actions(app).await),
+        "approve_action" => {
+            let a: Id = args(&body)?;
+            reply(ops::approve_action(app, &a.id).await)
+        }
+        "reject_action" => {
+            let a: Id = args(&body)?;
+            reply(ops::reject_action(app, &a.id).await)
         }
         "get_today" => reply(ops::get_today(app).await),
         "get_plan" => {

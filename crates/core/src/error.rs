@@ -61,6 +61,11 @@ pub enum CoreError {
     /// A manual plan generation was asked for while another generation is queued or running.
     #[error("a plan is already being generated")]
     PlanBusy,
+
+    /// An approval or rejection of an action that was already resolved or has expired
+    /// (`crate::approvals`).
+    #[error("the action is no longer awaiting approval")]
+    ActionNotPending,
 }
 
 impl CoreError {
@@ -77,6 +82,7 @@ impl CoreError {
             }
             CoreError::NotFound(_) => "not_found",
             CoreError::PlanBusy => "busy",
+            CoreError::ActionNotPending => "action_not_pending",
             CoreError::Llm(e) => e.code(),
             CoreError::Db(_) | CoreError::Migrate(_) | CoreError::Json(_) | CoreError::Io(_) => {
                 "internal"

@@ -39,6 +39,9 @@ pub struct ServerConfig {
     /// `LIFEAGENT_INSECURE_COOKIES=1` drops the cookie's `Secure` flag, for plain-HTTP testing
     /// on something other than `localhost`. Never set it in production.
     pub secure_cookies: bool,
+    /// `LIFEAGENT_DAILY_TOKEN_BUDGET`: LLM tokens (prompt + completion, all roles) each user
+    /// may spend per rolling 24 hours. Unset: no cap.
+    pub daily_token_budget: Option<u64>,
 }
 
 fn flag(name: &str) -> bool {
@@ -72,6 +75,10 @@ impl ServerConfig {
             Some(password) => with_password(&database_url, &password)?,
             None => database_url,
         };
+        let daily_token_budget = optional("LIFEAGENT_DAILY_TOKEN_BUDGET")
+            .map(|v| v.parse())
+            .transpose()
+            .context("LIFEAGENT_DAILY_TOKEN_BUDGET is not a whole number")?;
         Ok(Self {
             database_url,
             auth_schema: optional("LIFEAGENT_AUTH_SCHEMA").unwrap_or_else(|| "auth".into()),
@@ -82,6 +89,7 @@ impl ServerConfig {
             tick_token: optional("LIFEAGENT_TICK_TOKEN"),
             inprocess_scheduler: flag("LIFEAGENT_INPROCESS_SCHEDULER"),
             secure_cookies: !flag("LIFEAGENT_INSECURE_COOKIES"),
+            daily_token_budget,
         })
     }
 }

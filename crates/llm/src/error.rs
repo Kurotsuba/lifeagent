@@ -27,6 +27,11 @@ pub enum LlmError {
 
     #[error("configuration error: {0}")]
     Config(String),
+
+    /// The user's own token budget (`UsageSink::check_budget`) is used up; the provider was
+    /// not called.
+    #[error("token budget exceeded")]
+    BudgetExceeded,
 }
 
 impl LlmError {
@@ -38,6 +43,7 @@ impl LlmError {
         match self {
             LlmError::Auth => "auth",
             LlmError::Config(_) => "not_configured",
+            LlmError::BudgetExceeded => "budget_exceeded",
             LlmError::RateLimited | LlmError::Timeout => "llm",
             LlmError::Http(_) | LlmError::Status { .. } | LlmError::InvalidResponse(_) => "llm",
         }

@@ -142,7 +142,12 @@ async fn meal_logged_via_orchestrator_shows_up_in_today_view() {
             _ => None,
         })
         .expect("tool result in the final request");
-    let tool_result: Value = serde_json::from_str(&tool_result).unwrap();
+    // Tool results reach the model fenced as data (`lifeagent_core::untrusted`).
+    let tool_result = tool_result
+        .strip_prefix(lifeagent_core::untrusted::OPEN)
+        .and_then(|t| t.strip_suffix(lifeagent_core::untrusted::CLOSE))
+        .expect("a fenced tool result");
+    let tool_result: Value = serde_json::from_str(tool_result.trim()).unwrap();
     assert_eq!(tool_result["total"]["kcal"], 376.0);
 
     // today_view shows the same totals: 200 g rice (232 kcal, 5.2 g protein) + 100 g egg

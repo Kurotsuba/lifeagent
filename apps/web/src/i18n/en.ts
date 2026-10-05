@@ -321,6 +321,47 @@ export const en: Strings = {
     thinking: "Thinking",
     sendFailed: "Couldn't send",
   },
+  approvals: {
+    title: "Needs your approval",
+    hint: "The assistant asked to make these changes. Nothing happens until you approve.",
+    approve: "Approve",
+    reject: "Reject",
+    approved: "Approved and done",
+    rejected: "Rejected, nothing changed",
+    expired: "Expired, nothing changed",
+    failed: (reason: string) => `Approved, but it failed: ${reason}`,
+    failedToResolve: "Couldn't do that",
+    previews: {
+      update_allergies: (d: { add: string[]; remove: string[] }) =>
+        [
+          d.add.length > 0 ? `Add allergies: ${d.add.join(", ")}` : "",
+          d.remove.length > 0 ? `Remove allergies: ${d.remove.join(", ")}` : "",
+        ]
+          .filter((s) => s !== "")
+          .join("; "),
+      add_preference: (d: {
+        preference_kind: "dislike" | "general";
+        text: string;
+        valid_from: string | null;
+        valid_until: string | null;
+        permanent: boolean;
+      }) =>
+        `Remember ${d.preference_kind === "dislike" ? "a disliked food" : "a preference"}: ${d.text}` +
+        (d.permanent
+          ? " (always)"
+          : d.valid_from || d.valid_until
+            ? ` (${d.valid_from ?? ""} to ${d.valid_until ?? ""})`
+            : " (one month)"),
+      remove_preference: (d: { preference_kind: "dislike" | "general"; text: string }) =>
+        `Delete ${d.preference_kind === "dislike" ? "a disliked food" : "a preference"}: ${d.text}`,
+      delete_past_entry: (d: { logical_date: string; description: string | null }) =>
+        `Delete the ${d.logical_date} record${d.description ? `: ${d.description}` : ""}`,
+      archive_member: (d: { name: string }) => `Remove member: ${d.name}`,
+      update_member_allergies: (d: { name: string; allergies: string[] }) =>
+        `Change ${d.name}'s allergies to: ${d.allergies.length > 0 ? d.allergies.join(", ") : "none"}`,
+    },
+    unknown: (tool: string) => `Run: ${tool}`,
+  },
   settings: {
     saveSucceeded: "Saved",
     saveFailed: "Couldn't save. Please try again.",
@@ -485,6 +526,8 @@ export const en: Strings = {
     llm_rate_limited: "Too many requests. Please wait a moment and try again.",
     llm_timeout: "The request timed out. Please try again.",
     llm_unavailable: "The model service ran into a problem. Please try again.",
+    token_budget_exceeded: "You've reached today's AI usage limit. Please try again tomorrow.",
+    action_not_pending: "That was already handled or has expired.",
     height_out_of_range: (d: { got: number }) =>
       `Height must be 120–230 cm (entered: ${d.got.toFixed(1)} cm).`,
     age_out_of_range: (d: { got: number }) =>
@@ -516,6 +559,7 @@ export const en: Strings = {
     invalid_username: "Usernames are 3–32 letters, digits or _ - .",
     invalid_password: "Passwords are 8–128 characters.",
     too_many_attempts: "Too many attempts. Please try again later.",
+    too_many_requests: "Too many requests. Please wait a moment and try again.",
     invalid_credentials: "Wrong username or password.",
     username_taken: "That username is already taken.",
     bad_request: "The request wasn't valid.",

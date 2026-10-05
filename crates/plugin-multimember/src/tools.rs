@@ -78,7 +78,8 @@ pub fn specs() -> Vec<ToolSpec> {
             name: "multimember_update_member".into(),
             description: format!(
                 "Change a member's profile (name, weight, allergies, ...). Only pass the fields \
-                 that change; `allergies` replaces the whole list. {NOT_FOR_LOGGING}"
+                 that change; `allergies` replaces the whole list, and a change to it waits for \
+                 the owner's approval in the app. {NOT_FOR_LOGGING}"
             ),
             parameters: json!({
                 "type": "object",
@@ -88,7 +89,8 @@ pub fn specs() -> Vec<ToolSpec> {
         },
         ToolSpec {
             name: "multimember_archive_member".into(),
-            description: "Remove a member who no longer shares meals. Past plans keep their name."
+            description: "Remove a member who no longer shares meals. Past plans keep their name. \
+                Waits for the owner's approval in the app."
                 .into(),
             parameters: json!({
                 "type": "object",
@@ -160,6 +162,47 @@ pub fn specs() -> Vec<ToolSpec> {
             }),
         },
     ]
+}
+
+/// Removing a member, and changing a member's allergies (hard constraints for shared meals),
+/// wait for the owner's approval (`lifeagent_core::approvals`). An unknown member runs, and
+/// fails, without asking.
+pub async fn approval_preview(
+    ctx: &PluginContext,
+    name: &str,
+    args: &Value,
+) -> Result<Option<Value>, PluginError> {
+    match name {
+        "multimember_archive_member" => {
+            let a: MemberArg = parse_args(args.clone())?;
+            let Ok(m) = store::resolve(ctx, &a.member).await else {
+                return Ok(None);
+            };
+            Ok(Some(json!({
+                "kind": "archive_member",
+                "name": m.profile.display_name,
+            })))
+        }
+        "multimember_update_member" => {
+            let a: UpdateArgs = parse_args(args.clone())?;
+            let Some(allergies) = a.allergies else {
+                return Ok(None);
+            };
+            let Ok(m) = store::resolve(ctx, &a.member).await else {
+                return Ok(None);
+            };
+            let allergies: Vec<String> = allergies.iter().map(|t| t.trim().to_string()).collect();
+            if allergies == m.profile.allergies {
+                return Ok(None);
+            }
+            Ok(Some(json!({
+                "kind": "update_member_allergies",
+                "name": m.profile.display_name,
+                "allergies": allergies,
+            })))
+        }
+        _ => Ok(None),
+    }
 }
 
 pub async fn call(ctx: &PluginContext, name: &str, args: Value) -> Result<ToolOutput, PluginError> {
@@ -399,6 +442,46 @@ mod tests {
             "height_cm": 160, "weight_kg": 52, "activity_level": "light",
             "dietary_pattern": "omnivore", "allergies": ["えび"]
         })
+    }
+
+    #[tokio::test]
+    async fn removing_a_member_or_changing_their_allergies_needs_approval() {
+        let env = env().await;
+        let ctx = &env.ctx;
+        call(ctx, "multimember_add_member", aki_args())
+            .await
+            .unwrap();
+        let preview = |args: Value| async move {
+            approval_preview(ctx, args["tool"].as_str().unwrap(), &args["args"])
+                .await
+                .unwrap()
+        };
+
+        assert_eq!(
+            preview(json!({"tool": "multimember_archive_member", "args": {"member": "aki"}})).await,
+            Some(json!({"kind": "archive_member", "name": "Aki"}))
+        );
+        assert_eq!(
+            preview(json!({"tool": "multimember_update_member",
+                           "args": {"member": "Aki", "allergies": []}}))
+            .await,
+            Some(json!({"kind": "update_member_allergies", "name": "Aki", "allergies": []}))
+        );
+        // Same allergies, other fields, or an unknown member: no approval.
+        for args in [
+            json!({"member": "Aki", "allergies": ["えび"]}),
+            json!({"member": "Aki", "weight_kg": 53}),
+            json!({"member": "Nobody", "allergies": []}),
+        ] {
+            assert_eq!(
+                preview(json!({"tool": "multimember_update_member", "args": args})).await,
+                None
+            );
+        }
+        assert_eq!(
+            preview(json!({"tool": "multimember_list_members", "args": {}})).await,
+            None
+        );
     }
 
     #[tokio::test]

@@ -59,6 +59,15 @@ impl Plugin for MultimemberPlugin {
         tools::specs()
     }
 
+    async fn approval_preview(
+        &self,
+        ctx: &PluginContext,
+        name: &str,
+        args: &Value,
+    ) -> Result<Option<Value>, PluginError> {
+        tools::approval_preview(ctx, name, args).await
+    }
+
     async fn call_tool(
         &self,
         ctx: &PluginContext,

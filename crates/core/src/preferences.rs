@@ -186,6 +186,18 @@ impl PreferenceService {
         })
     }
 
+    /// One preference that hasn't been removed.
+    pub async fn get(&self, id: &str) -> Result<Option<Preference>, CoreError> {
+        let row: Option<Row> = sqlx::query_as(
+            "SELECT id, kind, text, valid_from, valid_until, created_at FROM preferences
+             WHERE id = $1 AND deleted_at IS NULL",
+        )
+        .bind(id)
+        .fetch_optional(&self.db)
+        .await?;
+        row.map(from_row).transpose()
+    }
+
     /// Newest-first, excluding removed ones, expired ones included (Settings shows them).
     pub async fn list(&self, limit: u32) -> Result<Vec<Preference>, CoreError> {
         // `seq DESC` breaks ties when two share the same `created_at` (e.g. under a

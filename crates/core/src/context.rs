@@ -5,6 +5,7 @@ use std::sync::Arc;
 use chrono::{Local, NaiveDate};
 use serde_json::Value;
 
+use crate::approvals::{ActionStatus, PendingAction};
 use crate::error::CoreError;
 use crate::events::Event;
 use crate::goals::{GoalDirection, WeightGoal};
@@ -14,6 +15,7 @@ use crate::plugin::{Plugin, PluginContext};
 use crate::preferences::{Preference, PreferenceKind};
 use crate::profile::Profile;
 use crate::time::age_years;
+use crate::untrusted;
 
 const SYSTEM_PROMPT_TEMPLATE: &str = "\
 You are HumanHealthHandler (HHH), a personal assistant running on the user's computer. You help the user
@@ -51,9 +53,18 @@ Rules:
   when the user writes in another language.
 - You give lifestyle guidance, not medical advice. If the user describes symptoms or a medical
   condition, suggest consulting a professional.
+- {untrusted_rule}
+- Some changes wait for the user's approval in the app (allergies, preferences, deleting an
+  earlier day's entry, and others): the tool then returns awaiting_user_approval. Tell the user
+  what you asked for and that it needs their approval; never say it is done, and don't call
+  the tool again for it. The last section below shows what the user approved or rejected.
 
 Current time: {now_local} ({weekday}). Logical date: {logical_date}.
 
+{data}";
+
+/// The user's data, fenced as a whole (`crate::untrusted`) into the template's `{data}`.
+const DATA_TEMPLATE: &str = "\
 ## User profile
 {profile_summary}
 
@@ -67,7 +78,10 @@ Current time: {now_local} ({weekday}). Logical date: {logical_date}.
 {plans}
 
 ## Preferences
-{preferences}";
+{preferences}
+
+## Changes that needed the user's approval (last 24 hours)
+{actions}";
 
 /// Target size for the built prompt (§7.9); preferences are truncated first if exceeded.
 const TARGET_TOKENS: usize = 2500;
@@ -82,6 +96,7 @@ fn estimate_tokens(text: &str) -> usize {
 pub async fn build_system_prompt(
     ctx: &PluginContext,
     plugins: &[Arc<dyn Plugin>],
+    recent_actions: &[PendingAction],
 ) -> Result<String, CoreError> {
     let now_local = ctx.clock.now().with_timezone(&Local);
     let today = ctx.today().await?;
@@ -126,6 +141,7 @@ pub async fn build_system_prompt(
         plans.join("\n\n")
     };
 
+    let actions_text = render_actions(recent_actions);
     let mut notes = ctx.preferences.current(today, 50).await?;
     let render = |notes: &[Preference]| -> String {
         render_template(
@@ -137,6 +153,7 @@ pub async fn build_system_prompt(
             &plugin_snippets,
             &plans_text,
             notes,
+            &actions_text,
         )
     };
 
@@ -161,6 +178,7 @@ fn render_template(
     plugin_snippets: &str,
     plans: &str,
     notes: &[Preference],
+    actions: &str,
 ) -> String {
     let preferences = if notes.is_empty() {
         "(none)".to_string()
@@ -178,6 +196,14 @@ fn render_template(
             .join("\n")
     };
 
+    let data = DATA_TEMPLATE
+        .replace("{profile_summary}", profile_summary)
+        .replace("{goals}", goals_text)
+        .replace("{plugin_snippets}", plugin_snippets)
+        .replace("{plans}", plans)
+        .replace("{actions}", actions)
+        .replace("{preferences}", &preferences);
+
     SYSTEM_PROMPT_TEMPLATE
         .replace(
             "{now_local}",
@@ -186,11 +212,36 @@ fn render_template(
         .replace("{weekday}", &now_local.format("%A").to_string())
         .replace("{logical_date}", &today.to_string())
         .replace("{user_language}", language.prompt_name())
-        .replace("{profile_summary}", profile_summary)
-        .replace("{goals}", goals_text)
-        .replace("{plugin_snippets}", plugin_snippets)
-        .replace("{plans}", plans)
-        .replace("{preferences}", &preferences)
+        .replace("{untrusted_rule}", untrusted::RULE)
+        // Last: nothing in the data is ever taken for a placeholder.
+        .replace("{data}", &untrusted::fence(&data))
+}
+
+/// One line per action: id, tool, the arguments the model passed, and what became of it.
+fn render_actions(actions: &[PendingAction]) -> String {
+    if actions.is_empty() {
+        return "(none)".to_string();
+    }
+    actions
+        .iter()
+        .map(|a| {
+            let outcome = match a.status {
+                ActionStatus::Pending => "awaiting the user".to_string(),
+                ActionStatus::Approved => format!(
+                    "approved and done ({})",
+                    a.result_summary.as_deref().unwrap_or_default()
+                ),
+                ActionStatus::Rejected => "rejected by the user: not done".to_string(),
+                ActionStatus::Failed => format!(
+                    "approved, but failed: {}",
+                    a.result_summary.as_deref().unwrap_or_default()
+                ),
+                ActionStatus::Expired => "expired: not done".to_string(),
+            };
+            format!("- [{}] {} {} — {outcome}", a.id, a.tool_name, a.arguments)
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// A plan in compact form (§7.9): summary, then each meal's title and items. Core doesn't
@@ -376,7 +427,7 @@ mod tests {
     #[tokio::test]
     async fn includes_fixed_rules_and_defaults_when_nothing_is_set() {
         let (ctx, _mock, _dir) = crate::test_support::context().await;
-        let prompt = build_system_prompt(&ctx, &[]).await.unwrap();
+        let prompt = build_system_prompt(&ctx, &[], &[]).await.unwrap();
 
         assert!(prompt.contains("You are HumanHealthHandler"));
         assert!(prompt.contains("Profile not set yet."));
@@ -395,7 +446,7 @@ mod tests {
             .set_language(Language::En, ctx.clock.now())
             .await
             .unwrap();
-        let prompt = build_system_prompt(&ctx, &[]).await.unwrap();
+        let prompt = build_system_prompt(&ctx, &[], &[]).await.unwrap();
 
         assert!(prompt.contains("Always reply in English"));
         assert!(!prompt.contains("{user_language}"));
@@ -423,7 +474,7 @@ mod tests {
             .await
             .unwrap();
 
-        let prompt = build_system_prompt(&ctx, &[]).await.unwrap();
+        let prompt = build_system_prompt(&ctx, &[], &[]).await.unwrap();
 
         assert!(prompt.contains("62.5 kg"));
         assert!(prompt.contains("female"));
@@ -436,7 +487,7 @@ mod tests {
         let (ctx, _mock, _dir) = crate::test_support::context().await;
         let plugins: Vec<Arc<dyn Plugin>> = vec![Arc::new(SnippetPlugin)];
 
-        let prompt = build_system_prompt(&ctx, &plugins).await.unwrap();
+        let prompt = build_system_prompt(&ctx, &plugins, &[]).await.unwrap();
 
         assert!(prompt.contains("### Snippet Plugin"));
         assert!(prompt.contains("today's snippet text"));
@@ -470,7 +521,7 @@ mod tests {
             .await
             .unwrap();
 
-        let prompt = build_system_prompt(&ctx, &[]).await.unwrap();
+        let prompt = build_system_prompt(&ctx, &[], &[]).await.unwrap();
 
         assert!(prompt.contains("- breakfast 燕麦牛奶 (473 kcal): 燕麦片(干) 50g"));
         assert!(prompt.contains("- day total (computed by the app): 2135 kcal"));
@@ -500,7 +551,7 @@ mod tests {
             .await
             .unwrap();
 
-        let prompt = build_system_prompt(&ctx, &[]).await.unwrap();
+        let prompt = build_system_prompt(&ctx, &[], &[]).await.unwrap();
 
         assert!(prompt.contains(&format!(
             "Tomorrow ({tomorrow}, version 1, proposed): 明天多吃蛋白质"
@@ -541,7 +592,7 @@ mod tests {
             .await
             .unwrap();
 
-        let prompt = build_system_prompt(&ctx, &[]).await.unwrap();
+        let prompt = build_system_prompt(&ctx, &[], &[]).await.unwrap();
         assert!(prompt.contains(&format!("[{}] dislikes 香菜", dislike.id)));
         assert!(prompt.contains(&format!("[{}] 只能吃便利店 (until {today})", week.id)));
         assert!(!prompt.contains("已过期"));
@@ -572,7 +623,7 @@ mod tests {
             ids.push((i, note.id));
         }
 
-        let prompt = build_system_prompt(&ctx, &[]).await.unwrap();
+        let prompt = build_system_prompt(&ctx, &[], &[]).await.unwrap();
 
         assert!(estimate_tokens(&prompt) <= TARGET_TOKENS);
         // The newest note (added last) must survive; the oldest must be the first dropped.

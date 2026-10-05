@@ -46,7 +46,10 @@ pub struct AppState {
     /// Pool on the `auth` schema, as the server's login role.
     pub auth_db: PgPool,
     pub tenants: Tenants,
-    pub limiter: RateLimiter,
+    /// Login and registration attempts per client IP.
+    pub limiter: RateLimiter<std::net::IpAddr>,
+    /// Model-backed commands per user id (`routes::LLM_COMMANDS`).
+    pub llm_limiter: RateLimiter<String>,
     dummy_hash: String,
 }
 
@@ -105,6 +108,7 @@ impl AppState {
             plugins,
             models: config.models.clone(),
             chat_model_override,
+            daily_token_budget: config.daily_token_budget,
         });
         let dummy_hash = auth::dummy_hash()
             .await
@@ -114,7 +118,11 @@ impl AppState {
             clock,
             auth_db,
             tenants,
-            limiter: RateLimiter::default(),
+            limiter: RateLimiter::new(auth::ATTEMPTS_PER_WINDOW, auth::ATTEMPT_WINDOW),
+            llm_limiter: RateLimiter::new(
+                routes::LLM_REQUESTS_PER_WINDOW,
+                routes::LLM_REQUEST_WINDOW,
+            ),
             dummy_hash,
         }))
     }

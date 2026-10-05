@@ -1,4 +1,10 @@
-import type { CommandError, ErrorDetail, ImportMessage, MacroViolation } from "../api/types";
+import type {
+  ActionPreview,
+  CommandError,
+  ErrorDetail,
+  ImportMessage,
+  MacroViolation,
+} from "../api/types";
 import { en } from "./en";
 import { ja } from "./ja";
 import { zhCN } from "./zh-CN";
@@ -40,6 +46,8 @@ const _importComplete: MessagesFor<
   "kind"
 > = zhCN.importMessages;
 const _macrosComplete: MessagesFor<MacroViolation, "rule"> = zhCN.macroViolations;
+const _previewsComplete: MessagesFor<ActionPreview, "kind"> = zhCN.approvals.previews;
+void _previewsComplete;
 void _errorsComplete;
 void _importComplete;
 void _macrosComplete;
@@ -117,4 +125,11 @@ export function describeError(e: CommandError): string {
   if (d.kind === "food_data") return describeImportMessage(d.detail);
   const entry = strings.errors[d.kind] as Entry<ErrorDetail>;
   return render(entry, d) ?? e.message;
+}
+
+/** What a pending action will do, in the current language; a preview kind this build doesn't
+ * know falls back to naming the tool. */
+export function describeActionPreview(preview: ActionPreview, toolName: string): string {
+  const entry = strings.approvals.previews[preview.kind] as Entry<ActionPreview>;
+  return render(entry, preview) ?? strings.approvals.unknown(toolName);
 }

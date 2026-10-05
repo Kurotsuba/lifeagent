@@ -4,12 +4,18 @@ use anyhow::Result;
 use lifeagent_core::app::ChatTurn;
 use serde::Serialize;
 
-/// A `send_message` turn's reply, then each activity on its own bullet line — what `chat`
-/// and `say` print (§11).
+/// A `send_message` turn's reply, then each activity on its own bullet line, then each change
+/// waiting for approval — what `chat` and `say` print (§11).
 pub fn print_turn(turn: &ChatTurn) {
     println!("{}", turn.reply);
     for activity in &turn.activities {
         println!("  · {activity}");
+    }
+    for action in &turn.pending_actions {
+        println!(
+            "  ? awaiting approval: {} {} (`actions approve {}`)",
+            action.tool_name, action.preview, action.id
+        );
     }
 }
 

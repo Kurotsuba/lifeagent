@@ -13,6 +13,7 @@
 //! `scheduler` with the daily backup, and `i18n`.
 
 pub mod app;
+pub mod approvals;
 pub mod clock;
 pub mod context;
 pub mod conversation;
@@ -33,4 +34,5 @@ pub mod settings;
 pub mod test_support;
 pub mod time;
 pub mod tools;
+pub mod untrusted;
 pub mod usage;

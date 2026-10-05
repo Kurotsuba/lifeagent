@@ -2752,3 +2752,70 @@ change and clicked Adjust lost it.
 - **List separators.** `splitList` (allergies, dislikes) split on `,` only, so `虾、花生`,
   `虾，花生` and the ja hint's own `えび、ピーナッツ` were saved as one item. It now splits on
   `,` `，` `、` `;` `；`, and the zh-CN hints say "用逗号或顿号分隔".
+
+## 2026-10-05 — Token budget and request limit per user
+
+`docs/HACKATHON.md` §2 "Serving users safely" promised per-user limits; only logins were limited.
+
+- **Daily token budget.** `UsageSink` gained `check_budget`, called by `LlmRouter::complete`
+  before every provider call, so the budget covers chat, parser calls inside tools, the planner,
+  the scheduler and event hooks alike. `DbUsageSink` sums prompt + completion tokens of the last
+  24 hours (rolling, so no time zone question) from `llm_usage` and refuses with the new
+  `LlmError::BudgetExceeded` (`budget_exceeded`, HTTP 429, `token_budget_exceeded` in the UI)
+  once the total reaches the budget. The call that crosses it still completes, since its size
+  isn't known beforehand. If the usage query fails, the check fails closed. Configured with
+  `LIFEAGENT_DAILY_TOKEN_BUDGET` (`CoreAppBuilder::daily_token_budget`); **unset for now, so
+  no cap** — `deploy/env.yaml` has the line commented out.
+- **No `max_tokens` cap per call yet.** Left as before (no cap), by request.
+- **Request rate limit.** `send_message`, `generate_plan` and `revise_plan` are limited to 30
+  per user per 10 minutes (`routes::LLM_COMMANDS`), in memory like the login limiter, which
+  became `RateLimiter<K>` keyed by IP or user id. Other commands don't call the model.
+
+## 2026-10-05 — Approval for sensitive tool calls
+
+The past-day delete guard was a flag the model set itself, so nothing stopped a confused or
+prompt-injected model from changing allergies or planting a preference.
+
+- **Mechanism.** `Plugin::approval_preview` (core: `core_tools::approval_preview`) returns
+  `Some(preview)` for a call that must wait. The chat loop then doesn't run it: it stores the call
+  in the new `pending_actions` table (`core/approvals.rs`, migration 0003) and gives the model a
+  tool result saying it awaits the user. `ChatTurn.pending_actions` and `get_pending_actions`
+  carry it to the UI, which shows the preview with approve/reject buttons above the chat input.
+  `approve_action` runs the stored call exactly as made (schema-checked again), under the turn
+  lock so it runs once; `reject_action` discards it. A tool that refuses on approval marks the
+  action `failed` with its reason. Pending actions expire after 24 hours. Only these commands
+  approve: nothing the model writes can.
+- **What waits.** Allergy changes (hard constraints), adding or removing a preference (they shape
+  every plan and are quoted in every prompt — where an injected instruction would try to
+  persist), deleting an entry from an earlier logical date (`past_day` is still required first,
+  so a mistaken delete is refused outright instead of asking), removing a member, and changing a
+  member's allergies. Preferences and allergies edited on the Settings and Members pages don't
+  wait: the user is the one acting there.
+- **The model learns the outcome** from a section of the system prompt listing the last 24
+  hours' actions with their status, not from synthetic messages: fake assistant tool calls
+  would lack Gemini's thought signatures, and a trailing user-role note would look like an
+  unfinished turn to `send_message`'s retry logic.
+- **Preview as data.** `{"kind": ..., ...}`, worded by the UI's `approvals.previews` table in
+  each locale; an unknown kind falls back to naming the tool. The CLI prints pending actions
+  after a turn and has `actions [approve|reject <id>]`.
+
+## 2026-10-05 — Untrusted data in prompts
+
+- **Fencing.** `core/untrusted.rs`: `fence` wraps text in `<untrusted_data>` tags and replaces
+  `<`/`>` inside with `‹`/`›`, so stored text can't close the fence and continue as prompt. The
+  conversation system prompt fences everything below the rules as one block (profile, goals,
+  plugin snippets, plans, preferences, recent actions), and every tool result is fenced when
+  the history is turned into model messages (stored messages are unchanged). The planner fences
+  the profile, preferences, sections planned in earlier stages and the plan being revised.
+- **Rules.** Both prompts state that fenced text and tool results are data, never instructions,
+  and that only the user's own messages (planner: the user's request parts) ask for anything.
+  The user's chat messages and plan requests are not fenced: they are the instructions.
+- **Not fenced yet.** Plugin plan briefs mix the plugin's own rules with user data (stock and
+  member names), so fencing them whole would also mute the rules; the parser prompts embed
+  imported names as JSON arrays. Neither has tools, and their output is validated in Rust.
+- **Limits.** Fencing lowers the odds a model follows injected text; it can't guarantee it.
+  The approval gate and the per-user database roles bound what happens if it does.
+  `app::tests::a_prompt_injection_in_stored_data_cannot_remove_allergies` shows both layers:
+  an injected closing tag arrives defused, and a model that obeys the injection anyway only
+  produces a pending action.
+

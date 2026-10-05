@@ -36,6 +36,7 @@ async fn start_with(edit: impl FnOnce(&mut ServerConfig)) -> TestServer {
         tick_token: Some(TICK_TOKEN.into()),
         inprocess_scheduler: false,
         secure_cookies: false,
+        daily_token_budget: None,
     };
     edit(&mut config);
     let state = AppState::new(config, Arc::new(SystemClock)).await.unwrap();
@@ -710,4 +711,114 @@ async fn members_attendance_and_dislikes_over_http() {
         .post(&session, "/api/archive_member", json!({ "id": id }))
         .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn model_commands_are_rate_limited_per_user() {
+    let server = start().await;
+    let alice = server.register("alice").await;
+    let bob = server.register("bob").await;
+
+    for _ in 0..lifeagent_server::routes::LLM_REQUESTS_PER_WINDOW {
+        let (status, _) = server
+            .post(&alice, "/api/send_message", json!({ "text": "hi" }))
+            .await;
+        assert_eq!(status, StatusCode::OK);
+    }
+    let (status, body) = server
+        .post(&alice, "/api/send_message", json!({ "text": "hi" }))
+        .await;
+    assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(body["detail"]["kind"], "too_many_requests");
+    // Other commands, and other users, are unaffected.
+    let (status, _) = server.post(&alice, "/api/get_today", json!({})).await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = server
+        .post(&bob, "/api/send_message", json!({ "text": "hi" }))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn a_spent_token_budget_refuses_model_calls() {
+    // The echo model reports no tokens, so only a zero budget is spent from the start.
+    let server = start_with(|c| c.daily_token_budget = Some(0)).await;
+    let alice = server.register("alice").await;
+    let (status, body) = server
+        .post(&alice, "/api/send_message", json!({ "text": "hi" }))
+        .await;
+    assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(body["code"], "budget_exceeded");
+    assert_eq!(body["detail"]["kind"], "token_budget_exceeded");
+}
+
+#[tokio::test]
+async fn pending_actions_are_approved_or_rejected_by_their_owner_only() {
+    let server = start().await;
+    let alice = server.register("alice").await;
+    let bob = server.register("bob").await;
+
+    // The echo model never calls tools, so the actions are queued the way a chat turn would.
+    let state = server.state.as_ref().unwrap();
+    let tenant = state
+        .tenants
+        .get(&server.schema_of("alice").await)
+        .await
+        .unwrap();
+    let queue = |text: &str| {
+        let args = json!({"kind": "dislike", "text": text, "permanent": true});
+        let preview = json!({"kind": "add_preference", "text": text});
+        let approvals = tenant.app.approvals().clone();
+        async move {
+            approvals
+                .create("core_add_preference", &args, &preview)
+                .await
+                .unwrap()
+        }
+    };
+    let cilantro = queue("香菜").await;
+    let celery = queue("芹菜").await;
+
+    let (_, pending) = server
+        .post(&alice, "/api/get_pending_actions", json!({}))
+        .await;
+    assert_eq!(pending.as_array().unwrap().len(), 2);
+    assert_eq!(pending[0]["preview"]["text"], "香菜");
+    let (_, pending) = server
+        .post(&bob, "/api/get_pending_actions", json!({}))
+        .await;
+    assert_eq!(pending, json!([]));
+
+    // Bob's own tenant has no such action.
+    let (status, _) = server
+        .post(&bob, "/api/approve_action", json!({ "id": cilantro.id }))
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    let (status, approved) = server
+        .post(&alice, "/api/approve_action", json!({ "id": cilantro.id }))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(approved["status"], "approved");
+    let (status, body) = server
+        .post(&alice, "/api/approve_action", json!({ "id": cilantro.id }))
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(body["detail"]["kind"], "action_not_pending");
+
+    let (_, rejected) = server
+        .post(&alice, "/api/reject_action", json!({ "id": celery.id }))
+        .await;
+    assert_eq!(rejected["status"], "rejected");
+
+    let (_, preferences) = server
+        .post(&alice, "/api/get_preferences", json!({ "limit": 10 }))
+        .await;
+    let texts: Vec<&str> = preferences
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p["text"].as_str().unwrap())
+        .collect();
+    assert_eq!(texts, vec!["香菜"]);
 }

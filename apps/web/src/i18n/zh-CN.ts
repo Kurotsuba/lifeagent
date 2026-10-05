@@ -326,6 +326,49 @@ export const zhCN = {
     thinking: "思考中",
     sendFailed: "发送失败",
   },
+  // Tool calls waiting for the user's approval (`PendingAction`, `crates/core/src/approvals.rs`).
+  approvals: {
+    title: "需要你确认",
+    hint: "助手请求做以下更改，只有你批准后才会执行。",
+    approve: "批准",
+    reject: "拒绝",
+    approved: "已批准并执行",
+    rejected: "已拒绝，未做更改",
+    expired: "已过期，未做更改",
+    failed: (reason: string) => `已批准，但执行失败：${reason}`,
+    failedToResolve: "操作失败",
+    // Keyed by `ActionPreview.kind`.
+    previews: {
+      update_allergies: (d: { add: string[]; remove: string[] }) =>
+        [
+          d.add.length > 0 ? `添加过敏食物：${d.add.join("、")}` : "",
+          d.remove.length > 0 ? `移除过敏食物：${d.remove.join("、")}` : "",
+        ]
+          .filter((s) => s !== "")
+          .join("；"),
+      add_preference: (d: {
+        preference_kind: "dislike" | "general";
+        text: string;
+        valid_from: string | null;
+        valid_until: string | null;
+        permanent: boolean;
+      }) =>
+        `记住${d.preference_kind === "dislike" ? "不喜欢的食物" : "偏好"}：${d.text}` +
+        (d.permanent
+          ? "（长期）"
+          : d.valid_from || d.valid_until
+            ? `（${d.valid_from ?? ""}～${d.valid_until ?? ""}）`
+            : "（一个月）"),
+      remove_preference: (d: { preference_kind: "dislike" | "general"; text: string }) =>
+        `删除${d.preference_kind === "dislike" ? "不喜欢的食物" : "偏好"}：${d.text}`,
+      delete_past_entry: (d: { logical_date: string; description: string | null }) =>
+        `删除 ${d.logical_date} 的记录${d.description ? `：${d.description}` : ""}`,
+      archive_member: (d: { name: string }) => `移除成员：${d.name}`,
+      update_member_allergies: (d: { name: string; allergies: string[] }) =>
+        `把 ${d.name} 的过敏食物改为：${d.allergies.length > 0 ? d.allergies.join("、") : "无"}`,
+    },
+    unknown: (tool: string) => `执行操作：${tool}`,
+  },
   settings: {
     saveSucceeded: "已保存",
     saveFailed: "保存失败，请重试。",
@@ -489,6 +532,8 @@ export const zhCN = {
     llm_rate_limited: "请求过于频繁，请稍后再试。",
     llm_timeout: "请求超时，请重试。",
     llm_unavailable: "模型服务出现问题，请重试。",
+    token_budget_exceeded: "今天的 AI 使用量已达上限，请明天再试。",
+    action_not_pending: "该操作已处理或已过期。",
     height_out_of_range: (d: { got: number }) =>
       `身高需在 120–230 厘米之间，当前填写的是 ${d.got.toFixed(1)} 厘米。`,
     age_out_of_range: (d: { got: number }) =>
@@ -520,6 +565,7 @@ export const zhCN = {
     invalid_username: "用户名需为 3–32 位英文字母、数字或 _ - . 组成。",
     invalid_password: "密码需为 8–128 位。",
     too_many_attempts: "尝试次数过多，请稍后再试。",
+    too_many_requests: "请求过于频繁，请稍等片刻再试。",
     invalid_credentials: "用户名或密码错误。",
     username_taken: "该用户名已被使用。",
     bad_request: "请求参数有误。",

@@ -79,6 +79,44 @@ export type MessageRole = "user" | "assistant" | "tool";
 export interface ChatTurn {
   reply: string;
   activities: string[];
+  /** Tool calls from this turn that wait for the user's approval. */
+  pending_actions: PendingAction[];
+}
+
+// ---- Approvals (`crates/core/src/approvals.rs`) --------------------------------------------
+
+export type ActionStatus = "pending" | "approved" | "rejected" | "failed" | "expired";
+
+/** What an action will do (`approval_preview` in core and the plugins), worded by the UI. */
+export type ActionPreview =
+  | { kind: "update_allergies"; add: string[]; remove: string[] }
+  | {
+      kind: "add_preference";
+      preference_kind: PreferenceKind;
+      text: string;
+      valid_from: string | null;
+      valid_until: string | null;
+      permanent: boolean;
+    }
+  | { kind: "remove_preference"; preference_kind: PreferenceKind; text: string }
+  | {
+      kind: "delete_past_entry";
+      event_type: string;
+      logical_date: string;
+      description: string | null;
+    }
+  | { kind: "archive_member"; name: string }
+  | { kind: "update_member_allergies"; name: string; allergies: string[] };
+
+export interface PendingAction {
+  id: string;
+  tool_name: string;
+  preview: ActionPreview;
+  status: ActionStatus;
+  /** The tool's own summary once approved, or why it failed. */
+  result_summary: string | null;
+  created_at: string;
+  resolved_at: string | null;
 }
 
 export interface HistoryMessage {
@@ -630,7 +668,9 @@ export type CommandErrorCode =
   | "invalid_credentials"
   | "username_taken"
   | "forbidden"
-  | "rate_limited";
+  | "rate_limited"
+  | "budget_exceeded"
+  | "action_not_pending";
 
 /** What went wrong (`ErrorDetail`, `crates/api/src/error.rs`), worded by `describeError`. */
 export type ErrorDetail =
@@ -644,6 +684,8 @@ export type ErrorDetail =
   | { kind: "llm_rate_limited" }
   | { kind: "llm_timeout" }
   | { kind: "llm_unavailable" }
+  | { kind: "token_budget_exceeded" }
+  | { kind: "action_not_pending" }
   | { kind: "height_out_of_range"; got: number }
   | { kind: "age_out_of_range"; got: number }
   | { kind: "meals_per_day_out_of_range"; got: number }
@@ -666,6 +708,7 @@ export type ErrorDetail =
   | { kind: "invalid_username" }
   | { kind: "invalid_password" }
   | { kind: "too_many_attempts" }
+  | { kind: "too_many_requests" }
   | { kind: "invalid_credentials" }
   | { kind: "username_taken" }
   | { kind: "bad_request" }

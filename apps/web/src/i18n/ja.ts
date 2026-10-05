@@ -320,6 +320,47 @@ export const ja: Strings = {
     thinking: "考え中",
     sendFailed: "送信に失敗しました",
   },
+  approvals: {
+    title: "確認が必要です",
+    hint: "アシスタントが次の変更を求めています。承認するまで実行されません。",
+    approve: "承認",
+    reject: "却下",
+    approved: "承認して実行しました",
+    rejected: "却下しました（変更なし）",
+    expired: "期限切れです（変更なし）",
+    failed: (reason: string) => `承認しましたが、実行に失敗しました：${reason}`,
+    failedToResolve: "操作に失敗しました",
+    previews: {
+      update_allergies: (d: { add: string[]; remove: string[] }) =>
+        [
+          d.add.length > 0 ? `アレルギーに追加：${d.add.join("、")}` : "",
+          d.remove.length > 0 ? `アレルギーから削除：${d.remove.join("、")}` : "",
+        ]
+          .filter((s) => s !== "")
+          .join("／"),
+      add_preference: (d: {
+        preference_kind: "dislike" | "general";
+        text: string;
+        valid_from: string | null;
+        valid_until: string | null;
+        permanent: boolean;
+      }) =>
+        `${d.preference_kind === "dislike" ? "苦手な食べ物" : "好み"}を保存：${d.text}` +
+        (d.permanent
+          ? "（ずっと）"
+          : d.valid_from || d.valid_until
+            ? `（${d.valid_from ?? ""}〜${d.valid_until ?? ""}）`
+            : "（1か月）"),
+      remove_preference: (d: { preference_kind: "dislike" | "general"; text: string }) =>
+        `${d.preference_kind === "dislike" ? "苦手な食べ物" : "好み"}を削除：${d.text}`,
+      delete_past_entry: (d: { logical_date: string; description: string | null }) =>
+        `${d.logical_date} の記録を削除${d.description ? `：${d.description}` : ""}`,
+      archive_member: (d: { name: string }) => `メンバーを削除：${d.name}`,
+      update_member_allergies: (d: { name: string; allergies: string[] }) =>
+        `${d.name} さんのアレルギーを変更：${d.allergies.length > 0 ? d.allergies.join("、") : "なし"}`,
+    },
+    unknown: (tool: string) => `操作を実行：${tool}`,
+  },
   settings: {
     saveSucceeded: "保存しました",
     saveFailed: "保存に失敗しました。もう一度お試しください。",
@@ -484,6 +525,8 @@ export const ja: Strings = {
     llm_rate_limited: "リクエストが多すぎます。しばらくしてから再試行してください。",
     llm_timeout: "リクエストがタイムアウトしました。もう一度お試しください。",
     llm_unavailable: "モデルのサービスで問題が発生しました。もう一度お試しください。",
+    token_budget_exceeded: "今日の AI 利用量の上限に達しました。明日もう一度お試しください。",
+    action_not_pending: "この操作はすでに処理されたか、期限切れです。",
     height_out_of_range: (d: { got: number }) =>
       `身長は 120〜230 cm の範囲で入力してください（入力値：${d.got.toFixed(1)} cm）。`,
     age_out_of_range: (d: { got: number }) =>
@@ -515,6 +558,7 @@ export const ja: Strings = {
     invalid_username: "ユーザー名は半角英数字と _ - . で 3〜32 文字にしてください。",
     invalid_password: "パスワードは 8〜128 文字にしてください。",
     too_many_attempts: "試行回数が多すぎます。しばらくしてから再試行してください。",
+    too_many_requests: "リクエストが多すぎます。少し待ってから再試行してください。",
     invalid_credentials: "ユーザー名またはパスワードが正しくありません。",
     username_taken: "このユーザー名はすでに使われています。",
     bad_request: "リクエストの内容に誤りがあります。",

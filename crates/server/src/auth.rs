@@ -36,8 +36,8 @@ pub const SESSION_COOKIE: &str = "lifeagent_session";
 const SESSION_DAYS: i64 = 30;
 
 /// Login + registration attempts allowed per client IP per window.
-const ATTEMPTS_PER_WINDOW: u32 = 20;
-const ATTEMPT_WINDOW: Duration = Duration::from_secs(10 * 60);
+pub const ATTEMPTS_PER_WINDOW: u32 = 20;
+pub const ATTEMPT_WINDOW: Duration = Duration::from_secs(10 * 60);
 
 // ---- Validation ------------------------------------------------------------------------------
 
@@ -186,25 +186,35 @@ async fn start_session(state: &AppState, user_id: &str) -> Result<HeaderValue, A
 
 // ---- Rate limiting ----------------------------------------------------------------------------
 
-/// Fixed-window attempt counter per client IP, in memory (per server instance).
-#[derive(Default)]
-pub struct RateLimiter {
-    windows: Mutex<HashMap<IpAddr, (Instant, u32)>>,
+/// Fixed-window attempt counter per key (client IP for logins, user id for model-backed
+/// commands), in memory (per server instance; the service runs one).
+pub struct RateLimiter<K> {
+    limit: u32,
+    window: Duration,
+    windows: Mutex<HashMap<K, (Instant, u32)>>,
 }
 
-impl RateLimiter {
-    pub fn allow(&self, ip: IpAddr) -> bool {
+impl<K: std::hash::Hash + Eq> RateLimiter<K> {
+    pub fn new(limit: u32, window: Duration) -> Self {
+        Self {
+            limit,
+            window,
+            windows: Mutex::new(HashMap::new()),
+        }
+    }
+
+    pub fn allow(&self, key: K) -> bool {
         let mut windows = self.windows.lock().unwrap_or_else(PoisonError::into_inner);
         let now = Instant::now();
         if windows.len() > 10_000 {
-            windows.retain(|_, (start, _)| now.duration_since(*start) < ATTEMPT_WINDOW);
+            windows.retain(|_, (start, _)| now.duration_since(*start) < self.window);
         }
-        let entry = windows.entry(ip).or_insert((now, 0));
-        if now.duration_since(entry.0) >= ATTEMPT_WINDOW {
+        let entry = windows.entry(key).or_insert((now, 0));
+        if now.duration_since(entry.0) >= self.window {
             *entry = (now, 0);
         }
         entry.1 += 1;
-        entry.1 <= ATTEMPTS_PER_WINDOW
+        entry.1 <= self.limit
     }
 }
 
@@ -462,7 +472,7 @@ mod tests {
 
     #[test]
     fn the_rate_limiter_caps_attempts_per_ip() {
-        let limiter = RateLimiter::default();
+        let limiter = RateLimiter::new(ATTEMPTS_PER_WINDOW, ATTEMPT_WINDOW);
         let ip: IpAddr = "203.0.113.7".parse().unwrap();
         for _ in 0..ATTEMPTS_PER_WINDOW {
             assert!(limiter.allow(ip));

@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use lifeagent_llm::error::LlmError;
 use lifeagent_llm::router::{UsageEvent, UsageSink};
 use lifeagent_llm::types::Role;
 use serde::Serialize;
@@ -22,12 +23,35 @@ use crate::error::CoreError;
 pub struct DbUsageSink {
     db: PgPool,
     clock: Arc<dyn Clock>,
+    /// Prompt + completion tokens allowed per rolling 24 hours (`CoreAppBuilder::daily_token_budget`).
+    /// `None`: no limit.
+    daily_token_budget: Option<u64>,
 }
 
 impl DbUsageSink {
     pub fn new(db: PgPool, clock: Arc<dyn Clock>) -> Self {
-        Self { db, clock }
+        Self {
+            db,
+            clock,
+            daily_token_budget: None,
+        }
     }
+
+    pub fn with_daily_token_budget(mut self, budget: Option<u64>) -> Self {
+        self.daily_token_budget = budget;
+        self
+    }
+}
+
+/// Prompt + completion tokens of every call recorded at or after `since`, all roles together.
+pub async fn tokens_since(db: &PgPool, since: DateTime<Utc>) -> Result<i64, CoreError> {
+    let total: Option<i64> = sqlx::query_scalar(
+        "SELECT SUM(prompt_tokens + completion_tokens)::BIGINT FROM llm_usage WHERE created_at >= $1",
+    )
+    .bind(since.to_rfc3339())
+    .fetch_one(db)
+    .await?;
+    Ok(total.unwrap_or(0))
 }
 
 fn role_str(role: Role) -> &'static str {
@@ -105,6 +129,28 @@ impl UsageSink for DbUsageSink {
         if let Err(e) = result {
             tracing::error!(error = %e, "failed to record llm usage");
         }
+    }
+
+    /// Refuses the call once the last 24 hours' tokens reach the budget. The call that crosses
+    /// it still completes (its size isn't known in advance); the next one is refused.
+    async fn check_budget(&self, role: Role) -> Result<(), LlmError> {
+        let Some(budget) = self.daily_token_budget else {
+            return Ok(());
+        };
+        let since = self.clock.now() - chrono::Duration::hours(24);
+        let used = match tokens_since(&self.db, since).await {
+            Ok(used) => used,
+            // Fail closed: without the count there's no way to tell the budget holds.
+            Err(e) => {
+                tracing::error!(error = %e, "failed to read llm usage for the token budget");
+                return Err(LlmError::BudgetExceeded);
+            }
+        };
+        if used >= i64::try_from(budget).unwrap_or(i64::MAX) {
+            tracing::warn!(role = role_str(role), used, budget, "token budget exceeded");
+            return Err(LlmError::BudgetExceeded);
+        }
+        Ok(())
     }
 }
 
@@ -225,5 +271,39 @@ mod tests {
                 completion_tokens: 5,
             }]
         );
+    }
+
+    #[tokio::test]
+    async fn the_budget_counts_the_last_24_hours_of_all_roles() {
+        let (db, _dir) = crate::db::test_pool().await;
+        let now = Utc.with_ymd_and_hms(2026, 9, 15, 12, 0, 0).unwrap();
+        let day_ago = now - chrono::Duration::hours(25);
+        DbUsageSink::new(db.clone(), Arc::new(crate::clock::FixedClock::new(day_ago)))
+            .record(event(Role::Planner, 1000, 1000))
+            .await;
+        let sink = DbUsageSink::new(db.clone(), Arc::new(crate::clock::FixedClock::new(now)))
+            .with_daily_token_budget(Some(100));
+
+        // Older than 24 hours: not counted.
+        assert!(sink.check_budget(Role::Conversation).await.is_ok());
+        sink.record(event(Role::Parser, 60, 10)).await;
+        assert!(sink.check_budget(Role::Conversation).await.is_ok());
+        sink.record(event(Role::Conversation, 20, 10)).await;
+        assert!(matches!(
+            sink.check_budget(Role::Parser).await,
+            Err(LlmError::BudgetExceeded)
+        ));
+    }
+
+    #[tokio::test]
+    async fn without_a_budget_nothing_is_refused() {
+        let (db, _dir) = crate::db::test_pool().await;
+        let sink = DbUsageSink::new(
+            db.clone(),
+            Arc::new(crate::clock::FixedClock::new(Utc::now())),
+        );
+        sink.record(event(Role::Planner, 1_000_000, 1_000_000))
+            .await;
+        assert!(sink.check_budget(Role::Planner).await.is_ok());
     }
 }

@@ -140,6 +140,19 @@ pub trait Plugin: Send + Sync {
         args: Value,
     ) -> Result<ToolOutput, PluginError>;
 
+    /// For a call of one of this plugin's tools from chat: `Some(preview)` if it must wait for
+    /// the user's approval in the app instead of running now (`crate::approvals`). The preview is
+    /// `{"kind": "<snake_case>", ...}`, data the UI words in the user's language. Called with
+    /// arguments that already passed the tool's schema. By default, nothing needs approval.
+    async fn approval_preview(
+        &self,
+        _ctx: &PluginContext,
+        _name: &str,
+        _args: &Value,
+    ) -> Result<Option<Value>, PluginError> {
+        Ok(None)
+    }
+
     async fn on_event(&self, _ctx: &PluginContext, _e: &Event) -> Result<(), PluginError> {
         Ok(())
     }

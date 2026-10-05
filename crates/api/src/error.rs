@@ -53,6 +53,11 @@ pub enum ErrorDetail {
     LlmRateLimited,
     LlmTimeout,
     LlmUnavailable,
+    /// The account's daily token budget is used up (`LlmError::BudgetExceeded`).
+    TokenBudgetExceeded,
+    // ---- Approvals (`CoreError::ActionNotPending`) ----
+    /// The action was already approved, rejected or has expired.
+    ActionNotPending,
     // ---- `ValidationRule` ----
     HeightOutOfRange {
         got: f64,
@@ -108,6 +113,8 @@ pub enum ErrorDetail {
     InvalidUsername,
     InvalidPassword,
     TooManyAttempts,
+    /// Too many model-backed requests from one account in a short time.
+    TooManyRequests,
     InvalidCredentials,
     UsernameTaken,
     BadRequest,
@@ -128,6 +135,8 @@ impl std::fmt::Display for ErrorDetail {
             LlmRateLimited => write!(f, "请求过于频繁，请稍后再试。"),
             LlmTimeout => write!(f, "请求超时，请重试。"),
             LlmUnavailable => write!(f, "模型服务出现问题，请重试。"),
+            TokenBudgetExceeded => write!(f, "今天的 AI 使用量已达上限，请明天再试。"),
+            ActionNotPending => write!(f, "该操作已处理或已过期。"),
             HeightOutOfRange { got } => {
                 write!(f, "身高需在 120–230 厘米之间，当前填写的是 {got:.1} 厘米。")
             }
@@ -183,6 +192,7 @@ impl std::fmt::Display for ErrorDetail {
             InvalidUsername => write!(f, "用户名需为 3–32 位英文字母、数字或 _ - . 组成。"),
             InvalidPassword => write!(f, "密码需为 8–128 位。"),
             TooManyAttempts => write!(f, "尝试次数过多，请稍后再试。"),
+            TooManyRequests => write!(f, "请求过于频繁，请稍等片刻再试。"),
             InvalidCredentials => write!(f, "用户名或密码错误。"),
             UsernameTaken => write!(f, "该用户名已被使用。"),
             BadRequest => write!(f, "请求参数有误。"),
@@ -213,6 +223,7 @@ impl From<CoreError> for CommandError {
             }
             CoreError::NothingToPlan => CommandError::new(code, ErrorDetail::NothingToPlan),
             CoreError::PlanBusy => CommandError::new(code, ErrorDetail::PlanBusy),
+            CoreError::ActionNotPending => CommandError::new(code, ErrorDetail::ActionNotPending),
             CoreError::Llm(e) => e.into(),
             other => {
                 tracing::error!(error = %other, "internal command error");
@@ -343,6 +354,7 @@ impl From<LlmError> for CommandError {
                 CommandError::new(code, ErrorDetail::NotConfigured)
             }
             LlmError::RateLimited => CommandError::new(code, ErrorDetail::LlmRateLimited),
+            LlmError::BudgetExceeded => CommandError::new(code, ErrorDetail::TokenBudgetExceeded),
             LlmError::Timeout => CommandError::new(code, ErrorDetail::LlmTimeout),
             // These three can carry a provider's raw response text (`Status.body_excerpt`) or a
             // `reqwest`/`serde_json` error message, which may itself quote a fragment of the

@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
-import { getHistory, sendMessage } from "../api/commands";
+import { getHistory, getPendingActions, sendMessage } from "../api/commands";
 import { onAppDataEvent } from "../api/events";
-import { commandErrorMessage, type HistoryMessage } from "../api/types";
+import { commandErrorMessage, type HistoryMessage, type PendingAction } from "../api/types";
 import { inputClass } from "../components/Field";
 import { primaryButtonClass } from "../components/buttonStyles";
 import { strings } from "../i18n";
+import { PendingActions } from "./PendingActions";
 
 const HISTORY_LIMIT = 50;
 
@@ -25,6 +26,9 @@ export function Chat({ draftText, onDraftConsumed }: ChatProps) {
     content: string;
     activities: string[];
   } | null>(null);
+  const [pendingActions, setPendingActions] = useState<PendingAction[]>([]);
+  // Approved/rejected here since the last message, kept on screen with their outcome until then.
+  const [resolvedActions, setResolvedActions] = useState<PendingAction[]>([]);
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -32,7 +36,12 @@ export function Chat({ draftText, onDraftConsumed }: ChatProps) {
 
   async function refetch() {
     try {
-      setHistory(await getHistory(HISTORY_LIMIT));
+      const [messages, pending] = await Promise.all([
+        getHistory(HISTORY_LIMIT),
+        getPendingActions(),
+      ]);
+      setHistory(messages);
+      setPendingActions(pending);
     } catch {
       // Background refetch (triggered by an app event, not the user) — the send path below has
       // its own error UI, so a failed refetch here just leaves the last-known history in place.
@@ -63,6 +72,7 @@ export function Chat({ draftText, onDraftConsumed }: ChatProps) {
     setSending(true);
     setError(null);
     setText("");
+    setResolvedActions([]);
     const optimisticUser: HistoryMessage = {
       role: "user",
       content: trimmed,
@@ -78,6 +88,10 @@ export function Chat({ draftText, onDraftConsumed }: ChatProps) {
     try {
       const turn = await sendMessage(trimmed);
       setLastLiveReply({ content: turn.reply, activities: turn.activities });
+      setPendingActions((p) => [
+        ...p,
+        ...turn.pending_actions.filter((a) => !p.some((q) => q.id === a.id)),
+      ]);
       await refetch();
     } catch (e) {
       // Resync with what was actually stored instead of just dropping the optimistic bubble:
@@ -99,6 +113,11 @@ export function Chat({ draftText, onDraftConsumed }: ChatProps) {
   }
 
   const visible = history.filter((m) => m.role !== "tool");
+
+  function handleResolved(action: PendingAction) {
+    setPendingActions((p) => p.filter((a) => a.id !== action.id));
+    setResolvedActions((r) => [...r.filter((a) => a.id !== action.id), action]);
+  }
 
   return (
     <div className="flex h-full flex-col">
@@ -163,6 +182,14 @@ export function Chat({ draftText, onDraftConsumed }: ChatProps) {
           ) : null}
         </div>
       </div>
+
+      <PendingActions
+        actions={[
+          ...pendingActions,
+          ...resolvedActions.filter((r) => !pendingActions.some((p) => p.id === r.id)),
+        ]}
+        onResolved={handleResolved}
+      />
 
       {error ? (
         <div className="mx-auto flex w-full max-w-2xl flex-wrap items-center gap-3 px-4 pb-2 md:px-6 text-sm text-red-600 dark:text-red-400">

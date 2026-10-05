@@ -103,14 +103,8 @@ impl ToolRegistry {
         }
     }
 
-    /// Validates `args` against the tool's JSON Schema, then routes to core or the owning
-    /// plugin.
-    pub async fn call(
-        &self,
-        ctx: &PluginContext,
-        name: &str,
-        args: Value,
-    ) -> Result<ToolOutput, PluginError> {
+    /// The owner and spec of `name`, after validating `args` against the spec's JSON Schema.
+    fn checked(&self, name: &str, args: &Value) -> Result<&ToolOwner, PluginError> {
         let owner = self
             .owners
             .get(name)
@@ -120,8 +114,34 @@ impl ToolRegistry {
             .iter()
             .find(|s| s.name == name)
             .expect("an owner entry always has a matching spec");
-        validate_args(&spec.parameters, &args).map_err(PluginError::InvalidArgs)?;
+        validate_args(&spec.parameters, args).map_err(PluginError::InvalidArgs)?;
+        Ok(owner)
+    }
 
+    /// `Some(preview)` if this call must wait for the user's approval (`crate::approvals`).
+    /// Validates `args` first, so an invalid call is refused right away rather than queued.
+    pub async fn approval_preview(
+        &self,
+        ctx: &PluginContext,
+        name: &str,
+        args: &Value,
+    ) -> Result<Option<Value>, PluginError> {
+        match self.checked(name, args)? {
+            ToolOwner::Core => core_tools::approval_preview(ctx, name, args).await,
+            ToolOwner::Plugin(plugin) => plugin.approval_preview(ctx, name, args).await,
+        }
+    }
+
+    /// Validates `args` against the tool's JSON Schema, then routes to core or the owning
+    /// plugin. Runs the tool whether or not it needs approval: the caller checks
+    /// [`ToolRegistry::approval_preview`] first.
+    pub async fn call(
+        &self,
+        ctx: &PluginContext,
+        name: &str,
+        args: Value,
+    ) -> Result<ToolOutput, PluginError> {
+        let owner = self.checked(name, &args)?;
         match owner {
             ToolOwner::Core => core_tools::call(ctx, &self.planner, name, args).await,
             ToolOwner::Plugin(plugin) => plugin.call_tool(ctx, name, args).await,

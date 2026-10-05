@@ -453,9 +453,14 @@ To make that visible:
 - **Audit trail UI:** show every tool call, with its arguments, result and who triggered it
   (chat or scheduler).
 - **Human approval for risky actions:** past-day deletes and preference/allergy writes go through a
-  confirmation step instead of only a flag the model sets.
+  confirmation step instead of only a flag the model sets. Done 2026-10-05 (`docs/DECISIONS.md`,
+  "Approval for sensitive tool calls").
 - **Prompt-injection defense:** treat imported food tables and dish names as untrusted data.
-- **Per-tool permissions and cost/token budgets**, built on the existing usage sink.
+  Done 2026-10-05 for the chat and planner prompts (`docs/DECISIONS.md`, "Untrusted data in
+  prompts").
+- **Per-tool permissions and cost/token budgets**, built on the existing usage sink. Token
+  budget and per-user request limit done 2026-10-05 (`docs/DECISIONS.md`, "Token budget and
+  request limit per user"); the budget is not switched on in `deploy/env.yaml` yet.
 - **More autonomy:** the scheduler already generates the next-day plan. Proactive follow-ups
   (e.g. "you haven't logged lunch") would show the agent acting on its own. Show this in the
   video.

@@ -15,6 +15,7 @@ import type {
   Dish,
   Food,
   HistoryMessage,
+  PendingAction,
   AttendanceSlot,
   MembersView,
   MainMealType,
@@ -91,6 +92,18 @@ export function sendMessage(text: string): Promise<ChatTurn> {
 
 export function getHistory(limit: number): Promise<HistoryMessage[]> {
   return call("get_history", { limit });
+}
+
+export function getPendingActions(): Promise<PendingAction[]> {
+  return call("get_pending_actions");
+}
+
+export function approveAction(id: string): Promise<PendingAction> {
+  return call("approve_action", { id });
+}
+
+export function rejectAction(id: string): Promise<PendingAction> {
+  return call("reject_action", { id });
 }
 
 // ---- Today / plan --------------------------------------------------------------------------

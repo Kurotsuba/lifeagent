@@ -36,7 +36,8 @@ pub fn specs() -> Vec<lifeagent_llm::types::ToolSpec> {
             name: "core_update_allergies".into(),
             description: "Add or remove foods the user is allergic to. Use whenever the user \
                 reports an allergy (or that one is gone). Allergies are permanent hard \
-                constraints; use core_add_preference for foods they merely dislike."
+                constraints; use core_add_preference for foods they merely dislike. The change \
+                waits for the user's approval in the app."
                 .into(),
             parameters: json!({
                 "type": "object",
@@ -57,7 +58,7 @@ pub fn specs() -> Vec<lifeagent_llm::types::ToolSpec> {
                 it lasts one month from valid_from (default today). Set permanent: true only \
                 when the user says it always applies (e.g. 'I never eat cilantro'). Text at \
                 most 300 characters. Not for allergies (core_update_allergies) or one-off changes to \
-                a single plan (core_revise_plan)."
+                a single plan (core_revise_plan). Waits for the user's approval in the app."
                 .into(),
             parameters: json!({
                 "type": "object",
@@ -74,7 +75,8 @@ pub fn specs() -> Vec<lifeagent_llm::types::ToolSpec> {
         ToolSpec {
             name: "core_remove_preference".into(),
             description: "Delete a saved preference by its id, e.g. when the user says it no \
-                longer applies. To change one, remove it and add the new version."
+                longer applies. To change one, remove it and add the new version. Waits for \
+                the user's approval in the app."
                 .into(),
             parameters: json!({
                 "type": "object",
@@ -129,7 +131,8 @@ pub fn specs() -> Vec<lifeagent_llm::types::ToolSpec> {
                 id. Use this when the user corrects or retracts something they reported, \
                 before logging the corrected version. Entries from an earlier logical date \
                 are refused unless `past_day` is true; set it only when the user explicitly \
-                asks to change that earlier day's record."
+                asks to change that earlier day's record. Such a delete then waits for the \
+                user's approval in the app."
                 .into(),
             parameters: json!({
                 "type": "object",
@@ -141,6 +144,98 @@ pub fn specs() -> Vec<lifeagent_llm::types::ToolSpec> {
             }),
         },
     ]
+}
+
+/// Which core tool calls wait for the user's approval (`crate::approvals`), with what the UI
+/// shows for them:
+/// - allergy changes: allergies are hard constraints the planner must never break, so a
+///   prompt-injected removal would be dangerous;
+/// - adding or removing a preference: preferences shape every later plan and are quoted in
+///   every prompt, which makes them the place an injected instruction would try to persist;
+/// - deleting an entry from an earlier day (today's corrections stay one step).
+pub async fn approval_preview(
+    ctx: &PluginContext,
+    name: &str,
+    args: &Value,
+) -> Result<Option<Value>, PluginError> {
+    match name {
+        "core_update_allergies" => {
+            let args: UpdateAllergiesArgs = parse(args)?;
+            let trimmed = |terms: Vec<String>| -> Vec<String> {
+                terms
+                    .into_iter()
+                    .map(|t| t.trim().to_string())
+                    .filter(|t| !t.is_empty())
+                    .collect()
+            };
+            let (add, remove) = (trimmed(args.add), trimmed(args.remove));
+            if add.is_empty() && remove.is_empty() {
+                return Ok(None);
+            }
+            Ok(Some(
+                json!({"kind": "update_allergies", "add": add, "remove": remove}),
+            ))
+        }
+        "core_add_preference" => {
+            let args: AddPreferenceArgs = parse(args)?;
+            Ok(Some(json!({
+                "kind": "add_preference",
+                "preference_kind": args.kind,
+                "text": args.text.trim(),
+                "valid_from": args.valid_from,
+                "valid_until": args.valid_until,
+                "permanent": args.permanent,
+            })))
+        }
+        "core_remove_preference" => {
+            let args: RemovePreferenceArgs = parse(args)?;
+            // An unknown id runs (and fails) right away instead of asking about nothing.
+            let Some(preference) = ctx.preferences.get(&args.preference_id).await? else {
+                return Ok(None);
+            };
+            Ok(Some(json!({
+                "kind": "remove_preference",
+                "preference_kind": preference.kind,
+                "text": preference.text,
+            })))
+        }
+        "core_delete_entry" => {
+            let args: DeleteEntryArgs = parse(args)?;
+            // Without `past_day`, a past entry is refused by the tool itself (no approval to
+            // ask for); today's entries need none.
+            if !args.past_day {
+                return Ok(None);
+            }
+            let Some(entry) = ctx.events.get(&args.entry_id).await? else {
+                return Ok(None);
+            };
+            if entry.logical_date >= ctx.today().await? {
+                return Ok(None);
+            }
+            let p = &entry.payload;
+            let description = p
+                .get("raw_text")
+                .or_else(|| p.get("title"))
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .or_else(|| {
+                    p.get("kg")
+                        .and_then(Value::as_f64)
+                        .map(|kg| format!("{kg} kg"))
+                });
+            Ok(Some(json!({
+                "kind": "delete_past_entry",
+                "event_type": entry.event_type,
+                "logical_date": entry.logical_date.to_string(),
+                "description": description,
+            })))
+        }
+        _ => Ok(None),
+    }
+}
+
+fn parse<T: serde::de::DeserializeOwned>(args: &Value) -> Result<T, PluginError> {
+    serde_json::from_value(args.clone()).map_err(|e| PluginError::InvalidArgs(e.to_string()))
 }
 
 pub async fn call(
@@ -789,6 +884,72 @@ mod tests {
         .await
         .unwrap();
         assert!(ctx.events.get(&event.id).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn only_a_past_day_delete_needs_approval() {
+        let env = crate::test_support::env().await;
+        let ctx = &env.ctx;
+        let append = |kg: f64| {
+            ctx.events.append(
+                "body.weight_logged",
+                ctx.clock.now(),
+                json!({"kg": kg}),
+                EventSource::Chat,
+            )
+        };
+        let old = append(60.0).await.unwrap();
+        env.clock.advance(chrono::Duration::days(1));
+        let today = append(61.0).await.unwrap();
+
+        let preview = |id: String, past_day: bool| async move {
+            let args = json!({"entry_id": id, "past_day": past_day});
+            approval_preview(ctx, "core_delete_entry", &args).await
+        };
+        assert_eq!(preview(today.id.clone(), true).await.unwrap(), None);
+        // Refused by the tool itself, nothing to approve.
+        assert_eq!(preview(old.id.clone(), false).await.unwrap(), None);
+        assert_eq!(
+            preview(old.id.clone(), true).await.unwrap(),
+            Some(json!({
+                "kind": "delete_past_entry",
+                "event_type": "body.weight_logged",
+                "logical_date": old.logical_date.to_string(),
+                "description": "60 kg",
+            }))
+        );
+    }
+
+    #[tokio::test]
+    async fn preference_and_allergy_changes_need_approval_but_reads_do_not() {
+        let (ctx, _mock, _dir) = crate::test_support::context().await;
+        let preview = |name: &'static str, args: Value| {
+            let ctx = &ctx;
+            async move { approval_preview(ctx, name, &args).await.unwrap() }
+        };
+        assert!(preview(
+            "core_add_preference",
+            json!({"kind": "general", "text": "x"})
+        )
+        .await
+        .is_some());
+        assert!(preview("core_update_allergies", json!({"add": ["虾"]}))
+            .await
+            .is_some());
+        // Nothing to change: runs (as a no-op) without asking.
+        assert!(preview("core_update_allergies", json!({"add": [" "]}))
+            .await
+            .is_none());
+        // An unknown preference id runs, and fails, without asking about nothing.
+        assert!(
+            preview("core_remove_preference", json!({"preference_id": "nope"}))
+                .await
+                .is_none()
+        );
+        assert!(preview("core_get_plan", json!({})).await.is_none());
+        assert!(preview("core_log_weight", json!({"kg": 60}))
+            .await
+            .is_none());
     }
 
     #[tokio::test]

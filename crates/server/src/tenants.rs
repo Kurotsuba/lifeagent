@@ -56,6 +56,8 @@ pub struct AppFactory {
     pub plugins: Vec<Arc<dyn Plugin>>,
     pub models: Option<ModelsConfig>,
     pub chat_model_override: Option<Arc<dyn ChatModel>>,
+    /// `ServerConfig::daily_token_budget`, the same for every user.
+    pub daily_token_budget: Option<u64>,
 }
 
 impl AppFactory {
@@ -66,7 +68,8 @@ impl AppFactory {
     async fn build(&self, schema: &str) -> Result<CoreApp, CoreError> {
         let mut builder = CoreAppBuilder::new(self.tenant_config(schema))
             .clock(self.clock.clone())
-            .secrets(self.secrets.clone());
+            .secrets(self.secrets.clone())
+            .daily_token_budget(self.daily_token_budget);
         for plugin in &self.plugins {
             builder = builder.plugin(plugin.clone());
         }

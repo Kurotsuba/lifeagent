@@ -106,6 +106,12 @@ pub struct UsageEvent {
 #[async_trait]
 pub trait UsageSink: Send + Sync {
     async fn record(&self, event: UsageEvent);
+
+    /// Called before every provider call: `Err(LlmError::BudgetExceeded)` refuses it, so a
+    /// per-user token budget stops spending before it happens. By default, no budget.
+    async fn check_budget(&self, _role: Role) -> Result<(), LlmError> {
+        Ok(())
+    }
 }
 
 fn default_temperature(role: Role) -> f32 {
@@ -250,6 +256,7 @@ impl LlmRouter {
             effort,
         };
 
+        self.usage_sink.check_budget(role).await?;
         let start = Instant::now();
         let result = provider.complete(full_req).await;
         let latency_ms = start.elapsed().as_millis() as u64;
@@ -335,6 +342,35 @@ mod tests {
             },
             finish_reason: "stop".into(),
         }
+    }
+
+    struct SpentUsageSink;
+
+    #[async_trait]
+    impl UsageSink for SpentUsageSink {
+        async fn record(&self, _event: UsageEvent) {}
+        async fn check_budget(&self, _role: Role) -> Result<(), LlmError> {
+            Err(LlmError::BudgetExceeded)
+        }
+    }
+
+    #[tokio::test]
+    async fn a_spent_budget_refuses_the_call_before_the_provider_sees_it() {
+        let mock = Arc::new(MockChatModel::new());
+        mock.push_response(ok_response());
+        let mut providers: HashMap<String, Arc<dyn ChatModel>> = HashMap::new();
+        providers.insert("p1".into(), mock.clone());
+        let router = LlmRouter::with_providers(
+            config(ProviderKind::OpenAiCompatible),
+            providers,
+            Arc::new(SpentUsageSink),
+        );
+
+        let result = router
+            .complete(Role::Conversation, RoleRequest::default())
+            .await;
+        assert!(matches!(result, Err(LlmError::BudgetExceeded)));
+        assert!(mock.received_requests().is_empty());
     }
 
     #[tokio::test]

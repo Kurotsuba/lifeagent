@@ -10,6 +10,7 @@ use std::sync::{Mutex, PoisonError};
 
 use chrono::{DateTime, NaiveDate, Utc};
 use lifeagent_core::app::{ChatTurn, CoreApp, HistoryMessage, PluginInfo, TodayView};
+use lifeagent_core::approvals::PendingAction;
 use lifeagent_core::error::CoreError;
 use lifeagent_core::goals::WeightGoal;
 use lifeagent_core::i18n::Language;
@@ -221,6 +222,20 @@ pub async fn send_message(app: &CoreApp, text: &str) -> Result<ChatTurn, Command
 
 pub async fn get_history(app: &CoreApp, limit: u32) -> Result<Vec<HistoryMessage>, CommandError> {
     Ok(app.get_history(limit).await?)
+}
+
+// ---- Approvals (`lifeagent_core::approvals`) -------------------------------------------------
+
+pub async fn get_pending_actions(app: &CoreApp) -> Result<Vec<PendingAction>, CommandError> {
+    Ok(app.pending_actions().await?)
+}
+
+pub async fn approve_action(app: &CoreApp, id: &str) -> Result<PendingAction, CommandError> {
+    Ok(app.approve_action(id).await?)
+}
+
+pub async fn reject_action(app: &CoreApp, id: &str) -> Result<PendingAction, CommandError> {
+    Ok(app.reject_action(id).await?)
 }
 
 // ---- Today / plan --------------------------------------------------------------------------

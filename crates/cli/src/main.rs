@@ -92,6 +92,17 @@ enum Command {
     },
     /// Print the Training page's data as pretty JSON.
     Training,
+    /// Changes the assistant asked for that wait for approval: list, approve or reject them.
+    Actions {
+        #[command(subcommand)]
+        action: Option<ActionsAction>,
+    },
+}
+
+#[derive(Subcommand)]
+enum ActionsAction {
+    Approve { id: String },
+    Reject { id: String },
 }
 
 #[derive(Subcommand)]
@@ -275,6 +286,11 @@ async fn main() -> Result<()> {
         Command::Training => print_json(
             &lifeagent_plugin_training::view::training_view(&app.plugin_context()).await?,
         ),
+        Command::Actions { action } => match action {
+            Some(ActionsAction::Approve { id }) => print_json(&app.approve_action(&id).await?),
+            Some(ActionsAction::Reject { id }) => print_json(&app.reject_action(&id).await?),
+            None => print_json(&app.pending_actions().await?),
+        },
     }
 }
 

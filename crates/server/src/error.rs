@@ -35,9 +35,9 @@ impl ApiError {
             "unauthorized" | "invalid_credentials" => StatusCode::UNAUTHORIZED,
             "forbidden" => StatusCode::FORBIDDEN,
             "not_found" => StatusCode::NOT_FOUND,
-            "username_taken" => StatusCode::CONFLICT,
+            "username_taken" | "action_not_pending" => StatusCode::CONFLICT,
             "payload_too_large" => StatusCode::PAYLOAD_TOO_LARGE,
-            "rate_limited" => StatusCode::TOO_MANY_REQUESTS,
+            "rate_limited" | "budget_exceeded" => StatusCode::TOO_MANY_REQUESTS,
             // The server's own model setup, not something the user can change.
             "not_configured" => StatusCode::SERVICE_UNAVAILABLE,
             // The model provider failed (`LlmError::code()`).
@@ -85,6 +85,8 @@ mod tests {
             ("not_found", 404),
             ("username_taken", 409),
             ("rate_limited", 429),
+            ("budget_exceeded", 429),
+            ("action_not_pending", 409),
             ("not_configured", 503),
             ("llm", 502),
             ("auth", 502),
