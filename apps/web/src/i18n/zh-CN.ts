@@ -151,6 +151,15 @@ export const zhCN = {
       previewFloorApplied: "已按安全下限调整。",
       previewError: "暂时无法计算预览，请检查上方信息。",
     },
+    issues: {
+      title: "继续之前还需：",
+      sexMissing: "选择性别",
+      birthDateMissing: "选择出生日期（年、月、日）",
+      heightMissing: "填写身高",
+      heightRange: (min: number, max: number) => `身高需在 ${min}–${max} 厘米之间`,
+      weightMissing: "填写当前体重",
+      weightRange: (min: number, max: number) => `体重需在 ${min}–${max} 千克之间`,
+    },
     errors: {
       required: "请填写此项",
       saveFailed: "保存失败，请重试。",

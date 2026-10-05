@@ -11,7 +11,7 @@ import { primaryButtonClass, secondaryButtonClass } from "../components/buttonSt
 import { LanguageSelect } from "../components/LanguageSelect";
 import { strings } from "../i18n";
 import { buildGoal, buildProfile, defaultDraft, splitList, type OnboardingDraft } from "./draft";
-import { isStepProfileValid, StepProfile } from "./StepProfile";
+import { StepProfile, StepProfileIssues, stepProfileIssues } from "./StepProfile";
 import { StepGoal } from "./StepGoal";
 
 const t = strings.onboarding;
@@ -70,7 +70,8 @@ export function Onboarding({ onComplete }: OnboardingProps) {
     }
   }
 
-  const canGoNext = step === 0 ? isStepProfileValid(draft) : true;
+  const nextIssues = step === 0 ? stepProfileIssues(draft) : [];
+  const canGoNext = nextIssues.length === 0;
 
   return (
     <div className="flex h-full flex-col">
@@ -93,6 +94,11 @@ export function Onboarding({ onComplete }: OnboardingProps) {
       </div>
 
       <div className="border-t border-neutral-200 px-4 py-4 pb-[max(1rem,env(safe-area-inset-bottom))] md:px-6 dark:border-neutral-700">
+        {step < LAST_STEP && !canGoNext ? (
+          <div className="mx-auto mb-3 max-w-2xl">
+            <StepProfileIssues issues={nextIssues} />
+          </div>
+        ) : null}
         <div className="mx-auto flex max-w-2xl justify-between">
           <button
             type="button"

@@ -13,7 +13,7 @@ import { strings } from "../i18n";
 import { LoadState } from "./LoadState";
 import { buildGoal, buildProfile, defaultDraft, type OnboardingDraft } from "../onboarding/draft";
 import { StepGoal } from "../onboarding/StepGoal";
-import { isStepProfileValid, StepProfile } from "../onboarding/StepProfile";
+import { StepProfile, StepProfileIssues, stepProfileIssues } from "../onboarding/StepProfile";
 
 const t = strings.settings;
 
@@ -95,15 +95,18 @@ export function ProfileGoalSection() {
     return <LoadState error={status && !status.ok ? status.message : null} />;
   }
 
+  const profileIssues = stepProfileIssues(draft);
+
   return (
     <div className="space-y-8">
       <StepProfile draft={draft} update={update} showDislikes={false} />
       <StepGoal draft={draft} update={update} />
+      <StepProfileIssues issues={profileIssues} />
       <div className="flex items-center gap-3">
         <button
           type="button"
           className={primaryButtonClass}
-          disabled={saving || !isStepProfileValid(draft)}
+          disabled={saving || profileIssues.length > 0}
           onClick={() => void handleSave()}
         >
           {saving ? strings.common.saving : strings.common.save}

@@ -163,21 +163,40 @@ export function StepProfile({ draft, update, showDislikes = true }: StepProfileP
   );
 }
 
-/** Whether step 1's required fields are filled and in range — gates the "下一步" button. Range
- * checks mirror `crates/core/src/profile.rs`'s `validate` (height 120–230, meals_per_day 3–5);
- * the backend re-validates regardless, this is just so the user isn't sent to step 2 with data
- * `save_profile` would reject later. */
-export function isStepProfileValid(draft: OnboardingDraft): boolean {
+/** What still blocks step 1, in form order: a required field left empty or a number out of range.
+ * Range checks mirror `crates/core/src/profile.rs`'s `validate` (height 120–230); the backend
+ * re-validates regardless, this is just so the user isn't sent to step 2 with data `save_profile`
+ * would reject later, and can see why the button is disabled. */
+export function stepProfileIssues(draft: OnboardingDraft): string[] {
+  const issues = strings.onboarding.issues;
+  const out: string[] = [];
+  if (draft.sex === "") out.push(issues.sexMissing);
+  if (draft.birthDate === "") out.push(issues.birthDateMissing);
   const height = Number(draft.heightCm);
+  if (draft.heightCm === "") out.push(issues.heightMissing);
+  else if (!(height >= 120 && height <= 230)) out.push(issues.heightRange(120, 230));
   const weight = Number(draft.weightKg);
+  if (draft.weightKg === "") out.push(issues.weightMissing);
+  else if (!(weight >= 30 && weight <= 300)) out.push(issues.weightRange(30, 300));
+  return out;
+}
+
+/** Whether step 1's required fields are filled and in range — gates the "下一步" button. */
+export function isStepProfileValid(draft: OnboardingDraft): boolean {
+  return stepProfileIssues(draft).length === 0;
+}
+
+/** Lists what `stepProfileIssues` found, shown beside a button it disables. */
+export function StepProfileIssues({ issues }: { issues: string[] }) {
+  if (issues.length === 0) return null;
   return (
-    draft.sex !== "" &&
-    draft.birthDate !== "" &&
-    draft.heightCm !== "" &&
-    height >= 120 &&
-    height <= 230 &&
-    draft.weightKg !== "" &&
-    weight >= 30 &&
-    weight <= 300
+    <div className="text-sm text-amber-700 dark:text-amber-400" role="status">
+      <p>{strings.onboarding.issues.title}</p>
+      <ul className="list-disc pl-5">
+        {issues.map((issue) => (
+          <li key={issue}>{issue}</li>
+        ))}
+      </ul>
+    </div>
   );
 }

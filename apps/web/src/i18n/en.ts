@@ -145,6 +145,15 @@ export const en: Strings = {
       previewFloorApplied: "Raised to the safe minimum.",
       previewError: "Can't calculate a preview right now. Check the details above.",
     },
+    issues: {
+      title: "To continue:",
+      sexMissing: "Choose your sex",
+      birthDateMissing: "Pick your birth date (year, month and day)",
+      heightMissing: "Enter your height",
+      heightRange: (min: number, max: number) => `Height must be between ${min} and ${max} cm`,
+      weightMissing: "Enter your current weight",
+      weightRange: (min: number, max: number) => `Weight must be between ${min} and ${max} kg`,
+    },
     errors: {
       required: "Required",
       saveFailed: "Couldn't save. Please try again.",

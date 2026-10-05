@@ -145,6 +145,15 @@ export const ja: Strings = {
       previewFloorApplied: "安全な下限値に合わせて調整しました。",
       previewError: "現在プレビューを計算できません。上の入力内容を確認してください。",
     },
+    issues: {
+      title: "次に進むには：",
+      sexMissing: "性別を選択してください",
+      birthDateMissing: "生年月日（年・月・日）を選択してください",
+      heightMissing: "身長を入力してください",
+      heightRange: (min: number, max: number) => `身長は ${min}〜${max} cm で入力してください`,
+      weightMissing: "現在の体重を入力してください",
+      weightRange: (min: number, max: number) => `体重は ${min}〜${max} kg で入力してください`,
+    },
     errors: {
       required: "入力してください",
       saveFailed: "保存に失敗しました。もう一度お試しください。",
