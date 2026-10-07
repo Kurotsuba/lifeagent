@@ -37,6 +37,9 @@ struct Attempts {
 pub struct Scheduler {
     app: CoreApp,
     attempts: HashMap<NaiveDate, Attempts>,
+    /// The logical day the activity log was last pruned (`crate::audit::RETENTION_DAYS`), so
+    /// it happens once a day per instance.
+    pruned_on: Option<NaiveDate>,
 }
 
 impl Scheduler {
@@ -44,10 +47,11 @@ impl Scheduler {
         Self {
             app,
             attempts: HashMap::new(),
+            pruned_on: None,
         }
     }
 
-    /// One tick: generate tomorrow's plan if due. Errors
+    /// One tick: generate tomorrow's plan if due, and prune the activity log once a day. Errors
     /// are logged, never propagated — the scheduler must keep ticking.
     pub async fn tick(&mut self) {
         let today = match self.app.logical_today().await {
@@ -59,6 +63,17 @@ impl Scheduler {
         };
         if let Err(e) = self.plan_if_due(today).await {
             tracing::warn!(error = %e, "scheduler: plan check failed");
+        }
+        if self.pruned_on != Some(today) {
+            match self.app.audit().prune().await {
+                Ok(pruned) => {
+                    self.pruned_on = Some(today);
+                    if pruned > 0 {
+                        tracing::info!(pruned, "scheduler: pruned old activity runs");
+                    }
+                }
+                Err(e) => tracing::warn!(error = %e, "scheduler: activity log prune failed"),
+            }
         }
     }
 

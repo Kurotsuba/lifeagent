@@ -45,6 +45,7 @@ export const en: Strings = {
   nav: {
     today: "Today",
     chat: "Chat",
+    activity: "Activity",
     nutrition: "Nutrition",
     stock: "Stock",
     settings: "Settings",
@@ -371,6 +372,192 @@ export const en: Strings = {
     },
     unknown: (tool: string) => `Run: ${tool}`,
   },
+  activity: {
+    hint: "Everything the assistant did for you is recorded here: who started it, what it called, and what was blocked or is waiting for your approval.",
+    period: (days: number) => `Last ${days} days`,
+    stats: {
+      byUser: "Started by you",
+      byScheduler: "Automatic",
+      approvals: "Approval requests",
+      approvalsDetail: (approved: number, rejected: number) =>
+        `${approved} approved · ${rejected} rejected`,
+      guardrails: "Blocked by guardrails",
+      tokens: "Model tokens",
+      last24h: (used: number, budget: number | null) =>
+        budget === null ? `${used} in the last 24 h` : `${used} of ${budget} in the last 24 h`,
+    },
+    filterAll: "All",
+    actors: { user: "You", scheduler: "Automatic" },
+    triggers: {
+      chat_turn: "Chat",
+      plan_scheduled: "Scheduled plan",
+      plan_manual: "Make plan",
+      plan_revision: "Adjust plan",
+      action_approved: "Approved an action",
+      action_rejected: "Rejected an action",
+    },
+    statuses: {
+      running: "Running",
+      succeeded: "Done",
+      needs_approval: "Needs approval",
+      failed: "Failed",
+      interrupted: "Interrupted",
+    },
+    counts: (o: { model_calls: number; tool_calls: number; tokens: number; guardrails: number }) =>
+      [
+        `${o.model_calls} model ${o.model_calls === 1 ? "call" : "calls"}`,
+        `${o.tool_calls} tool ${o.tool_calls === 1 ? "call" : "calls"}`,
+        `${o.tokens} tokens`,
+        o.guardrails > 0 ? `${o.guardrails} blocked` : "",
+      ]
+        .filter((s) => s !== "")
+        .join(" · "),
+    planSaved: (date: string, version: number) => `Plan for ${date}, version ${version}`,
+    errorCodes: {
+      invalid_input: "Invalid input, or nothing to plan",
+      internal: "Internal error",
+      budget_exceeded: "Daily token limit reached",
+      busy: "Another plan is being made",
+      not_configured: "No model configured",
+      action_not_pending: "Already handled or expired",
+      rate_limited: "The model is busy",
+    } as Record<string, string>,
+    errorCode: (code: string) => `Error: ${code}`,
+    empty: "Nothing recorded yet.",
+    loadMore: "Load more",
+    showSteps: "Show steps",
+    hideSteps: "Hide",
+    roles: { conversation: "conversation", parser: "parsing", planner: "planning" },
+    modelCall: (role: string, model: string, tokens: number, seconds: string, ok: boolean) =>
+      `Model call (${role}) ${model} · ${tokens} tokens · ${seconds} s${ok ? "" : " · failed"}`,
+    toolOutcomes: {
+      ran: "done",
+      invalid_args: "refused",
+      not_found: "not found",
+      failed: "error",
+    },
+    arguments: "Arguments",
+    approvalRequested: "Asked for your approval",
+    approvalResolved: {
+      approved: "You approved",
+      rejected: "You rejected",
+      failed: "Approved, but it failed",
+      pending: "Waiting",
+      expired: "Expired",
+    },
+    fromEarlierRun: "(from an earlier chat)",
+    actionStatus: {
+      pending: "Still waiting for you",
+      approved: "Approved",
+      rejected: "Rejected",
+      failed: "Failed after approval",
+      expired: "Expired, not done",
+    },
+    guardrails: {
+      invalid_args: "Blocked: arguments or rules don't allow it",
+      unknown_tool: "Blocked: no such tool, or it's switched off",
+      token_budget: "Blocked: over the daily token limit",
+      iteration_cap: "Stopped: too many steps",
+    },
+    planValidation: (d: { violations: string[]; retried: boolean; violations_left: number }) =>
+      d.violations.length === 0
+        ? "Plan check: passed"
+        : d.violations_left === 0
+          ? `Plan check: ${d.violations.length} issues found, all fixed on a retry`
+          : `Plan check: ${d.violations.length} issues found, ${d.violations_left} left (kept as warnings)`,
+    planSavedStep: (date: string, version: number) => `Saved the plan for ${date} (version ${version})`,
+  },
+  toolSummaries: {
+    core_plan_viewed: (d: { date: string }) => `Viewed the plan for ${d.date}`,
+    core_plan_generated: (d: { date: string; version: number }) =>
+      `Made the plan for ${d.date} (version ${d.version})`,
+    core_plan_revised: (d: { date: string; version: number }) =>
+      `Adjusted the plan for ${d.date} (version ${d.version})`,
+    core_weight_logged: (d: { kg: number }) => `Logged weight: ${d.kg} kg`,
+    core_allergies_updated: (d: { allergies: string[] }) =>
+      `Updated allergies: ${d.allergies.length > 0 ? d.allergies.join(", ") : "none"}`,
+    core_preference_added: (d: {
+      preference_kind: "dislike" | "general";
+      text: string;
+      valid_from: string | null;
+      valid_until: string | null;
+    }) =>
+      `Remembered ${d.preference_kind === "dislike" ? "a dislike" : "a preference"}: ${d.text}` +
+      (d.valid_until ? ` (until ${d.valid_until})` : ""),
+    core_preference_removed: "Removed a preference",
+    core_entry_deleted: "Deleted an entry",
+    diet_meal_logged: (d: { meal_type: "breakfast" | "lunch" | "dinner" | "snack"; kcal: number }) =>
+      `Logged ${{ breakfast: "breakfast", lunch: "lunch", dinner: "dinner", snack: "a snack" }[d.meal_type]} · ${d.kcal} kcal`,
+    diet_intake_viewed: (d: { date: string }) => `Viewed meals for ${d.date}`,
+    diet_food_updated: (d: { name: string }) => `Updated food: ${d.name}`,
+    diet_dish_updated: (d: { name: string }) => `Updated dish: ${d.name}`,
+    diet_alias_added: (d: { alias: string; food: string }) => `Added alias: ${d.alias} → ${d.food}`,
+    diet_alias_removed: (d: { alias: string }) => `Removed alias: ${d.alias}`,
+    stock_added: (d: { names: string[] }) => `Added to stock: ${d.names.join(", ")}`,
+    stock_viewed: "Viewed stock",
+    stock_updated: (d: { name: string }) => `Updated stock: ${d.name}`,
+    training_session_logged: (d: { title: string; minutes: number }) =>
+      `Logged training: ${d.title}, ${d.minutes} min`,
+    training_log_viewed: (d: { start_date: string; end_date: string }) =>
+      `Viewed training from ${d.start_date} to ${d.end_date}`,
+    training_day_preference_set: (d: { date: string; cleared: boolean }) =>
+      d.cleared
+        ? `Cleared the training wish for ${d.date}`
+        : `Saved the training wish for ${d.date}`,
+    training_preferences_updated: "Updated training preferences",
+    multimember_members_viewed: (d: { count: number }) => `Viewed members (${d.count})`,
+    multimember_member_added: (d: { name: string }) => `Added member: ${d.name}`,
+    multimember_member_updated: (d: { name: string }) => `Updated member: ${d.name}`,
+    multimember_member_archived: (d: { name: string }) => `Removed member: ${d.name}`,
+    multimember_attendance_set: (d: {
+      name: string;
+      meal_type: "breakfast" | "lunch" | "dinner";
+      present: boolean;
+      date: string | null;
+    }) =>
+      d.date
+        ? `${d.name} ${d.present ? "joins" : "skips"} ${d.meal_type} on ${d.date}`
+        : `${d.name} usually ${d.present ? "joins" : "skips"} ${d.meal_type}`,
+    multimember_attendance_cleared: (d: {
+      name: string;
+      meal_type: "breakfast" | "lunch" | "dinner";
+      date: string;
+    }) => `${d.name}: back to the usual ${d.meal_type} on ${d.date}`,
+    multimember_dislike_added: (d: { name: string; text: string }) =>
+      `Remembered ${d.name} dislikes ${d.text}`,
+    multimember_dislike_removed: "Removed a dislike",
+  },
+  tools: {
+    core_get_plan: "View plan",
+    core_generate_plan: "Make plan",
+    core_revise_plan: "Adjust plan",
+    core_log_weight: "Log weight",
+    core_update_allergies: "Update allergies",
+    core_add_preference: "Remember a preference",
+    core_remove_preference: "Remove a preference",
+    core_delete_entry: "Delete an entry",
+    diet_log_meal: "Log a meal",
+    diet_get_intake: "View meals",
+    diet_update_food: "Update food",
+    diet_update_dish: "Update dish",
+    diet_add_alias: "Add alias",
+    diet_remove_alias: "Remove alias",
+    stock_add: "Add to stock",
+    stock_list: "View stock",
+    stock_update: "Update stock",
+    training_log_session: "Log training",
+    training_get_log: "View training",
+    training_set_day_preference: "Set a day's training wish",
+    training_update_preferences: "Update training preferences",
+    multimember_list_members: "View members",
+    multimember_add_member: "Add member",
+    multimember_update_member: "Update member",
+    multimember_archive_member: "Remove member",
+    multimember_set_attendance: "Set meal attendance",
+    multimember_clear_attendance_override: "Reset attendance to usual",
+    multimember_add_dislike: "Remember a member's dislike",
+    multimember_remove_dislike: "Remove a member's dislike",
+  } as Record<string, string>,
   settings: {
     saveSucceeded: "Saved",
     saveFailed: "Couldn't save. Please try again.",
@@ -385,6 +572,8 @@ export const en: Strings = {
     },
     features: {
       hint: "Optional features appear in the sidebar and join the daily plan once turned on.",
+      activityTab: "Show the Activity page",
+      activityTabHint: "The assistant's actions are always recorded; this only decides whether the page shows in the sidebar.",
       names: {
         training: "Training log & plan",
         stock: "Stock",

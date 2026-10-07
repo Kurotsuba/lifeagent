@@ -9,8 +9,11 @@
 use std::sync::{Mutex, PoisonError};
 
 use chrono::{DateTime, NaiveDate, Utc};
-use lifeagent_core::app::{ChatTurn, CoreApp, HistoryMessage, PluginInfo, TodayView};
+use lifeagent_core::app::{
+    ActivityRun, ActivitySummary, ChatTurn, CoreApp, HistoryMessage, PluginInfo, TodayView,
+};
 use lifeagent_core::approvals::PendingAction;
+use lifeagent_core::audit::{Actor, RunFilter, RunPage, RunStatus};
 use lifeagent_core::error::CoreError;
 use lifeagent_core::goals::WeightGoal;
 use lifeagent_core::i18n::Language;
@@ -66,6 +69,8 @@ pub struct AppState {
     pub logical_date: NaiveDate,
     /// Ids of the plugins switched on, so the shell shows only their pages.
     pub enabled_plugins: Vec<String>,
+    /// Whether to show the Activity tab (`docs/AUDIT_LOG_SPEC.md` §6.3).
+    pub activity_tab_visible: bool,
 }
 
 pub async fn get_app_state(app: &CoreApp) -> Result<AppState, CommandError> {
@@ -79,6 +84,7 @@ pub async fn get_app_state(app: &CoreApp) -> Result<AppState, CommandError> {
             .iter()
             .map(|p| p.manifest().id.to_string())
             .collect(),
+        activity_tab_visible: app.settings().activity_tab_visible().await?,
     })
 }
 
@@ -376,6 +382,56 @@ pub async fn add_preference(
 
 pub async fn delete_preference(app: &CoreApp, id: &str) -> Result<(), CommandError> {
     Ok(app.preferences().remove(id).await?)
+}
+
+// ---- Activity log (`lifeagent_core::audit`, `docs/AUDIT_LOG_SPEC.md` §6) ---------------------
+
+/// `get_activity`'s arguments; all optional.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct ActivityQuery {
+    /// Continue after this run (the previous page's `next_before`).
+    #[serde(default)]
+    pub before: Option<String>,
+    /// Runs per page, 1..=100; default 30.
+    #[serde(default)]
+    pub limit: Option<u32>,
+    #[serde(default)]
+    pub actor: Option<Actor>,
+    #[serde(default)]
+    pub status: Option<RunStatus>,
+}
+
+pub const ACTIVITY_PAGE_DEFAULT: u32 = 30;
+
+pub async fn get_activity(app: &CoreApp, query: &ActivityQuery) -> Result<RunPage, CommandError> {
+    let filter = RunFilter {
+        before: query.before.clone(),
+        actor: query.actor,
+        status: query.status,
+    };
+    Ok(app
+        .activity(&filter, query.limit.unwrap_or(ACTIVITY_PAGE_DEFAULT))
+        .await?)
+}
+
+pub async fn get_activity_run(app: &CoreApp, id: &str) -> Result<ActivityRun, CommandError> {
+    Ok(app.activity_run(id).await?)
+}
+
+/// Counts for the last `days` days (default 7).
+pub async fn get_activity_summary(
+    app: &CoreApp,
+    days: Option<u32>,
+) -> Result<ActivitySummary, CommandError> {
+    Ok(app.activity_summary(days.unwrap_or(7)).await?)
+}
+
+/// Shows or hides the Activity tab. Recording is unaffected.
+pub async fn set_activity_tab_visible(app: &CoreApp, visible: bool) -> Result<(), CommandError> {
+    Ok(app
+        .settings()
+        .set_activity_tab_visible(visible, app.clock().now())
+        .await?)
 }
 
 // ---- Usage ----------------------------------------------------------------------------------

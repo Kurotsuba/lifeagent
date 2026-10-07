@@ -2819,3 +2819,46 @@ prompt-injected model from changing allergies or planting a preference.
   an injected closing tag arrives defused, and a model that obeys the injection anyway only
   produces a pending action.
 
+
+## 2026-10-07 — Structured logs for Cloud Logging
+
+- **Format.** With `LIFEAGENT_LOG_FORMAT=json` (set in `deploy/env.yaml`) the server writes one
+  JSON object per line (`crates/server/src/logging.rs`): `severity` (Cloud Logging's names,
+  `WARN` becomes `WARNING`), `message`, `target`, `logging.googleapis.com/sourceLocation`, and
+  every event field as a typed top-level key. Without it the output stays the usual text, for
+  local runs.
+- **Own formatter, no new crate.** `tracing-subscriber`'s `json` feature writes `level` (not
+  `severity`, so Cloud Logging would show every line as DEFAULT) and nests fields; a crate like
+  `tracing-stackdriver` would fix that but adds a dependency for about 100 lines of code.
+- **Who and why on every line.** Each `/api/{command}` runs in a `command` span
+  (`user_id`, `command`, `actor = "user"`) and each scheduler tick per user in a `tick` span
+  (`user_id`, `actor = "scheduler"`). The formatter copies span fields onto every event inside,
+  so e.g. the router's `llm call` line (model, tokens, latency) can be filtered and summed per
+  user and per actor in Logs Explorer or a log-based metric. Work core spawns onto its own tasks
+  (event hooks) does not inherit the span.
+- **No timestamp field.** Cloud Logging stamps lines on receipt, and the formatter would
+  otherwise read the wall clock outside the injected `Clock`.
+- **Privacy unchanged.** Only fields already logged; message content stays at DEBUG.
+
+## 2026-10-07 — Agent activity log (`docs/AUDIT_LOG_SPEC.md`)
+
+- **Tool summaries are data.** `ToolOutput::summary` is a `ToolSummary` (`{"kind", …params}`,
+  kinds prefixed by plugin id), worded by the UI's `toolSummaries` table in each locale, like
+  approval previews. The chat chips were Chinese in every locale before. The model's "recent
+  actions" section quotes the summary as JSON. `pending_actions.result_summary_json` holds an
+  approved action's summary; `result_summary` keeps failure reasons. Completeness is checked by
+  `tsc` against the `ToolSummary` union, not by a Rust list of kinds.
+- **Steps reach the run through a task-local** (`audit::scope` / `audit::record`), so the usage
+  sink, the planner and the tool loop record without new parameters, and the `llm` crate is
+  unchanged. Outside a run nothing is recorded. A nested `with_run` joins the current run.
+- **Fail closed on start, open on steps** (as `DbUsageSink::record`).
+- **Every `InvalidArgs` is a guardrail step**, schema checks and the tools' own rules alike
+  (e.g. the past-day delete guard). A plugin's `NotFound` is only a guardrail when the tool
+  itself doesn't exist or is switched off.
+- **Actor from `PlanTrigger`**, not a new `generate_plan` argument.
+- **`needs_approval` is the run's status when it ended.** It stays after the action is decided;
+  the step shows what became of the action, and the decision is its own run.
+- **Activity tab** is a per-account setting (`activity_tab_visible`, default on), returned by
+  `get_app_state`. Hiding it changes nothing else.
+- **Not done:** a test asserting that no INFO `agent step` line carries arguments or excerpts.
+  The line is built from ids, kinds, tool names, outcomes and rules only (`RunHandle::log_step`).

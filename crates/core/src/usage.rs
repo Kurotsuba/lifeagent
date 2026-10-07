@@ -107,6 +107,20 @@ pub async fn summary(db: &PgPool, since: DateTime<Utc>) -> Result<Vec<RoleUsage>
 #[async_trait]
 impl UsageSink for DbUsageSink {
     async fn record(&self, event: UsageEvent) {
+        // The activity log's copy, for display; `llm_usage` stays the source of truth.
+        crate::audit::record(
+            crate::audit::StepKind::ModelCall,
+            serde_json::json!({
+                "role": role_str(event.role),
+                "provider": event.provider_id,
+                "model": event.model,
+                "prompt_tokens": event.prompt_tokens,
+                "completion_tokens": event.completion_tokens,
+                "latency_ms": event.latency_ms,
+                "ok": event.ok,
+            }),
+        )
+        .await;
         let result = sqlx::query(
             "INSERT INTO llm_usage
                 (id, role, provider_id, model, prompt_tokens, completion_tokens, latency_ms, ok, created_at)
@@ -148,6 +162,16 @@ impl UsageSink for DbUsageSink {
         };
         if used >= i64::try_from(budget).unwrap_or(i64::MAX) {
             tracing::warn!(role = role_str(role), used, budget, "token budget exceeded");
+            crate::audit::record(
+                crate::audit::StepKind::Guardrail,
+                serde_json::json!({
+                    "rule": "token_budget",
+                    "role": role_str(role),
+                    "used": used,
+                    "budget": budget,
+                }),
+            )
+            .await;
             return Err(LlmError::BudgetExceeded);
         }
         Ok(())

@@ -334,3 +334,53 @@ async fn failed_generation_emits_plan_failed_and_retries_every_15_minutes_at_mos
     assert_eq!(env.mock.received_requests().len(), 3);
     assert_eq!(env.app.get_plan(tomorrow).await.unwrap(), None);
 }
+
+/// `docs/AUDIT_LOG_SPEC.md` AL2: a scheduled plan is one `plan_scheduled` run by the scheduler,
+/// with its model calls, the validator's verdict (here a retry) and the saved plan.
+#[tokio::test]
+async fn a_scheduled_plan_is_logged_as_a_scheduler_run_with_its_validation() {
+    use lifeagent_core::audit::{Actor, RunFilter, RunStatus, RunTrigger, StepKind};
+
+    let env = env_at(local(2026, 9, 24, 1, 0)).await;
+    let tomorrow = NaiveDate::from_ymd_opt(2026, 9, 24).unwrap();
+    // Dinner 100 g leaves the day short of its kcal target: one retry.
+    env.mock.push_response(planner_reply("first", 100.0));
+    env.mock.push_closure(estimate_for(tomorrow));
+    env.mock.push_response(planner_reply("second", 300.0));
+    let mut scheduler = Scheduler::new(env.app.clone());
+
+    scheduler.tick().await;
+
+    let page = env
+        .app
+        .audit()
+        .list(&RunFilter::default(), 10)
+        .await
+        .unwrap();
+    assert_eq!(page.runs.len(), 1);
+    let run = &page.runs[0];
+    assert_eq!(run.trigger, RunTrigger::PlanScheduled);
+    assert_eq!(run.actor, Actor::Scheduler);
+    assert_eq!(run.status, RunStatus::Succeeded);
+    let outcome = run.outcome.clone().unwrap();
+    assert_eq!(outcome.plan.unwrap().date, tomorrow);
+
+    let steps = env.app.audit().steps(&run.id).await.unwrap();
+    let kinds: Vec<StepKind> = steps.iter().map(|s| s.kind).collect();
+    assert_eq!(
+        kinds.iter().filter(|k| **k == StepKind::ModelCall).count(),
+        outcome.model_calls as usize
+    );
+    assert!(outcome.model_calls >= 2, "{kinds:?}");
+    let validation = steps
+        .iter()
+        .find(|s| s.kind == StepKind::PlanValidation)
+        .unwrap();
+    assert_eq!(validation.detail["retried"], true);
+    assert_eq!(validation.detail["violations_left"], 0);
+    assert!(!validation.detail["violations"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    assert_eq!(kinds.last(), Some(&StepKind::PlanSaved));
+}

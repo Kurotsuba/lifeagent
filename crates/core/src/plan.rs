@@ -495,6 +495,11 @@ impl PlanService {
             .plans
             .insert(date, trigger, instruction.or(request), &content, &warnings)
             .await?;
+        crate::audit::record(
+            crate::audit::StepKind::PlanSaved,
+            serde_json::json!({ "date": date, "version": plan.version, "trigger": trigger }),
+        )
+        .await;
         ctx.events.publish(AppEvent::PlanReady {
             date,
             version: plan.version,
@@ -556,8 +561,13 @@ async fn plan_stage(
     let mut output: PlannerOutput =
         complete_json(&ctx.llm, Role::Planner, messages.clone()).await?;
     let mut sections = finalize_all(ctx, date, inputs, &output, draft).await?;
+    let violations: Vec<String> = sections
+        .iter()
+        .flat_map(|(_, s)| s.violations.iter().cloned())
+        .collect();
+    let retried = !violations.is_empty();
 
-    if sections.iter().any(|(_, s)| !s.violations.is_empty()) {
+    if retried {
         messages.push(Message::Assistant {
             content: Some(serde_json::to_string(&output)?),
             tool_calls: vec![],
@@ -568,6 +578,19 @@ async fn plan_stage(
         output = complete_json(&ctx.llm, Role::Planner, messages).await?;
         sections = finalize_all(ctx, date, inputs, &output, draft).await?;
     }
+    // The validator's verdict on this stage: what it found first, whether that sent the
+    // planner back for a retry, and how many violations are left (they become warnings).
+    crate::audit::record(
+        crate::audit::StepKind::PlanValidation,
+        serde_json::json!({
+            "date": date,
+            "sections": sections.iter().map(|(id, _)| id).collect::<Vec<_>>(),
+            "violations": violations,
+            "retried": retried,
+            "violations_left": sections.iter().map(|(_, s)| s.violations.len()).sum::<usize>(),
+        }),
+    )
+    .await;
     Ok((output, sections))
 }
 

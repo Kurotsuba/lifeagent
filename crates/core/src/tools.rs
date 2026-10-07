@@ -270,7 +270,7 @@ mod tests {
         ) -> Result<ToolOutput, PluginError> {
             Ok(ToolOutput {
                 content: json!({"ok": true}),
-                summary: "did the thing".into(),
+                summary: crate::plugin::ToolSummary::new("good_did_the_thing"),
             })
         }
     }
@@ -422,7 +422,7 @@ mod tests {
             .call(&ctx, "good_do_thing", json!({}))
             .await
             .unwrap();
-        assert_eq!(out.summary, "did the thing");
+        assert_eq!(out.summary.kind(), "good_did_the_thing");
     }
 
     #[tokio::test]

@@ -10,7 +10,12 @@
 import type { Locale } from "../i18n";
 import { call, callRaw } from "./transport";
 import type {
+  ActivityActor,
+  ActivityRun,
+  ActivitySummary,
   AppState,
+  RunPage,
+  RunStatus,
   ChatTurn,
   Dish,
   Food,
@@ -104,6 +109,29 @@ export function approveAction(id: string): Promise<PendingAction> {
 
 export function rejectAction(id: string): Promise<PendingAction> {
   return call("reject_action", { id });
+}
+
+// ---- Activity log ---------------------------------------------------------------------------
+
+export function getActivity(query: {
+  before?: string;
+  limit?: number;
+  actor?: ActivityActor;
+  status?: RunStatus;
+}): Promise<RunPage> {
+  return call("get_activity", query);
+}
+
+export function getActivityRun(id: string): Promise<ActivityRun> {
+  return call("get_activity_run", { id });
+}
+
+export function getActivitySummary(days?: number): Promise<ActivitySummary> {
+  return call("get_activity_summary", { days });
+}
+
+export function setActivityTabVisible(visible: boolean): Promise<void> {
+  return call("set_activity_tab_visible", { visible });
 }
 
 // ---- Today / plan --------------------------------------------------------------------------

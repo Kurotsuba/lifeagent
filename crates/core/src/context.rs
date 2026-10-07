@@ -227,9 +227,14 @@ fn render_actions(actions: &[PendingAction]) -> String {
         .map(|a| {
             let outcome = match a.status {
                 ActionStatus::Pending => "awaiting the user".to_string(),
+                // The summary as its JSON data (the model reads it as well as prose), or the
+                // text summary of an action approved before summaries became data.
                 ActionStatus::Approved => format!(
                     "approved and done ({})",
-                    a.result_summary.as_deref().unwrap_or_default()
+                    match &a.result {
+                        Some(summary) => summary.0.to_string(),
+                        None => a.result_summary.clone().unwrap_or_default(),
+                    }
                 ),
                 ActionStatus::Rejected => "rejected by the user: not done".to_string(),
                 ActionStatus::Failed => format!(

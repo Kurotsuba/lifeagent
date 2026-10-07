@@ -14,6 +14,7 @@
 
 pub mod app;
 pub mod approvals;
+pub mod audit;
 pub mod clock;
 pub mod context;
 pub mod conversation;

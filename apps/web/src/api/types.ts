@@ -56,6 +56,8 @@ export interface AppState {
   logical_date: string;
   /** Ids of the plugins switched on (e.g. `"training"` once enabled). */
   enabled_plugins: string[];
+  /** Whether to show the Activity tab; the log records either way. */
+  activity_tab_visible: boolean;
 }
 
 /** `lifeagent_core::app::PluginInfo`. */
@@ -76,9 +78,55 @@ export interface SettingsDto {
 
 export type MessageRole = "user" | "assistant" | "tool";
 
+/** What a tool call did (`ToolSummary` in `crates/core/src/plugin.rs`), worded by the UI's
+ * `toolSummaries` table. Kinds start with the owning plugin's id. */
+export type ToolSummary =
+  | { kind: "core_plan_viewed"; date: string }
+  | { kind: "core_plan_generated"; date: string; version: number }
+  | { kind: "core_plan_revised"; date: string; version: number }
+  | { kind: "core_weight_logged"; kg: number }
+  | { kind: "core_allergies_updated"; allergies: string[] }
+  | {
+      kind: "core_preference_added";
+      preference_kind: PreferenceKind;
+      text: string;
+      valid_from: string | null;
+      valid_until: string | null;
+    }
+  | { kind: "core_preference_removed" }
+  | { kind: "core_entry_deleted"; event_type: string }
+  | { kind: "diet_meal_logged"; meal_type: MealType; kcal: number }
+  | { kind: "diet_intake_viewed"; date: string }
+  | { kind: "diet_food_updated"; name: string }
+  | { kind: "diet_dish_updated"; name: string }
+  | { kind: "diet_alias_added"; alias: string; food: string }
+  | { kind: "diet_alias_removed"; alias: string }
+  | { kind: "stock_added"; names: string[] }
+  | { kind: "stock_viewed" }
+  | { kind: "stock_updated"; name: string }
+  | { kind: "training_session_logged"; title: string; minutes: number }
+  | { kind: "training_log_viewed"; start_date: string; end_date: string }
+  | { kind: "training_day_preference_set"; date: string; cleared: boolean }
+  | { kind: "training_preferences_updated" }
+  | { kind: "multimember_members_viewed"; count: number }
+  | { kind: "multimember_member_added"; name: string }
+  | { kind: "multimember_member_updated"; name: string }
+  | { kind: "multimember_member_archived"; name: string }
+  | {
+      kind: "multimember_attendance_set";
+      name: string;
+      meal_type: MainMealType;
+      present: boolean;
+      /** `null`: the member's usual attendance on the given weekdays. */
+      date: string | null;
+    }
+  | { kind: "multimember_attendance_cleared"; name: string; meal_type: MainMealType; date: string }
+  | { kind: "multimember_dislike_added"; name: string; text: string }
+  | { kind: "multimember_dislike_removed" };
+
 export interface ChatTurn {
   reply: string;
-  activities: string[];
+  activities: ToolSummary[];
   /** Tool calls from this turn that wait for the user's approval. */
   pending_actions: PendingAction[];
 }
@@ -113,10 +161,142 @@ export interface PendingAction {
   tool_name: string;
   preview: ActionPreview;
   status: ActionStatus;
-  /** The tool's own summary once approved, or why it failed. */
+  /** What the tool did once approved. */
+  result: ToolSummary | null;
+  /** Why an approved action failed. */
   result_summary: string | null;
   created_at: string;
   resolved_at: string | null;
+}
+
+// ---- Activity log (`crates/core/src/audit.rs`, `docs/AUDIT_LOG_SPEC.md`) --------------------
+
+export type ActivityActor = "user" | "scheduler";
+export type RunTrigger =
+  | "chat_turn"
+  | "plan_scheduled"
+  | "plan_manual"
+  | "plan_revision"
+  | "action_approved"
+  | "action_rejected";
+export type RunStatus = "running" | "succeeded" | "needs_approval" | "failed" | "interrupted";
+export type ModelRole = "conversation" | "parser" | "planner";
+export type ToolCallOutcome = "ran" | "invalid_args" | "not_found" | "failed";
+export type GuardrailRule = "invalid_args" | "unknown_tool" | "token_budget" | "iteration_cap";
+
+export interface RunOutcome {
+  model_calls: number;
+  tool_calls: number;
+  tokens: number;
+  latency_ms: number;
+  guardrails: number;
+  pending_actions: number;
+  plan: { date: string; version: number } | null;
+}
+
+export interface ActivityRunInfo {
+  id: string;
+  trigger: RunTrigger;
+  actor: ActivityActor;
+  status: RunStatus;
+  input_excerpt: string | null;
+  /** Null while the run is still going. */
+  outcome: RunOutcome | null;
+  error_code: string | null;
+  logical_date: string;
+  started_at: string;
+  finished_at: string | null;
+}
+
+export interface RunPage {
+  runs: ActivityRunInfo[];
+  /** Pass as `before` for the next page; null at the end. */
+  next_before: string | null;
+}
+
+/** One step of a run, by kind (`StepKind` and the details in `docs/AUDIT_LOG_SPEC.md` §4.2). */
+export type ActivityStepDetail =
+  | {
+      kind: "model_call";
+      detail: {
+        role: ModelRole;
+        provider: string;
+        model: string;
+        prompt_tokens: number;
+        completion_tokens: number;
+        latency_ms: number;
+        ok: boolean;
+      };
+    }
+  | {
+      kind: "tool_call";
+      detail: {
+        tool: string;
+        arguments: unknown;
+        outcome: ToolCallOutcome;
+        summary?: ToolSummary;
+        error?: string;
+      };
+    }
+  | {
+      kind: "approval_requested";
+      detail: { tool: string; action_id: string; arguments: unknown; preview: ActionPreview };
+    }
+  | {
+      kind: "approval_resolved";
+      detail: {
+        tool: string;
+        action_id: string;
+        decision: ActionStatus;
+        requested_in: string | null;
+        result?: ToolSummary;
+      };
+    }
+  | {
+      kind: "guardrail";
+      detail: {
+        rule: GuardrailRule;
+        tool?: string;
+        limit?: number;
+        used?: number;
+        budget?: number;
+      };
+    }
+  | {
+      kind: "plan_validation";
+      detail: {
+        date: string;
+        sections: string[];
+        violations: string[];
+        retried: boolean;
+        violations_left: number;
+      };
+    }
+  | { kind: "plan_saved"; detail: { date: string; version: number; trigger: string } };
+
+export type ActivityStep = ActivityStepDetail & {
+  id: string;
+  created_at: string;
+  /** For `approval_requested`: what became of the action since. */
+  action_status: ActionStatus | null;
+};
+
+export interface ActivityRun {
+  run: ActivityRunInfo;
+  steps: ActivityStep[];
+}
+
+export interface ActivitySummary {
+  days: number;
+  runs_by_user: number;
+  runs_by_scheduler: number;
+  approvals_requested: number;
+  approvals_approved: number;
+  approvals_rejected: number;
+  guardrails: number;
+  tokens: number;
+  tokens_last_24h: number;
+  daily_token_budget: number | null;
 }
 
 export interface HistoryMessage {

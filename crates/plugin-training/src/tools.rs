@@ -3,7 +3,7 @@
 
 use chrono::NaiveDate;
 use lifeagent_core::events::EventSource;
-use lifeagent_core::plugin::{PluginContext, PluginError, ToolOutput};
+use lifeagent_core::plugin::{PluginContext, PluginError, ToolOutput, ToolSummary};
 use lifeagent_core::time::parse_local_datetime;
 use lifeagent_llm::types::ToolSpec;
 use serde::Deserialize;
@@ -203,10 +203,9 @@ async fn log_session(ctx: &PluginContext, args: Value) -> Result<ToolOutput, Plu
         logical_date: date,
         session,
     };
-    let summary = format!(
-        "已记录训练：{} {:.0} 分钟",
-        logged.session.title, logged.session.duration_min
-    );
+    let summary = ToolSummary::new("training_session_logged")
+        .with("title", &logged.session.title)
+        .with("minutes", logged.session.duration_min.round());
     Ok(ToolOutput {
         content: json!({
             "session": logged.view(),
@@ -249,7 +248,9 @@ async fn get_log(ctx: &PluginContext, args: Value) -> Result<ToolOutput, PluginE
     let days = log::summarize(from, to, &sessions);
     Ok(ToolOutput {
         content: json!({ "start_date": from, "end_date": to, "days": days }),
-        summary: format!("查看了 {from} 至 {to} 的训练记录"),
+        summary: ToolSummary::new("training_log_viewed")
+            .with("start_date", from)
+            .with("end_date", to),
     })
 }
 
@@ -273,11 +274,9 @@ async fn set_day_preference(ctx: &PluginContext, args: Value) -> Result<ToolOutp
     let text = args.text.trim();
     Ok(ToolOutput {
         content: json!({ "date": date, "text": text, "saved": true }),
-        summary: if text.is_empty() {
-            format!("已清除 {date} 的训练偏好")
-        } else {
-            format!("已保存 {date} 的训练偏好")
-        },
+        summary: ToolSummary::new("training_day_preference_set")
+            .with("date", date)
+            .with("cleared", text.is_empty()),
     })
 }
 
@@ -303,7 +302,7 @@ async fn update_preferences(ctx: &PluginContext, args: Value) -> Result<ToolOutp
     prefs::save(ctx, &updated).await?;
     Ok(ToolOutput {
         content: json!({ "preferences": prefs::get(ctx).await? }),
-        summary: "已更新训练偏好".into(),
+        summary: ToolSummary::new("training_preferences_updated"),
     })
 }
 
@@ -333,7 +332,12 @@ mod tests {
         assert_eq!(out.content["session"]["exercise_kcal"], 186.0);
         assert_eq!(out.content["session"]["intensity"], "moderate");
         assert_eq!(out.content["last_7_days"]["sessions"], 1);
-        assert_eq!(out.summary, "已记录训练：晨跑 30 分钟");
+        assert_eq!(
+            out.summary,
+            ToolSummary::new("training_session_logged")
+                .with("title", "晨跑")
+                .with("minutes", 30.0)
+        );
         let today = env.ctx.today().await.unwrap();
         let logged = log::sessions_between(&env.ctx, today, today).await.unwrap();
         assert_eq!(logged.len(), 1);

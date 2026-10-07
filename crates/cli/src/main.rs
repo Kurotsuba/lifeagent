@@ -92,6 +92,11 @@ enum Command {
     },
     /// Print the Training page's data as pretty JSON.
     Training,
+    /// The agent activity log: the newest runs, each with its steps.
+    Activity {
+        #[arg(long, default_value_t = 10)]
+        limit: u32,
+    },
     /// Changes the assistant asked for that wait for approval: list, approve or reject them.
     Actions {
         #[command(subcommand)]
@@ -286,12 +291,32 @@ async fn main() -> Result<()> {
         Command::Training => print_json(
             &lifeagent_plugin_training::view::training_view(&app.plugin_context()).await?,
         ),
+        Command::Activity { limit } => print_activity(&app, limit).await,
         Command::Actions { action } => match action {
             Some(ActionsAction::Approve { id }) => print_json(&app.approve_action(&id).await?),
             Some(ActionsAction::Reject { id }) => print_json(&app.reject_action(&id).await?),
             None => print_json(&app.pending_actions().await?),
         },
     }
+}
+
+/// `activity`: one line per run (newest first), then one indented line per step.
+async fn print_activity(app: &CoreApp, limit: u32) -> Result<()> {
+    let page = app.activity(&Default::default(), limit).await?;
+    for run in page.runs {
+        println!(
+            "{} {} {} {} {}",
+            run.started_at.format("%Y-%m-%d %H:%M:%S"),
+            run.actor.as_str(),
+            run.trigger.as_str(),
+            run.status.as_str(),
+            run.input_excerpt.as_deref().unwrap_or("")
+        );
+        for item in app.activity_run(&run.id).await?.steps {
+            println!("    {} {}", item.step.kind.as_str(), item.step.detail);
+        }
+    }
+    Ok(())
 }
 
 async fn chat(app: &CoreApp, mock: bool, mock_model: &MockChatModel) -> Result<()> {

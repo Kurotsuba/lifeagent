@@ -18,6 +18,7 @@ use uuid::Uuid;
 
 use crate::clock::Clock;
 use crate::error::CoreError;
+use crate::plugin::ToolSummary;
 
 /// A pending action older than this can no longer be approved.
 pub const EXPIRY_HOURS: i64 = 24;
@@ -66,9 +67,15 @@ pub struct PendingAction {
     /// `{"kind": ..., ...}`: what the action will do, as data the UI words in its language.
     pub preview: Value,
     pub status: ActionStatus,
+    /// What the tool did once approved, as data the UI words (`ToolSummary`).
+    pub result: Option<ToolSummary>,
+    /// Why an approved action failed. Actions approved before tool summaries became data
+    /// (migration 0004) also have their text summary here.
     pub result_summary: Option<String>,
     pub created_at: DateTime<Utc>,
     pub resolved_at: Option<DateTime<Utc>>,
+    /// The activity-log run that queued it (`crate::audit`), if it was queued inside one.
+    pub run_id: Option<String>,
 }
 
 type Row = (
@@ -80,10 +87,12 @@ type Row = (
     Option<String>,
     String,
     Option<String>,
+    Option<String>,
+    Option<String>,
 );
 
 const COLUMNS: &str = "id, tool_name, arguments_json, preview_json, status, result_summary, \
-                       created_at, resolved_at";
+                       created_at, resolved_at, result_summary_json, run_id";
 
 #[derive(Clone)]
 pub struct ApprovalStore {
@@ -104,16 +113,18 @@ impl ApprovalStore {
     ) -> Result<PendingAction, CoreError> {
         let id = Uuid::now_v7().to_string();
         let created_at = self.clock.now();
+        let run_id = crate::audit::current().map(|run| run.id().to_string());
         sqlx::query(
             "INSERT INTO pending_actions
-                (id, tool_name, arguments_json, preview_json, status, created_at)
-             VALUES ($1, $2, $3, $4, 'pending', $5)",
+                (id, tool_name, arguments_json, preview_json, status, created_at, run_id)
+             VALUES ($1, $2, $3, $4, 'pending', $5, $6)",
         )
         .bind(&id)
         .bind(tool_name)
         .bind(arguments.to_string())
         .bind(preview.to_string())
         .bind(created_at.to_rfc3339())
+        .bind(&run_id)
         .execute(&self.db)
         .await?;
         Ok(PendingAction {
@@ -122,9 +133,11 @@ impl ApprovalStore {
             arguments: arguments.clone(),
             preview: preview.clone(),
             status: ActionStatus::Pending,
+            result: None,
             result_summary: None,
             created_at,
             resolved_at: None,
+            run_id,
         })
     }
 
@@ -160,24 +173,28 @@ impl ApprovalStore {
             .collect())
     }
 
-    /// Records the outcome of a pending action. Errors `ActionNotPending` if it was resolved
-    /// meanwhile (e.g. approved twice from two tabs) or has expired.
+    /// Records the outcome of a pending action: the tool's summary if it ran, or why it
+    /// failed. Errors `ActionNotPending` if it was resolved meanwhile (e.g. approved twice
+    /// from two tabs) or has expired.
     pub async fn resolve(
         &self,
         id: &str,
         status: ActionStatus,
-        result_summary: Option<&str>,
+        result: Option<&ToolSummary>,
+        failure: Option<&str>,
     ) -> Result<PendingAction, CoreError> {
         let now = self.clock.now();
         let result = sqlx::query(
-            "UPDATE pending_actions SET status = $1, result_summary = $2, resolved_at = $3
+            "UPDATE pending_actions
+             SET status = $1, result_summary = $2, resolved_at = $3, result_summary_json = $6
              WHERE id = $4 AND status = 'pending' AND created_at >= $5",
         )
         .bind(status.as_str())
-        .bind(result_summary)
+        .bind(failure)
         .bind(now.to_rfc3339())
         .bind(id)
         .bind(self.expiry_cutoff().to_rfc3339())
+        .bind(result.map(|r| r.0.to_string()))
         .execute(&self.db)
         .await?;
         if result.rows_affected() == 0 {
@@ -206,8 +223,18 @@ impl ApprovalStore {
     }
 
     fn action_from_row(&self, row: Row) -> Result<PendingAction, CoreError> {
-        let (id, tool_name, arguments, preview, status, result_summary, created_at, resolved_at) =
-            row;
+        let (
+            id,
+            tool_name,
+            arguments,
+            preview,
+            status,
+            result_summary,
+            created_at,
+            resolved_at,
+            result_json,
+            run_id,
+        ) = row;
         let created_at = parse_instant(&created_at)?;
         let mut status = ActionStatus::parse(&status)?;
         if status == ActionStatus::Pending && created_at < self.expiry_cutoff() {
@@ -219,9 +246,14 @@ impl ApprovalStore {
             arguments: serde_json::from_str(&arguments)?,
             preview: serde_json::from_str(&preview)?,
             status,
+            result: result_json
+                .as_deref()
+                .map(serde_json::from_str)
+                .transpose()?,
             result_summary,
             created_at,
             resolved_at: resolved_at.as_deref().map(parse_instant).transpose()?,
+            run_id,
         })
     }
 }
@@ -258,14 +290,14 @@ mod tests {
         assert_eq!(store.pending().await.unwrap(), vec![action.clone()]);
 
         let resolved = store
-            .resolve(&action.id, ActionStatus::Rejected, None)
+            .resolve(&action.id, ActionStatus::Rejected, None, None)
             .await
             .unwrap();
         assert_eq!(resolved.status, ActionStatus::Rejected);
         assert!(store.pending().await.unwrap().is_empty());
         assert!(matches!(
             store
-                .resolve(&action.id, ActionStatus::Approved, None)
+                .resolve(&action.id, ActionStatus::Approved, None, None)
                 .await,
             Err(CoreError::ActionNotPending)
         ));
@@ -294,7 +326,7 @@ mod tests {
         ));
         assert!(matches!(
             store
-                .resolve(&action.id, ActionStatus::Approved, None)
+                .resolve(&action.id, ActionStatus::Approved, None, None)
                 .await,
             Err(CoreError::ActionNotPending)
         ));

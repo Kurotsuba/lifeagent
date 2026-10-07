@@ -2,10 +2,15 @@ import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import { getHistory, getPendingActions, sendMessage } from "../api/commands";
 import { onAppDataEvent } from "../api/events";
-import { commandErrorMessage, type HistoryMessage, type PendingAction } from "../api/types";
+import {
+  commandErrorMessage,
+  type HistoryMessage,
+  type PendingAction,
+  type ToolSummary,
+} from "../api/types";
 import { inputClass } from "../components/Field";
 import { primaryButtonClass } from "../components/buttonStyles";
-import { strings } from "../i18n";
+import { describeToolSummary, strings } from "../i18n";
 import { PendingActions } from "./PendingActions";
 
 const HISTORY_LIMIT = 50;
@@ -24,7 +29,7 @@ export function Chat({ draftText, onDraftConsumed }: ChatProps) {
   // last rendered assistant message by content rather than folded into `history` itself.
   const [lastLiveReply, setLastLiveReply] = useState<{
     content: string;
-    activities: string[];
+    activities: ToolSummary[];
   } | null>(null);
   const [pendingActions, setPendingActions] = useState<PendingAction[]>([]);
   // Approved/rejected here since the last message, kept on screen with their outcome until then.
@@ -164,7 +169,7 @@ export function Chat({ draftText, onDraftConsumed }: ChatProps) {
                           key={j}
                           className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
                         >
-                          {chip}
+                          {describeToolSummary(chip)}
                         </span>
                       ))}
                     </div>

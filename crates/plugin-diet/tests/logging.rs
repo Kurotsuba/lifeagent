@@ -8,6 +8,7 @@ use lifeagent_core::app::{CoreApp, CoreAppBuilder};
 use lifeagent_core::clock::FixedClock;
 use lifeagent_core::events::EventSource;
 use lifeagent_core::goals::{GoalDirection, WeightGoal};
+use lifeagent_core::plugin::ToolSummary;
 use lifeagent_core::profile::{ActivityLevel, DietaryPattern, Profile, Sex};
 use lifeagent_core::secrets::MemorySecretStore;
 use lifeagent_llm::error::LlmError;
@@ -128,7 +129,12 @@ async fn meal_logged_via_orchestrator_shows_up_in_today_view() {
         .unwrap();
 
     assert_eq!(turn.reply, "已记录午餐，共 376 kcal。");
-    assert_eq!(turn.activities, vec!["已记录午餐 · 376 kcal"]);
+    assert_eq!(
+        turn.activities,
+        vec![ToolSummary::new("diet_meal_logged")
+            .with("meal_type", "lunch")
+            .with("kcal", 376.0)]
+    );
 
     // The final conversation request saw the tool result with the totals.
     let requests = mock.received_requests();

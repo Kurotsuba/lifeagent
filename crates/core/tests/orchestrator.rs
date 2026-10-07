@@ -8,7 +8,9 @@ use chrono::Utc;
 use lifeagent_core::app::CoreAppBuilder;
 use lifeagent_core::clock::FixedClock;
 use lifeagent_core::events::EventSource;
-use lifeagent_core::plugin::{Plugin, PluginContext, PluginError, PluginManifest, ToolOutput};
+use lifeagent_core::plugin::{
+    Plugin, PluginContext, PluginError, PluginManifest, ToolOutput, ToolSummary,
+};
 use lifeagent_core::secrets::MemorySecretStore;
 use lifeagent_llm::mock::MockChatModel;
 use lifeagent_llm::types::{ChatResponse, ToolCall, Usage};
@@ -77,7 +79,7 @@ impl Plugin for TestPlugin {
                     .await?;
                 Ok(ToolOutput {
                     content: json!({"entry_id": event.id, "value": value}),
-                    summary: format!("已记录：{value}"),
+                    summary: ToolSummary::new("test_logged").with("value", value),
                 })
             }
             other => Err(PluginError::NotFound(format!("unknown tool {other}"))),
@@ -132,7 +134,10 @@ async fn logs_via_tool_then_answers() {
     let turn = app.send_message("测试记录一下燕麦牛奶").await.unwrap();
 
     assert_eq!(turn.reply, "已经帮你记下啦");
-    assert_eq!(turn.activities, vec!["已记录：燕麦牛奶"]);
+    assert_eq!(
+        turn.activities,
+        vec![ToolSummary::new("test_logged").with("value", "燕麦牛奶")]
+    );
 
     // The event was actually stored.
     let event = app
@@ -207,7 +212,10 @@ async fn invalid_tool_args_return_an_error_the_model_can_retry_from() {
     let turn = app.send_message("测试无效参数重试").await.unwrap();
 
     assert_eq!(turn.reply, "好的，已修正");
-    assert_eq!(turn.activities, vec!["已记录：修正后的值"]);
+    assert_eq!(
+        turn.activities,
+        vec![ToolSummary::new("test_logged").with("value", "修正后的值")]
+    );
 
     // The retry request (third call overall: the two tool rounds plus the final answer) must
     // have seen the error from the first, invalid call.

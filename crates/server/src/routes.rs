@@ -29,6 +29,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
+use tracing::Instrument;
 
 use crate::auth::AuthUser;
 use crate::error::ApiError;
@@ -79,6 +80,15 @@ struct PreferenceArg {
 #[derive(Deserialize)]
 struct Id {
     id: String,
+}
+#[derive(Deserialize)]
+struct Days {
+    #[serde(default)]
+    days: Option<u32>,
+}
+#[derive(Deserialize)]
+struct Visible {
+    visible: bool,
 }
 #[derive(Deserialize)]
 struct ProfileArg {
@@ -209,10 +219,25 @@ pub const LLM_COMMANDS: &[&str] = &["send_message", "generate_plan", "revise_pla
 pub const LLM_REQUESTS_PER_WINDOW: u32 = 30;
 pub const LLM_REQUEST_WINDOW: Duration = Duration::from_secs(10 * 60);
 
+/// Runs one command inside a span carrying the user and command, so every log line it causes
+/// (model calls, tool calls, errors) can be traced back to them.
 pub async fn command(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
     Path(command): Path<String>,
+    body: Bytes,
+) -> Result<Response, ApiError> {
+    let span =
+        tracing::info_span!("command", user_id = %user.id, command = %command, actor = "user");
+    run_command(state, user, command, body)
+        .instrument(span)
+        .await
+}
+
+async fn run_command(
+    state: Arc<AppState>,
+    user: AuthUser,
+    command: String,
     body: Bytes,
 ) -> Result<Response, ApiError> {
     if LLM_COMMANDS.contains(&command.as_str()) && !state.llm_limiter.allow(user.id.clone()) {
@@ -233,6 +258,22 @@ pub async fn command(
             reply(ops::get_history(app, a.limit).await)
         }
         "get_pending_actions" => reply(ops::get_pending_actions(app).await),
+        "get_activity" => {
+            let a: ops::ActivityQuery = args(&body)?;
+            reply(ops::get_activity(app, &a).await)
+        }
+        "get_activity_run" => {
+            let a: Id = args(&body)?;
+            reply(ops::get_activity_run(app, &a.id).await)
+        }
+        "get_activity_summary" => {
+            let a: Days = args(&body)?;
+            reply(ops::get_activity_summary(app, a.days).await)
+        }
+        "set_activity_tab_visible" => {
+            let a: Visible = args(&body)?;
+            reply(ops::set_activity_tab_visible(app, a.visible).await)
+        }
         "approve_action" => {
             let a: Id = args(&body)?;
             reply(ops::approve_action(app, &a.id).await)
@@ -496,31 +537,36 @@ const TICK_CONCURRENCY: usize = 4;
 /// Runs one scheduler tick (§7.13) for every user. Called by Cloud Scheduler through `/api/internal/tick`, or by the in-process
 /// loop in development.
 pub async fn tick_all(state: &Arc<AppState>) -> Result<TickReport, ApiError> {
-    let schemas: Vec<String> = sqlx::query_scalar("SELECT schema_name FROM users ORDER BY id")
-        .fetch_all(&state.auth_db)
-        .await?;
+    let users: Vec<(String, String)> =
+        sqlx::query_as("SELECT id, schema_name FROM users ORDER BY id")
+            .fetch_all(&state.auth_db)
+            .await?;
     let permits = Arc::new(Semaphore::new(TICK_CONCURRENCY));
     let mut tasks = JoinSet::new();
-    for schema in &schemas {
+    for (user_id, schema) in &users {
         let state = state.clone();
         let permits = permits.clone();
         let schema = schema.clone();
-        tasks.spawn(async move {
-            let _permit = permits.acquire_owned().await;
-            match state.tenants.get_quietly(&schema).await {
-                Ok(tenant) => {
-                    tenant.scheduler.lock().await.tick().await;
-                    true
-                }
-                Err(e) => {
-                    tracing::error!(schema, error = %e, "tick: could not open tenant");
-                    false
+        let span = tracing::info_span!("tick", user_id = %user_id, actor = "scheduler");
+        tasks.spawn(
+            async move {
+                let _permit = permits.acquire_owned().await;
+                match state.tenants.get_quietly(&schema).await {
+                    Ok(tenant) => {
+                        tenant.scheduler.lock().await.tick().await;
+                        true
+                    }
+                    Err(e) => {
+                        tracing::error!(schema, error = %e, "tick: could not open tenant");
+                        false
+                    }
                 }
             }
-        });
+            .instrument(span),
+        );
     }
     let mut report = TickReport {
-        users: schemas.len(),
+        users: users.len(),
         failed: 0,
     };
     while let Some(result) = tasks.join_next().await {

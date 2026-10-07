@@ -50,3 +50,19 @@ export function onPlanGenerating(onChange: (generating: boolean | null) => void)
   });
   return () => source.close();
 }
+
+/** Calls `onRun` with the id of every agent run that ends (`activity-recorded`), and with `null`
+ * whenever the stream (re)opens, since runs that ended meanwhile were missed. Returns an
+ * unsubscribe function. */
+export function onActivityRecorded(onRun: (runId: string | null) => void): () => void {
+  const source = new EventSource("/api/events");
+  source.addEventListener("open", () => onRun(null));
+  source.addEventListener("activity-recorded", (e) => {
+    try {
+      onRun((JSON.parse(e.data) as { run_id: string }).run_id);
+    } catch {
+      onRun(null);
+    }
+  });
+  return () => source.close();
+}

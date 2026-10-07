@@ -121,8 +121,9 @@ Cloud Scheduler --> POST /api/internal/tick (replaces the in-process scheduler l
   from the metadata server. No key anywhere. See §2.
 - **DB password:** in Secret Manager, exposed with `--set-secrets DB_PASSWORD=...`. Never in
   the image or the repo.
-- **Logs:** to stdout, ideally JSON (`tracing-subscriber` json feature). Cloud Logging picks it
-  up; the rolling log file is not used on the server.
+- **Logs:** to stdout as Cloud Logging structured JSON (`LIFEAGENT_LOG_FORMAT=json`, set in
+  `deploy/env.yaml`; done 2026-10-07, `docs/DECISIONS.md` "Structured logs for Cloud Logging").
+  The rolling log file is not used on the server.
 - **Accounts:** register, login and logout, with each user's data in its own Postgres schema.
   See "Account management" below.
 
@@ -451,7 +452,7 @@ has a good base:
 To make that visible:
 
 - **Audit trail UI:** show every tool call, with its arguments, result and who triggered it
-  (chat or scheduler).
+  (chat or scheduler). Done 2026-10-07: `docs/AUDIT_LOG_SPEC.md` (milestones AL0–AL4), the Activity tab.
 - **Human approval for risky actions:** past-day deletes and preference/allergy writes go through a
   confirmation step instead of only a flag the model sets. Done 2026-10-05 (`docs/DECISIONS.md`,
   "Approval for sensitive tool calls").

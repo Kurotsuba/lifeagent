@@ -84,6 +84,8 @@ pub enum AppEvent {
         /// parse `error`'s English `Display` text (§14 M8: per-cause notification text).
         code: &'static str,
     },
+    /// An agent run ended (`crate::audit`), so an open Activity page can refresh.
+    ActivityRecorded { run_id: String },
 }
 
 /// A committed change to the event store, published on the internal channel the dispatcher

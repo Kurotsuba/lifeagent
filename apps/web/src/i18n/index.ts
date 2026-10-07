@@ -4,6 +4,7 @@ import type {
   ErrorDetail,
   ImportMessage,
   MacroViolation,
+  ToolSummary,
 } from "../api/types";
 import { en } from "./en";
 import { ja } from "./ja";
@@ -47,6 +48,8 @@ const _importComplete: MessagesFor<
 > = zhCN.importMessages;
 const _macrosComplete: MessagesFor<MacroViolation, "rule"> = zhCN.macroViolations;
 const _previewsComplete: MessagesFor<ActionPreview, "kind"> = zhCN.approvals.previews;
+const _toolSummariesComplete: MessagesFor<ToolSummary, "kind"> = zhCN.toolSummaries;
+void _toolSummariesComplete;
 void _previewsComplete;
 void _errorsComplete;
 void _importComplete;
@@ -105,6 +108,19 @@ type Entry<T> = string | ((d: T) => string) | undefined;
 
 function render<T>(entry: Entry<T>, d: T): string | undefined {
   return typeof entry === "function" ? entry(d) : entry;
+}
+
+/** A tool's name as a label in the current language; the raw name if this build doesn't
+ * know it. */
+export function toolLabel(tool: string): string {
+  return strings.tools[tool] ?? tool;
+}
+
+/** What a tool call did, in the current language. A kind this build doesn't know (a newer
+ * server, a plugin without translations) falls back to the tool's label, then the raw kind. */
+export function describeToolSummary(summary: ToolSummary | { kind: string }, tool?: string): string {
+  const entry = (strings.toolSummaries as Record<string, Entry<never>>)[summary.kind];
+  return render(entry, summary as never) ?? (tool ? toolLabel(tool) : summary.kind);
 }
 
 /** An import error or warning in the current language. */

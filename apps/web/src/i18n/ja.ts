@@ -45,6 +45,7 @@ export const ja: Strings = {
   nav: {
     today: "今日",
     chat: "チャット",
+    activity: "アクティビティ",
     nutrition: "栄養",
     stock: "在庫",
     settings: "設定",
@@ -370,6 +371,191 @@ export const ja: Strings = {
     },
     unknown: (tool: string) => `操作を実行：${tool}`,
   },
+  activity: {
+    hint: "アシスタントがあなたの代わりに行ったことをすべて記録しています。誰が始めたか、何を呼び出したか、何が止められ、何があなたの確認待ちかが分かります。",
+    period: (days: number) => `直近 ${days} 日`,
+    stats: {
+      byUser: "あなたが開始",
+      byScheduler: "自動実行",
+      approvals: "確認リクエスト",
+      approvalsDetail: (approved: number, rejected: number) => `承認 ${approved} · 却下 ${rejected}`,
+      guardrails: "安全ブロック",
+      tokens: "モデルのトークン",
+      last24h: (used: number, budget: number | null) =>
+        budget === null ? `直近 24 時間 ${used}` : `直近 24 時間 ${used} / 上限 ${budget}`,
+    },
+    filterAll: "すべて",
+    actors: { user: "あなた", scheduler: "自動" },
+    triggers: {
+      chat_turn: "チャット",
+      plan_scheduled: "定時のプラン作成",
+      plan_manual: "プラン作成",
+      plan_revision: "プランの調整",
+      action_approved: "操作の承認",
+      action_rejected: "操作の却下",
+    },
+    statuses: {
+      running: "実行中",
+      succeeded: "完了",
+      needs_approval: "確認待ち",
+      failed: "失敗",
+      interrupted: "中断",
+    },
+    counts: (o: { model_calls: number; tool_calls: number; tokens: number; guardrails: number }) =>
+      [
+        `モデル ${o.model_calls} 回`,
+        `ツール ${o.tool_calls} 回`,
+        `${o.tokens} トークン`,
+        o.guardrails > 0 ? `ブロック ${o.guardrails} 回` : "",
+      ]
+        .filter((s) => s !== "")
+        .join(" · "),
+    planSaved: (date: string, version: number) => `${date} のプラン 第 ${version} 版`,
+    errorCodes: {
+      invalid_input: "入力が無効か、計画する項目がありません",
+      internal: "内部エラー",
+      budget_exceeded: "1 日のトークン上限に達しました",
+      busy: "別のプランを作成中です",
+      not_configured: "モデルが未設定です",
+      action_not_pending: "この操作は処理済みか期限切れです",
+      rate_limited: "モデルが混み合っています",
+    } as Record<string, string>,
+    errorCode: (code: string) => `エラー：${code}`,
+    empty: "まだ記録がありません。",
+    loadMore: "さらに読み込む",
+    showSteps: "ステップを表示",
+    hideSteps: "閉じる",
+    roles: { conversation: "会話", parser: "解析", planner: "プラン" },
+    modelCall: (role: string, model: string, tokens: number, seconds: string, ok: boolean) =>
+      `モデル呼び出し（${role}）${model} · ${tokens} トークン · ${seconds} 秒${ok ? "" : " · 失敗"}`,
+    toolOutcomes: {
+      ran: "実行",
+      invalid_args: "拒否",
+      not_found: "見つからない",
+      failed: "エラー",
+    },
+    arguments: "引数",
+    approvalRequested: "確認をリクエスト",
+    approvalResolved: {
+      approved: "あなたが承認",
+      rejected: "あなたが却下",
+      failed: "承認したが実行に失敗",
+      pending: "待機中",
+      expired: "期限切れ",
+    },
+    fromEarlierRun: "（以前の会話から）",
+    actionStatus: {
+      pending: "まだ確認待ちです",
+      approved: "承認済み",
+      rejected: "却下済み",
+      failed: "承認後に実行失敗",
+      expired: "期限切れ（未実行）",
+    },
+    guardrails: {
+      invalid_args: "ブロック：引数またはルールで許可されていません",
+      unknown_tool: "ブロック：存在しない、またはオフのツールです",
+      token_budget: "ブロック：1 日のトークン上限を超えています",
+      iteration_cap: "停止：ステップが多すぎます",
+    },
+    planValidation: (d: { violations: string[]; retried: boolean; violations_left: number }) =>
+      d.violations.length === 0
+        ? "プランのチェック：問題なし"
+        : d.violations_left === 0
+          ? `プランのチェック：${d.violations.length} 件の問題を検出し、作り直してすべて解消`
+          : `プランのチェック：${d.violations.length} 件の問題を検出、${d.violations_left} 件は未解消（注意として表示）`,
+    planSavedStep: (date: string, version: number) => `${date} のプランを保存しました（第 ${version} 版）`,
+  },
+  toolSummaries: {
+    core_plan_viewed: (d: { date: string }) => `${d.date} のプランを確認しました`,
+    core_plan_generated: (d: { date: string; version: number }) =>
+      `${d.date} のプランを作成しました（第 ${d.version} 版）`,
+    core_plan_revised: (d: { date: string; version: number }) =>
+      `${d.date} のプランを調整しました（第 ${d.version} 版）`,
+    core_weight_logged: (d: { kg: number }) => `体重 ${d.kg} kg を記録しました`,
+    core_allergies_updated: (d: { allergies: string[] }) =>
+      `アレルギー食品を更新しました：${d.allergies.length > 0 ? d.allergies.join("、") : "なし"}`,
+    core_preference_added: (d: {
+      preference_kind: "dislike" | "general";
+      text: string;
+      valid_from: string | null;
+      valid_until: string | null;
+    }) =>
+      `${d.preference_kind === "dislike" ? "苦手な食べ物" : "好み"}を記憶しました：${d.text}` +
+      (d.valid_until ? `（${d.valid_until} まで）` : ""),
+    core_preference_removed: "好みを削除しました",
+    core_entry_deleted: "記録を削除しました",
+    diet_meal_logged: (d: { meal_type: "breakfast" | "lunch" | "dinner" | "snack"; kcal: number }) =>
+      `${{ breakfast: "朝食", lunch: "昼食", dinner: "夕食", snack: "間食" }[d.meal_type]}を記録しました · ${d.kcal} kcal`,
+    diet_intake_viewed: (d: { date: string }) => `${d.date} の食事記録を確認しました`,
+    diet_food_updated: (d: { name: string }) => `食品を更新しました：${d.name}`,
+    diet_dish_updated: (d: { name: string }) => `料理を更新しました：${d.name}`,
+    diet_alias_added: (d: { alias: string; food: string }) =>
+      `別名を追加しました：${d.alias} → ${d.food}`,
+    diet_alias_removed: (d: { alias: string }) => `別名を削除しました：${d.alias}`,
+    stock_added: (d: { names: string[] }) => `在庫に追加しました：${d.names.join("、")}`,
+    stock_viewed: "在庫を確認しました",
+    stock_updated: (d: { name: string }) => `在庫を更新しました：${d.name}`,
+    training_session_logged: (d: { title: string; minutes: number }) =>
+      `トレーニングを記録しました：${d.title} ${d.minutes} 分`,
+    training_log_viewed: (d: { start_date: string; end_date: string }) =>
+      `${d.start_date}〜${d.end_date} のトレーニング記録を確認しました`,
+    training_day_preference_set: (d: { date: string; cleared: boolean }) =>
+      d.cleared
+        ? `${d.date} のトレーニングの希望を消去しました`
+        : `${d.date} のトレーニングの希望を保存しました`,
+    training_preferences_updated: "トレーニング設定を更新しました",
+    multimember_members_viewed: (d: { count: number }) => `メンバーを確認しました（${d.count} 人）`,
+    multimember_member_added: (d: { name: string }) => `メンバーを追加しました：${d.name}`,
+    multimember_member_updated: (d: { name: string }) => `メンバーを更新しました：${d.name}`,
+    multimember_member_archived: (d: { name: string }) => `メンバーを外しました：${d.name}`,
+    multimember_attendance_set: (d: {
+      name: string;
+      meal_type: "breakfast" | "lunch" | "dinner";
+      present: boolean;
+      date: string | null;
+    }) =>
+      `${d.name}・${d.date ? `${d.date} の` : "いつもの"}${{ breakfast: "朝食", lunch: "昼食", dinner: "夕食" }[d.meal_type]}：${d.present ? "一緒に食べる" : "一緒に食べない"}`,
+    multimember_attendance_cleared: (d: {
+      name: string;
+      meal_type: "breakfast" | "lunch" | "dinner";
+      date: string;
+    }) =>
+      `${d.name}・${d.date} の${{ breakfast: "朝食", lunch: "昼食", dinner: "夕食" }[d.meal_type]}：いつもの予定に戻しました`,
+    multimember_dislike_added: (d: { name: string; text: string }) =>
+      `${d.name} さんの苦手な食べ物を記憶しました：${d.text}`,
+    multimember_dislike_removed: "苦手な食べ物を 1 件削除しました",
+  },
+  tools: {
+    core_get_plan: "プランの確認",
+    core_generate_plan: "プランの作成",
+    core_revise_plan: "プランの調整",
+    core_log_weight: "体重の記録",
+    core_update_allergies: "アレルギー食品の更新",
+    core_add_preference: "好みの記憶",
+    core_remove_preference: "好みの削除",
+    core_delete_entry: "記録の削除",
+    diet_log_meal: "食事の記録",
+    diet_get_intake: "食事記録の確認",
+    diet_update_food: "食品の更新",
+    diet_update_dish: "料理の更新",
+    diet_add_alias: "別名の追加",
+    diet_remove_alias: "別名の削除",
+    stock_add: "在庫の追加",
+    stock_list: "在庫の確認",
+    stock_update: "在庫の更新",
+    training_log_session: "トレーニングの記録",
+    training_get_log: "トレーニング記録の確認",
+    training_set_day_preference: "日ごとのトレーニングの希望",
+    training_update_preferences: "トレーニング設定の更新",
+    multimember_list_members: "メンバーの確認",
+    multimember_add_member: "メンバーの追加",
+    multimember_update_member: "メンバーの更新",
+    multimember_archive_member: "メンバーを外す",
+    multimember_set_attendance: "食事の参加予定の設定",
+    multimember_clear_attendance_override: "参加予定をいつも通りに戻す",
+    multimember_add_dislike: "メンバーの苦手な食べ物の記憶",
+    multimember_remove_dislike: "メンバーの苦手な食べ物の削除",
+  } as Record<string, string>,
   settings: {
     saveSucceeded: "保存しました",
     saveFailed: "保存に失敗しました。もう一度お試しください。",
@@ -384,6 +570,8 @@ export const ja: Strings = {
     },
     features: {
       hint: "オプション機能をオンにすると、サイドバーに表示され、毎日のプランに加わります。",
+      activityTab: "「アクティビティ」ページを表示",
+      activityTabHint: "アシスタントの操作は常に記録されます。ここではページをサイドバーに表示するかだけを選びます。",
       names: {
         training: "トレーニング記録とプラン",
         stock: "在庫管理",

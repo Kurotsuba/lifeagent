@@ -822,3 +822,131 @@ async fn pending_actions_are_approved_or_rejected_by_their_owner_only() {
         .collect();
     assert_eq!(texts, vec!["香菜"]);
 }
+
+/// `docs/AUDIT_LOG_SPEC.md` AL3: paging, filters, run detail and summary, scoped per user.
+#[tokio::test]
+async fn activity_pages_filters_and_stays_per_user() {
+    let server = start().await;
+    let alice = server.register("alice").await;
+    let bob = server.register("bob").await;
+    for text in ["一", "二", "三"] {
+        let (status, _) = server
+            .post(&alice, "/api/send_message", json!({ "text": text }))
+            .await;
+        assert_eq!(status, StatusCode::OK);
+    }
+
+    let (status, page) = server
+        .post(&alice, "/api/get_activity", json!({ "limit": 2 }))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let runs = page["runs"].as_array().unwrap();
+    assert_eq!(runs.len(), 2);
+    assert_eq!(runs[0]["input_excerpt"], "三");
+    assert_eq!(runs[0]["trigger"], "chat_turn");
+    assert_eq!(runs[0]["actor"], "user");
+    assert_eq!(runs[0]["status"], "succeeded");
+    assert_eq!(runs[0]["outcome"]["model_calls"], 1);
+    let (_, rest) = server
+        .post(
+            &alice,
+            "/api/get_activity",
+            json!({ "limit": 2, "before": page["next_before"] }),
+        )
+        .await;
+    assert_eq!(rest["runs"].as_array().unwrap().len(), 1);
+    assert_eq!(rest["next_before"], Value::Null);
+
+    let (_, scheduler) = server
+        .post(&alice, "/api/get_activity", json!({ "actor": "scheduler" }))
+        .await;
+    assert!(scheduler["runs"].as_array().unwrap().is_empty());
+    let (status, _) = server
+        .post(&alice, "/api/get_activity", json!({ "actor": "robot" }))
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    let run_id = runs[0]["id"].as_str().unwrap();
+    let (status, detail) = server
+        .post(&alice, "/api/get_activity_run", json!({ "id": run_id }))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(detail["run"]["id"], run_id);
+    let steps = detail["steps"].as_array().unwrap();
+    assert_eq!(steps.len(), 1);
+    assert_eq!(steps[0]["kind"], "model_call");
+    assert_eq!(steps[0]["detail"]["model"], "mock");
+
+    let (_, summary) = server
+        .post(&alice, "/api/get_activity_summary", json!({}))
+        .await;
+    assert_eq!(summary["days"], 7);
+    assert_eq!(summary["runs_by_user"], 3);
+    assert_eq!(summary["runs_by_scheduler"], 0);
+    assert_eq!(summary["guardrails"], 0);
+
+    // Bob's log is his own schema: Alice's run doesn't exist there.
+    let (status, error) = server
+        .post(&bob, "/api/get_activity_run", json!({ "id": run_id }))
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{error}");
+    let (_, bobs) = server.post(&bob, "/api/get_activity", json!({})).await;
+    assert!(bobs["runs"].as_array().unwrap().is_empty());
+}
+
+/// `docs/AUDIT_LOG_SPEC.md` §6.3: hiding the Activity tab only hides it.
+#[tokio::test]
+async fn hiding_the_activity_tab_keeps_recording() {
+    let server = start().await;
+    let alice = server.register("alice").await;
+    let (_, state) = server.post(&alice, "/api/get_app_state", json!({})).await;
+    assert_eq!(state["activity_tab_visible"], true);
+
+    let (status, _) = server
+        .post(
+            &alice,
+            "/api/set_activity_tab_visible",
+            json!({ "visible": false }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, state) = server.post(&alice, "/api/get_app_state", json!({})).await;
+    assert_eq!(state["activity_tab_visible"], false);
+
+    server
+        .post(&alice, "/api/send_message", json!({ "text": "hidden" }))
+        .await;
+    let (_, page) = server.post(&alice, "/api/get_activity", json!({})).await;
+    assert_eq!(page["runs"][0]["input_excerpt"], "hidden");
+}
+
+#[tokio::test]
+async fn the_event_stream_reports_finished_activity_runs() {
+    let server = start().await;
+    let alice = server.register("alice").await;
+    let mut stream = server
+        .http
+        .get(format!("{}/api/events", server.base))
+        .header("cookie", alice.cookie.clone().unwrap())
+        .send()
+        .await
+        .unwrap();
+
+    server
+        .post(&alice, "/api/send_message", json!({ "text": "hi" }))
+        .await;
+
+    let mut received = String::new();
+    let found = tokio::time::timeout(Duration::from_secs(5), async {
+        while let Some(chunk) = stream.chunk().await.unwrap() {
+            received.push_str(&String::from_utf8_lossy(&chunk));
+            if received.contains("event: activity-recorded") {
+                return true;
+            }
+        }
+        false
+    })
+    .await;
+    assert_eq!(found, Ok(true), "{received}");
+    assert!(received.contains("run_id"), "{received}");
+}

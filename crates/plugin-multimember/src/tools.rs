@@ -2,7 +2,7 @@
 //! let the owner tell the assistant about the other people they share meals with.
 
 use chrono::NaiveDate;
-use lifeagent_core::plugin::{PluginContext, PluginError, ToolOutput};
+use lifeagent_core::plugin::{PluginContext, PluginError, ToolOutput, ToolSummary};
 use lifeagent_core::profile::{ActivityLevel, DietaryPattern, Sex};
 use lifeagent_llm::types::ToolSpec;
 use serde::Deserialize;
@@ -240,7 +240,7 @@ async fn list_members(ctx: &PluginContext) -> Result<ToolOutput, PluginError> {
         out.push(member_json(ctx, m, today).await?);
     }
     Ok(ToolOutput {
-        summary: format!("{} members", members.len()),
+        summary: ToolSummary::new("multimember_members_viewed").with("count", members.len()),
         content: json!({ "members": out }),
     })
 }
@@ -258,7 +258,7 @@ async fn add_member(ctx: &PluginContext, args: Value) -> Result<ToolOutput, Plug
     let m = store::add_member(ctx, &a.profile, a.attendance.as_deref()).await?;
     let today = ctx.today().await?;
     Ok(ToolOutput {
-        summary: format!("added {}", m.profile.display_name),
+        summary: ToolSummary::new("multimember_member_added").with("name", &m.profile.display_name),
         content: json!({ "member": member_json(ctx, &m, today).await? }),
     })
 }
@@ -293,7 +293,8 @@ async fn update_member(ctx: &PluginContext, args: Value) -> Result<ToolOutput, P
     let m = store::update_member(ctx, &m.id, &profile).await?;
     let today = ctx.today().await?;
     Ok(ToolOutput {
-        summary: format!("updated {}", m.profile.display_name),
+        summary: ToolSummary::new("multimember_member_updated")
+            .with("name", &m.profile.display_name),
         content: json!({ "member": member_json(ctx, &m, today).await? }),
     })
 }
@@ -308,7 +309,8 @@ async fn archive_member(ctx: &PluginContext, args: Value) -> Result<ToolOutput, 
     let m = store::resolve(ctx, &a.member).await?;
     store::archive_member(ctx, &m.id).await?;
     Ok(ToolOutput {
-        summary: format!("removed {}", m.profile.display_name),
+        summary: ToolSummary::new("multimember_member_archived")
+            .with("name", &m.profile.display_name),
         content: json!({ "archived": m.id }),
     })
 }
@@ -327,14 +329,17 @@ async fn set_attendance(ctx: &PluginContext, args: Value) -> Result<ToolOutput, 
     let a: AttendanceArgs = parse_args(args)?;
     let m = store::resolve(ctx, &a.member).await?;
     let name = &m.profile.display_name;
-    let verb = if a.present { "eats" } else { "skips" };
     match (a.date.as_deref(), a.weekdays) {
         (Some(date), None) => {
             let date = parse_date(date)?;
             store::set_override(ctx, &m.id, date, a.meal_type, a.present, a.note.as_deref())
                 .await?;
             Ok(ToolOutput {
-                summary: format!("{name} {verb} {} on {date}", a.meal_type.as_str()),
+                summary: ToolSummary::new("multimember_attendance_set")
+                    .with("name", name)
+                    .with("meal_type", a.meal_type)
+                    .with("present", a.present)
+                    .with("date", Some(date)),
                 content: json!({
                     "member_id": m.id, "date": date, "meal_type": a.meal_type,
                     "present": a.present
@@ -356,7 +361,11 @@ async fn set_attendance(ctx: &PluginContext, args: Value) -> Result<ToolOutput, 
                 store::set_default(ctx, &m.id, &slot).await?;
             }
             Ok(ToolOutput {
-                summary: format!("{name} usually {verb} {}", a.meal_type.as_str()),
+                summary: ToolSummary::new("multimember_attendance_set")
+                    .with("name", name)
+                    .with("meal_type", a.meal_type)
+                    .with("present", a.present)
+                    .with("date", None::<NaiveDate>),
                 content: json!({
                     "member_id": m.id, "weekdays": weekdays, "meal_type": a.meal_type,
                     "present": a.present
@@ -382,11 +391,10 @@ async fn clear_override(ctx: &PluginContext, args: Value) -> Result<ToolOutput, 
     let date = parse_date(&a.date)?;
     store::clear_override(ctx, &m.id, date, a.meal_type).await?;
     Ok(ToolOutput {
-        summary: format!(
-            "{}: usual {} on {date}",
-            m.profile.display_name,
-            a.meal_type.as_str()
-        ),
+        summary: ToolSummary::new("multimember_attendance_cleared")
+            .with("name", &m.profile.display_name)
+            .with("meal_type", a.meal_type)
+            .with("date", date),
         content: json!({ "member_id": m.id, "date": date, "meal_type": a.meal_type }),
     })
 }
@@ -411,7 +419,9 @@ async fn add_dislike(ctx: &PluginContext, args: Value) -> Result<ToolOutput, Plu
     )
     .await?;
     Ok(ToolOutput {
-        summary: format!("{} dislikes {}", m.profile.display_name, d.text),
+        summary: ToolSummary::new("multimember_dislike_added")
+            .with("name", &m.profile.display_name)
+            .with("text", &d.text),
         content: json!({ "dislike": d }),
     })
 }
@@ -425,7 +435,7 @@ async fn remove_dislike(ctx: &PluginContext, args: Value) -> Result<ToolOutput, 
     let a: IdArg = parse_args(args)?;
     store::remove_dislike(ctx, &a.id).await?;
     Ok(ToolOutput {
-        summary: "removed a dislike".into(),
+        summary: ToolSummary::new("multimember_dislike_removed"),
         content: json!({ "removed": a.id }),
     })
 }

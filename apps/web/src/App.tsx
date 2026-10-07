@@ -3,6 +3,7 @@ import { me, SIGNED_OUT_EVENT } from "./api/auth";
 import { getAppState, setLanguage } from "./api/commands";
 import { SESSION_EXPIRED_EVENT } from "./api/transport";
 import { isCommandError } from "./api/types";
+import { Activity } from "./activity/Activity";
 import { AuthScreen } from "./auth/AuthScreen";
 import { Chat } from "./chat/Chat";
 import { Guide, guideSeen } from "./components/Guide";
@@ -20,14 +21,15 @@ import { Training } from "./training/Training";
 /**
  * Thin view layer: all state comes from commands, no business logic here (see CLAUDE.md).
  * A login comes first; then, on the first run, onboarding; afterwards, the
- * main shell. Its tabs, in order: Today (a read-only summary of the day), Chat, then one tab per
- * plugin (Nutrition, plus Training, Members and Stock while those optional plugins are on), and
- * Settings.
+ * main shell. Its tabs, in order: Today (a read-only summary of the day), Chat, Activity (what
+ * the agent did; can be hidden in Settings), then one tab per plugin (Nutrition, plus Training,
+ * Members and Stock while those optional plugins are on), and Settings.
  */
 type Screen = "loading" | "auth" | "onboarding" | "main";
 export type Tab =
   | "today"
   | "chat"
+  | "activity"
   | "nutrition"
   | "training"
   | "members"
@@ -139,10 +141,13 @@ function MainShell({ username }: { username: string | null }) {
   const [showGuide, setShowGuide] = useState(() => !guideSeen(username));
   // Null until loaded, so the Today tab doesn't fetch twice (without, then with, stock).
   const [enabledPlugins, setEnabledPlugins] = useState<string[] | null>(null);
+  const [activityTabVisible, setActivityTabVisible] = useState(true);
 
   async function refreshPlugins() {
     try {
-      setEnabledPlugins((await getAppState()).enabled_plugins);
+      const state = await getAppState();
+      setEnabledPlugins(state.enabled_plugins);
+      setActivityTabVisible(state.activity_tab_visible);
     } catch {
       // Keep the current tabs; Settings shows its own error for a failed switch. On the first
       // load, fall back to no optional plugins rather than an empty Today tab forever.
@@ -154,10 +159,12 @@ function MainShell({ username }: { username: string | null }) {
     void refreshPlugins();
   }, []);
 
-  // A plugin switched off in Settings takes its tab with it.
+  // A plugin switched off in Settings takes its tab with it; so does hiding the Activity tab.
   const visibleTab: Tab = (() => {
     const plugin = PLUGIN_TABS[tab];
-    return plugin && enabledPlugins && !enabledPlugins.includes(plugin) ? "today" : tab;
+    if (plugin && enabledPlugins && !enabledPlugins.includes(plugin)) return "today";
+    if (tab === "activity" && !activityTabVisible) return "today";
+    return tab;
   })();
 
   function openChatWithDraft(prefillText: string) {
@@ -173,6 +180,7 @@ function MainShell({ username }: { username: string | null }) {
         username={username}
         onShowGuide={() => setShowGuide(true)}
         isTabShown={(id) => {
+          if (id === "activity") return activityTabVisible;
           const plugin = PLUGIN_TABS[id];
           return !plugin || (enabledPlugins?.includes(plugin) ?? false);
         }}
@@ -184,6 +192,7 @@ function MainShell({ username }: { username: string | null }) {
         {visibleTab === "chat" ? (
           <Chat draftText={chatDraft} onDraftConsumed={() => setChatDraft(null)} />
         ) : null}
+        {visibleTab === "activity" ? <Activity /> : null}
         {visibleTab === "nutrition" ? <Nutrition onAdjustPlan={openChatWithDraft} /> : null}
         {visibleTab === "training" ? <Training /> : null}
         {visibleTab === "members" ? <Members /> : null}

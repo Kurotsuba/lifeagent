@@ -7,7 +7,7 @@ use serde_json::{json, Value};
 use crate::context::render_plan_compact;
 use crate::events::EventSource;
 use crate::plan::{PlanService, PlanTrigger, StoredPlan};
-use crate::plugin::{PluginContext, PluginError, ToolOutput};
+use crate::plugin::{PluginContext, PluginError, ToolOutput, ToolSummary};
 use crate::preferences::{NewPreference, PreferenceKind};
 use crate::time::parse_local_datetime;
 
@@ -311,7 +311,7 @@ async fn get_plan(ctx: &PluginContext, args: Value) -> Result<ToolOutput, Plugin
             Some(plan) => plan_json(plan),
             None => json!({ "date": date.to_string(), "plan": null }),
         },
-        summary: format!("查看了 {date} 的计划"),
+        summary: ToolSummary::new("core_plan_viewed").with("date", date),
     })
 }
 
@@ -341,7 +341,9 @@ async fn generate_plan(
         .await?;
     Ok(ToolOutput {
         content: plan_json(&plan),
-        summary: format!("已生成 {date} 的计划（第 {} 版）", plan.version),
+        summary: ToolSummary::new("core_plan_generated")
+            .with("date", date)
+            .with("version", plan.version),
     })
 }
 
@@ -362,7 +364,9 @@ async fn revise_plan(
     let plan = planner.revise(ctx, date, &args.instruction).await?;
     Ok(ToolOutput {
         content: plan_json(&plan),
-        summary: format!("已调整 {date} 的计划（第 {} 版）", plan.version),
+        summary: ToolSummary::new("core_plan_revised")
+            .with("date", date)
+            .with("version", plan.version),
     })
 }
 
@@ -400,7 +404,7 @@ async fn log_weight(ctx: &PluginContext, args: Value) -> Result<ToolOutput, Plug
 
     Ok(ToolOutput {
         content: json!({"entry_id": event.id, "kg": args.kg}),
-        summary: format!("已记录体重 {} kg", args.kg),
+        summary: ToolSummary::new("core_weight_logged").with("kg", args.kg),
     })
 }
 
@@ -444,11 +448,7 @@ async fn update_allergies(ctx: &PluginContext, args: Value) -> Result<ToolOutput
 
     Ok(ToolOutput {
         content: json!({"allergies": profile.allergies, "not_found": not_found}),
-        summary: if profile.allergies.is_empty() {
-            "已更新过敏食物：无".to_string()
-        } else {
-            format!("已更新过敏食物：{}", profile.allergies.join("、"))
-        },
+        summary: ToolSummary::new("core_allergies_updated").with("allergies", &profile.allergies),
     })
 }
 
@@ -473,17 +473,13 @@ async fn add_preference(ctx: &PluginContext, args: Value) -> Result<ToolOutput, 
         permanent: args.permanent,
     };
     let preference = ctx.preferences.add(&new, ctx.today().await?).await?;
-    let kind = match preference.kind {
-        PreferenceKind::Dislike => "不喜欢",
-        PreferenceKind::General => "偏好",
-    };
     Ok(ToolOutput {
         content: json!({"preference_id": preference.id}),
-        summary: format!(
-            "已记住{kind}：{}{}",
-            preference.text,
-            preference.validity_label()
-        ),
+        summary: ToolSummary::new("core_preference_added")
+            .with("preference_kind", preference.kind)
+            .with("text", &preference.text)
+            .with("valid_from", preference.valid_from)
+            .with("valid_until", preference.valid_until),
     })
 }
 
@@ -498,7 +494,7 @@ async fn remove_preference(ctx: &PluginContext, args: Value) -> Result<ToolOutpu
     ctx.preferences.remove(&args.preference_id).await?;
     Ok(ToolOutput {
         content: json!({"preference_id": args.preference_id}),
-        summary: "已删除该偏好".to_string(),
+        summary: ToolSummary::new("core_preference_removed"),
     })
 }
 
@@ -534,7 +530,7 @@ async fn delete_entry(ctx: &PluginContext, args: Value) -> Result<ToolOutput, Pl
             "event_type": event.event_type,
             "logical_date": event.logical_date.to_string(),
         }),
-        summary: "已删除记录".to_string(),
+        summary: ToolSummary::new("core_entry_deleted").with("event_type", &event.event_type),
     })
 }
 
@@ -733,10 +729,10 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(
-            out.summary,
-            "已记住偏好：这周只能吃便利店 (until 2026-10-09)"
-        );
+        assert_eq!(out.summary.kind(), "core_preference_added");
+        assert_eq!(out.summary.0["preference_kind"], "general");
+        assert_eq!(out.summary.0["text"], "这周只能吃便利店");
+        assert_eq!(out.summary.0["valid_until"], "2026-10-09");
         let id = out.content["preference_id"].as_str().unwrap().to_string();
 
         let saved = ctx.preferences.list(50).await.unwrap();

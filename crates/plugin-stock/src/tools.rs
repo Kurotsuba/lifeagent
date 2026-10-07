@@ -1,7 +1,7 @@
 //! Stock tools for the conversation model.
 
 use chrono::NaiveDate;
-use lifeagent_core::plugin::{PluginContext, PluginError, ToolOutput};
+use lifeagent_core::plugin::{PluginContext, PluginError, ToolOutput, ToolSummary};
 use lifeagent_llm::types::ToolSpec;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -133,14 +133,10 @@ async fn add(ctx: &PluginContext, args: Value) -> Result<ToolOutput, PluginError
     for new in &new_items {
         added.push(store::add(ctx, new).await?);
     }
-    let names = added
-        .iter()
-        .map(|i| i.name.as_str())
-        .collect::<Vec<_>>()
-        .join("、");
+    let names = added.iter().map(|i| i.name.as_str()).collect::<Vec<_>>();
     Ok(ToolOutput {
         content: json!({ "stock": added.iter().map(item_json).collect::<Vec<_>>() }),
-        summary: format!("已加入库存：{names}"),
+        summary: ToolSummary::new("stock_added").with("names", names),
     })
 }
 
@@ -148,7 +144,7 @@ async fn list(ctx: &PluginContext) -> Result<ToolOutput, PluginError> {
     let items = store::list(ctx).await?;
     Ok(ToolOutput {
         content: json!({ "stock": items.iter().map(item_json).collect::<Vec<_>>() }),
-        summary: "查看了库存".into(),
+        summary: ToolSummary::new("stock_viewed"),
     })
 }
 
@@ -193,7 +189,7 @@ async fn update(ctx: &PluginContext, args: Value) -> Result<ToolOutput, PluginEr
     let item = store::set_quantity(ctx, &item.id, args.quantity).await?;
     Ok(ToolOutput {
         content: json!({ "stock": item_json(&item) }),
-        summary: format!("已更新库存：{}", item.name),
+        summary: ToolSummary::new("stock_updated").with("name", &item.name),
     })
 }
 
@@ -215,7 +211,10 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(out.summary, "已加入库存：鸡蛋、牛奶");
+        assert_eq!(
+            out.summary,
+            ToolSummary::new("stock_added").with("names", ["鸡蛋", "牛奶"])
+        );
 
         let out = call(&env.ctx, "stock_list", json!({})).await.unwrap();
         assert_eq!(out.content["stock"][0]["name"], "鸡蛋");

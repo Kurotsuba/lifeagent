@@ -19,6 +19,7 @@ use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::{broadcast, Mutex};
 
 use crate::approvals::{ActionStatus, ApprovalStore, PendingAction};
+use crate::audit::{self, Actor, AuditLog, RunEnd, RunTrigger, StepKind};
 use crate::clock::{Clock, SystemClock};
 use crate::context;
 use crate::conversation::{ConversationStore, MessageRole, NewMessage, StoredMessage};
@@ -27,7 +28,7 @@ use crate::error::{CoreError, ValidationRule};
 use crate::events::{AppEvent, EventChange, EventStore};
 use crate::goals::{self, GoalsService, WeightGoal};
 use crate::plan::{PlanService, PlanStore, PlanTrigger, StoredPlan};
-use crate::plugin::{Plugin, PluginContext, PluginError};
+use crate::plugin::{Plugin, PluginContext, PluginError, ToolSummary};
 use crate::preferences::PreferenceService;
 use crate::profile::ProfileService;
 use crate::scheduler::{Scheduler, TICK_INTERVAL};
@@ -48,7 +49,8 @@ const TOO_MANY_STEPS_REPLY: &str = "（处理步骤过多，已停止。请换�
 #[derive(Debug, Clone, PartialEq, Default, Serialize)]
 pub struct ChatTurn {
     pub reply: String,
-    pub activities: Vec<String>,
+    /// What each tool call that ran did, as data the UI words (`ToolSummary`).
+    pub activities: Vec<ToolSummary>,
     /// Tool calls from this turn that wait for the user's approval (`crate::approvals`).
     pub pending_actions: Vec<PendingAction>,
 }
@@ -80,6 +82,35 @@ pub struct PluginInfo {
     /// The user can switch it off (and it starts off); see `Plugin::optional`.
     pub optional: bool,
     pub enabled: bool,
+}
+
+/// A run with its steps, for the Activity page's detail view.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ActivityRun {
+    pub run: audit::Run,
+    pub steps: Vec<ActivityStep>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ActivityStep {
+    #[serde(flatten)]
+    pub step: audit::Step,
+    /// For an `approval_requested` step: what has become of the action since (pending,
+    /// approved, rejected, failed, expired).
+    pub action_status: Option<ActionStatus>,
+}
+
+/// The Activity page's header strip: counts over the last `days` days, plus token use.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ActivitySummary {
+    pub days: u32,
+    #[serde(flatten)]
+    pub counts: audit::ActivityCounts,
+    /// All model tokens over the period (`llm_usage`, which also counts calls outside runs).
+    pub tokens: u64,
+    pub tokens_last_24h: u64,
+    /// The per-user daily cap, if one is set.
+    pub daily_token_budget: Option<u64>,
 }
 
 /// Everything the Today page shows (§7.14).
@@ -166,6 +197,7 @@ impl CoreAppBuilder {
         let conversation = ConversationStore::new(db.clone(), self.clock.clone());
         let plans = PlanStore::new(db.clone(), self.clock.clone());
         let approvals = ApprovalStore::new(db.clone(), self.clock.clone());
+        let audit = AuditLog::new(db.clone(), self.clock.clone(), events.clone());
 
         for plugin in &self.plugins {
             crate::plugin::apply_migrations(&db, self.clock.as_ref(), &plugin.manifest()).await?;
@@ -193,6 +225,7 @@ impl CoreAppBuilder {
             conversation,
             plans,
             approvals,
+            audit,
             planner,
             plugins: self.plugins,
             registry,
@@ -332,6 +365,7 @@ struct CoreAppInner {
     conversation: ConversationStore,
     plans: PlanStore,
     approvals: ApprovalStore,
+    audit: AuditLog,
     /// Shared with the tool registry, so chat, the scheduler and the shell all go through
     /// one generation lock.
     planner: Arc<PlanService>,
@@ -396,6 +430,10 @@ impl CoreApp {
     pub fn plans(&self) -> &PlanStore {
         &self.0.plans
     }
+    pub fn audit(&self) -> &AuditLog {
+        &self.0.audit
+    }
+
     pub fn approvals(&self) -> &ApprovalStore {
         &self.0.approvals
     }
@@ -473,10 +511,18 @@ impl CoreApp {
         request: Option<&str>,
     ) -> Result<StoredPlan, CoreError> {
         self.require_models()?;
-        self.0
-            .planner
-            .generate(&self.plugin_context(), date, trigger, request)
-            .await
+        let (run_trigger, actor) = match trigger {
+            PlanTrigger::Schedule => (RunTrigger::PlanScheduled, Actor::Scheduler),
+            PlanTrigger::Manual => (RunTrigger::PlanManual, Actor::User),
+            PlanTrigger::Revision => (RunTrigger::PlanRevision, Actor::User),
+        };
+        self.with_run(run_trigger, actor, request, async {
+            self.0
+                .planner
+                .generate(&self.plugin_context(), date, trigger, request)
+                .await
+        })
+        .await
     }
 
     /// Whether a plan generation or revision is queued or running; `AppEvent::PlanGenerating`
@@ -492,10 +538,42 @@ impl CoreApp {
         instruction: &str,
     ) -> Result<StoredPlan, CoreError> {
         self.require_models()?;
-        self.0
-            .planner
-            .revise(&self.plugin_context(), date, instruction)
-            .await
+        self.with_run(
+            RunTrigger::PlanRevision,
+            Actor::User,
+            Some(instruction),
+            async {
+                self.0
+                    .planner
+                    .revise(&self.plugin_context(), date, instruction)
+                    .await
+            },
+        )
+        .await
+    }
+
+    /// Runs `body` as one activity-log run (`crate::audit`): opens it (failing closed), makes it
+    /// the current run while `body` goes, and ends it as succeeded, needing approval or failed
+    /// with the error's code. Inside a run already (e.g. the scheduler's plan through
+    /// `generate_plan`), `body` simply joins it.
+    async fn with_run<T>(
+        &self,
+        trigger: RunTrigger,
+        actor: Actor,
+        input: Option<&str>,
+        body: impl std::future::Future<Output = Result<T, CoreError>>,
+    ) -> Result<T, CoreError> {
+        if audit::current().is_some() {
+            return body.await;
+        }
+        let today = self.logical_today().await?;
+        let run = self.0.audit.start(trigger, actor, input, today).await?;
+        let result = audit::scope(run.clone(), body).await;
+        match &result {
+            Ok(_) => run.finish(RunEnd::Ok).await,
+            Err(e) => run.finish(RunEnd::Failed { code: e.code() }).await,
+        }
+        result
     }
 
     /// Marks the current plan for `date` accepted.
@@ -721,6 +799,59 @@ impl CoreApp {
         crate::usage::summary(&self.0.db, month_start).await
     }
 
+    /// One page of the activity log, newest first (`docs/AUDIT_LOG_SPEC.md` §6.1).
+    pub async fn activity(
+        &self,
+        filter: &audit::RunFilter,
+        limit: u32,
+    ) -> Result<audit::RunPage, CoreError> {
+        self.0.audit.list(filter, limit).await
+    }
+
+    /// One run with its steps; `NotFound` for an id that isn't in this user's log.
+    pub async fn activity_run(&self, id: &str) -> Result<ActivityRun, CoreError> {
+        let run = self
+            .0
+            .audit
+            .get(id)
+            .await?
+            .ok_or_else(|| CoreError::NotFound(format!("activity run {id}")))?;
+        let mut steps = Vec::new();
+        for step in self.0.audit.steps(id).await? {
+            let action_status = match (step.kind, step.detail["action_id"].as_str()) {
+                (StepKind::ApprovalRequested, Some(action_id)) => self
+                    .0
+                    .approvals
+                    .get(action_id)
+                    .await?
+                    .map(|action| action.status),
+                _ => None,
+            };
+            steps.push(ActivityStep {
+                step,
+                action_status,
+            });
+        }
+        Ok(ActivityRun { run, steps })
+    }
+
+    /// Counts over the last `days` (1..=90) days for the Activity page's header.
+    pub async fn activity_summary(&self, days: u32) -> Result<ActivitySummary, CoreError> {
+        let days = days.clamp(1, audit::RETENTION_DAYS as u32);
+        let now = self.0.clock.now();
+        let since = now - chrono::Duration::days(i64::from(days));
+        let tokens = crate::usage::tokens_since(&self.0.db, since).await?;
+        let tokens_last_24h =
+            crate::usage::tokens_since(&self.0.db, now - chrono::Duration::hours(24)).await?;
+        Ok(ActivitySummary {
+            days,
+            counts: self.0.audit.counts(since).await?,
+            tokens: u64::try_from(tokens).unwrap_or(0),
+            tokens_last_24h: u64::try_from(tokens_last_24h).unwrap_or(0),
+            daily_token_budget: self.0.daily_token_budget,
+        })
+    }
+
     /// Everything the Today page shows (§7.14). Works before models are configured.
     pub async fn today_view(&self) -> Result<TodayView, CoreError> {
         let today = self.logical_today().await?;
@@ -762,6 +893,17 @@ impl CoreApp {
     /// behind).
     pub async fn send_message(&self, text: &str) -> Result<ChatTurn, CoreError> {
         self.require_models()?;
+        self.with_run(
+            RunTrigger::ChatTurn,
+            Actor::User,
+            Some(text),
+            self.chat_turn(text),
+        )
+        .await
+    }
+
+    /// `send_message`'s turn, inside its activity-log run.
+    async fn chat_turn(&self, text: &str) -> Result<ChatTurn, CoreError> {
         let _guard = self.0.send_lock.lock().await;
 
         let is_retry = self
@@ -832,24 +974,64 @@ impl CoreApp {
             }
 
             for call in resp.tool_calls {
+                let arguments = call.arguments.clone();
                 let result = self
                     .run_or_queue(&plugin_ctx, &plugins, &call.name, call.arguments)
                     .await;
+                let tool_call = |outcome: &str, summary, error: Option<&str>| {
+                    audit::record(
+                        StepKind::ToolCall,
+                        audit::tool_call_detail(&call.name, &arguments, outcome, summary, error),
+                    )
+                };
                 let content = match result {
                     Ok(ToolStep::Ran(out)) => {
+                        tool_call("ran", Some(&out.summary), None).await;
                         activities.push(out.summary);
                         out.content
                     }
                     Ok(ToolStep::Queued(action)) => {
+                        audit::record(
+                            StepKind::ApprovalRequested,
+                            serde_json::json!({
+                                "tool": call.name,
+                                "action_id": action.id,
+                                "arguments": audit::tool_call_detail(
+                                    &call.name, &arguments, "queued", None, None
+                                )["arguments"],
+                                "preview": action.preview,
+                            }),
+                        )
+                        .await;
                         let content = awaiting_approval_result(&action);
                         pending_actions.push(action);
                         content
                     }
-                    Err(PluginError::InvalidArgs(msg)) | Err(PluginError::NotFound(msg)) => {
+                    Err(PluginError::InvalidArgs(msg)) => {
+                        // Schema checks and the tools' own rules (e.g. the past-day delete
+                        // guard) both refuse with InvalidArgs: a guardrail stepped in.
+                        tool_call("invalid_args", None, Some(&msg)).await;
+                        audit::record(
+                            StepKind::Guardrail,
+                            serde_json::json!({ "rule": "invalid_args", "tool": call.name }),
+                        )
+                        .await;
+                        serde_json::json!({ "error": msg })
+                    }
+                    Err(PluginError::NotFound(msg)) => {
+                        tool_call("not_found", None, Some(&msg)).await;
+                        if !self.0.registry.is_available(&call.name, &plugins) {
+                            audit::record(
+                                StepKind::Guardrail,
+                                serde_json::json!({ "rule": "unknown_tool", "tool": call.name }),
+                            )
+                            .await;
+                        }
                         serde_json::json!({ "error": msg })
                     }
                     Err(other) => {
                         tracing::error!(error = %other, tool = %call.name, "tool call failed");
+                        tool_call("failed", None, Some("internal error")).await;
                         serde_json::json!({ "error": "internal error" })
                     }
                 };
@@ -867,6 +1049,11 @@ impl CoreApp {
             }
         }
 
+        audit::record(
+            StepKind::Guardrail,
+            serde_json::json!({ "rule": "iteration_cap", "limit": MAX_ITERATIONS }),
+        )
+        .await;
         Ok(ChatTurn {
             reply: TOO_MANY_STEPS_REPLY.to_string(),
             activities,
@@ -903,6 +1090,16 @@ impl CoreApp {
     /// arguments, something no longer there) marks it `failed` with the reason rather than
     /// erroring; `ActionNotPending` if it was already resolved or has expired.
     pub async fn approve_action(&self, id: &str) -> Result<PendingAction, CoreError> {
+        self.with_run(
+            RunTrigger::ActionApproved,
+            Actor::User,
+            None,
+            self.approve_in_run(id),
+        )
+        .await
+    }
+
+    async fn approve_in_run(&self, id: &str) -> Result<PendingAction, CoreError> {
         // The turn lock: no chat turn reads the actions meanwhile, and two approvals of one
         // action run one after the other, the second finding it resolved.
         let _guard = self.0.send_lock.lock().await;
@@ -920,40 +1117,69 @@ impl CoreApp {
                 action.tool_name
             )))
         };
+        let tool_call = |outcome: &str, summary, error: Option<&str>| {
+            audit::record(
+                StepKind::ToolCall,
+                audit::tool_call_detail(
+                    &action.tool_name,
+                    &action.arguments,
+                    outcome,
+                    summary,
+                    error,
+                ),
+            )
+        };
         let resolved = match result {
             Ok(out) => {
+                tool_call("ran", Some(&out.summary), None).await;
                 self.0
                     .approvals
-                    .resolve(id, ActionStatus::Approved, Some(&out.summary))
+                    .resolve(id, ActionStatus::Approved, Some(&out.summary), None)
                     .await?
             }
             Err(PluginError::InvalidArgs(msg)) | Err(PluginError::NotFound(msg)) => {
+                tool_call("invalid_args", None, Some(&msg)).await;
                 self.0
                     .approvals
-                    .resolve(id, ActionStatus::Failed, Some(&msg))
+                    .resolve(id, ActionStatus::Failed, None, Some(&msg))
                     .await?
             }
             Err(other) => {
                 tracing::error!(error = %other, tool = %action.tool_name, "approved tool call failed");
-                self.0
+                tool_call("failed", None, Some("internal error")).await;
+                let resolved = self
+                    .0
                     .approvals
-                    .resolve(id, ActionStatus::Failed, Some("internal error"))
+                    .resolve(id, ActionStatus::Failed, None, Some("internal error"))
                     .await?;
+                record_resolution(&resolved).await;
                 return Err(CoreError::Plugin(other.to_string()));
             }
         };
+        record_resolution(&resolved).await;
         tracing::info!(action_id = %id, tool = %action.tool_name, status = ?resolved.status, "action approved");
         Ok(resolved)
     }
 
     /// Discards a pending action without running it.
     pub async fn reject_action(&self, id: &str) -> Result<PendingAction, CoreError> {
+        self.with_run(
+            RunTrigger::ActionRejected,
+            Actor::User,
+            None,
+            self.reject_in_run(id),
+        )
+        .await
+    }
+
+    async fn reject_in_run(&self, id: &str) -> Result<PendingAction, CoreError> {
         let _guard = self.0.send_lock.lock().await;
         let resolved = self
             .0
             .approvals
-            .resolve(id, ActionStatus::Rejected, None)
+            .resolve(id, ActionStatus::Rejected, None, None)
             .await?;
+        record_resolution(&resolved).await;
         tracing::info!(action_id = %id, tool = %resolved.tool_name, "action rejected");
         Ok(resolved)
     }
@@ -1027,6 +1253,20 @@ impl CoreApp {
         }
         Ok(messages)
     }
+}
+
+/// The `approval_resolved` step for a decided action, linking back to the run that queued it.
+async fn record_resolution(action: &PendingAction) {
+    let mut detail = serde_json::json!({
+        "tool": action.tool_name,
+        "action_id": action.id,
+        "decision": action.status,
+        "requested_in": action.run_id,
+    });
+    if let Some(result) = &action.result {
+        detail["result"] = result.0.clone();
+    }
+    audit::record(StepKind::ApprovalResolved, detail).await;
 }
 
 /// What [`CoreApp::run_or_queue`] did with a tool call.
@@ -1293,7 +1533,7 @@ mod tests {
         ) -> Result<crate::plugin::ToolOutput, PluginError> {
             Ok(crate::plugin::ToolOutput {
                 content: serde_json::json!({"pong": true}),
-                summary: "pong".into(),
+                summary: crate::plugin::ToolSummary::new("opt_pong"),
             })
         }
         async fn today_card(
@@ -1349,7 +1589,7 @@ mod tests {
 
         assert!(app.today_view().await.unwrap().cards.contains_key("opt"));
         let turn = app.send_message("ping again").await.unwrap();
-        assert_eq!(turn.activities, vec!["pong"]);
+        assert_eq!(turn.activities, vec![ToolSummary::new("opt_pong")]);
         let requests = mock.received_requests();
         assert!(tool_names(&requests[2]).contains(&"opt_ping".to_string()));
         assert!(app.plugins().await.unwrap()[1].enabled);
@@ -1672,7 +1912,10 @@ mod tests {
 
         let turn = app.send_message("今天 62.5 公斤").await.unwrap();
         assert_eq!(turn.reply, "记好了");
-        assert_eq!(turn.activities, vec!["已记录体重 62.5 kg"]);
+        assert_eq!(
+            turn.activities,
+            vec![ToolSummary::new("core_weight_logged").with("kg", 62.5)]
+        );
         assert!(turn.pending_actions.is_empty());
         assert!(app.latest_weight().await.unwrap().is_some());
     }
@@ -1738,10 +1981,11 @@ mod tests {
         assert_eq!(app.pending_actions().await.unwrap(), turn.pending_actions);
         let approved = app.approve_action(&action.id).await.unwrap();
         assert_eq!(approved.status, ActionStatus::Approved);
-        assert_eq!(
-            approved.result_summary.as_deref(),
-            Some("已记住不喜欢：香菜")
-        );
+        let result = approved.result.clone().unwrap();
+        assert_eq!(result.kind(), "core_preference_added");
+        assert_eq!(result.0["preference_kind"], "dislike");
+        assert_eq!(result.0["text"], "香菜");
+        assert_eq!(approved.result_summary, None);
         assert_eq!(app.preferences().list(10).await.unwrap().len(), 1);
         assert!(app.pending_actions().await.unwrap().is_empty());
         // Approving twice runs it once.
@@ -1924,5 +2168,229 @@ mod tests {
         assert_eq!(stored[0].provider_extra, None);
         let json = serde_json::to_string(&stored).unwrap();
         assert!(!json.contains("provider_extra"));
+    }
+
+    // ---- Activity log (`docs/AUDIT_LOG_SPEC.md` AL2) ----------------------------------------
+
+    use crate::audit::{Run, RunFilter, RunStatus, RunTrigger, Step, StepKind};
+
+    async fn app_with(mock: &Arc<MockChatModel>) -> (CoreApp, crate::db::TestDb) {
+        let (builder, dir) = builder().await;
+        let app = builder
+            .chat_model_override(mock.clone())
+            .build()
+            .await
+            .unwrap();
+        (app, dir)
+    }
+
+    /// The runs, newest first, and the newest run's steps.
+    async fn activity(app: &CoreApp) -> (Vec<Run>, Vec<Step>) {
+        let runs = app
+            .audit()
+            .list(&RunFilter::default(), 50)
+            .await
+            .unwrap()
+            .runs;
+        let steps = app.audit().steps(&runs[0].id).await.unwrap();
+        (runs, steps)
+    }
+
+    fn kinds(steps: &[Step]) -> Vec<StepKind> {
+        steps.iter().map(|s| s.kind).collect()
+    }
+
+    #[tokio::test]
+    async fn a_plain_reply_is_one_run_with_one_model_call() {
+        let mock = Arc::new(MockChatModel::new());
+        mock.push_response(response(Some("你好"), vec![]));
+        let (app, _dir) = app_with(&mock).await;
+
+        app.send_message("你好").await.unwrap();
+
+        let (runs, steps) = activity(&app).await;
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].trigger, RunTrigger::ChatTurn);
+        assert_eq!(runs[0].actor, Actor::User);
+        assert_eq!(runs[0].status, RunStatus::Succeeded);
+        assert_eq!(runs[0].input_excerpt.as_deref(), Some("你好"));
+        assert_eq!(kinds(&steps), vec![StepKind::ModelCall]);
+        assert_eq!(steps[0].detail["role"], "conversation");
+    }
+
+    #[tokio::test]
+    async fn a_tool_call_is_logged_with_its_arguments_and_summary() {
+        let mock = Arc::new(MockChatModel::new());
+        mock.push_response(response(
+            None,
+            vec![call("core_log_weight", serde_json::json!({"kg": 62.5}))],
+        ));
+        mock.push_response(response(Some("记好了"), vec![]));
+        let (app, _dir) = app_with(&mock).await;
+
+        app.send_message("62.5 公斤").await.unwrap();
+
+        let (runs, steps) = activity(&app).await;
+        assert_eq!(
+            kinds(&steps),
+            vec![StepKind::ModelCall, StepKind::ToolCall, StepKind::ModelCall]
+        );
+        let tool = &steps[1].detail;
+        assert_eq!(tool["tool"], "core_log_weight");
+        assert_eq!(tool["outcome"], "ran");
+        assert_eq!(tool["arguments"]["kg"], 62.5);
+        assert_eq!(tool["summary"]["kind"], "core_weight_logged");
+        let outcome = runs[0].outcome.clone().unwrap();
+        assert_eq!((outcome.model_calls, outcome.tool_calls), (2, 1));
+        assert_eq!(runs[0].status, RunStatus::Succeeded);
+    }
+
+    #[tokio::test]
+    async fn refused_arguments_and_unknown_tools_are_guardrail_steps() {
+        let mock = Arc::new(MockChatModel::new());
+        mock.push_response(response(
+            None,
+            vec![
+                call("core_log_weight", serde_json::json!({"kg": 5})),
+                call("nope_tool", serde_json::json!({})),
+            ],
+        ));
+        mock.push_response(response(Some("抱歉"), vec![]));
+        let (app, _dir) = app_with(&mock).await;
+
+        app.send_message("5 公斤").await.unwrap();
+
+        let (runs, steps) = activity(&app).await;
+        assert_eq!(
+            kinds(&steps),
+            vec![
+                StepKind::ModelCall,
+                StepKind::ToolCall,
+                StepKind::Guardrail,
+                StepKind::ToolCall,
+                StepKind::Guardrail,
+                StepKind::ModelCall,
+            ]
+        );
+        assert_eq!(steps[1].detail["outcome"], "invalid_args");
+        assert!(steps[1].detail["error"]
+            .as_str()
+            .unwrap()
+            .contains("30..=300"));
+        assert_eq!(steps[2].detail["rule"], "invalid_args");
+        assert_eq!(steps[3].detail["outcome"], "not_found");
+        assert_eq!(steps[4].detail["rule"], "unknown_tool");
+        assert_eq!(runs[0].outcome.clone().unwrap().guardrails, 2);
+    }
+
+    #[tokio::test]
+    async fn a_queued_action_and_its_approval_are_two_linked_runs() {
+        let mock = Arc::new(MockChatModel::new());
+        mock.push_response(response(
+            None,
+            vec![call(
+                "core_add_preference",
+                serde_json::json!({"kind": "dislike", "text": "香菜", "permanent": true}),
+            )],
+        ));
+        mock.push_response(response(Some("请确认"), vec![]));
+        let (app, _dir) = app_with(&mock).await;
+
+        let turn = app.send_message("我不吃香菜").await.unwrap();
+        let (runs, steps) = activity(&app).await;
+        let chat_run = runs[0].clone();
+        assert_eq!(chat_run.status, RunStatus::NeedsApproval);
+        let requested = steps
+            .iter()
+            .find(|s| s.kind == StepKind::ApprovalRequested)
+            .unwrap();
+        let action_id = turn.pending_actions[0].id.clone();
+        assert_eq!(requested.detail["action_id"], action_id.as_str());
+        assert_eq!(requested.detail["preview"]["kind"], "add_preference");
+        assert_eq!(
+            turn.pending_actions[0].run_id.as_deref(),
+            Some(chat_run.id.as_str())
+        );
+
+        app.approve_action(&action_id).await.unwrap();
+
+        let (runs, steps) = activity(&app).await;
+        assert_eq!(runs.len(), 2);
+        assert_eq!(runs[0].trigger, RunTrigger::ActionApproved);
+        assert_eq!(runs[0].status, RunStatus::Succeeded);
+        assert_eq!(
+            kinds(&steps),
+            vec![StepKind::ToolCall, StepKind::ApprovalResolved]
+        );
+        assert_eq!(steps[0].detail["summary"]["kind"], "core_preference_added");
+        let resolved = &steps[1].detail;
+        assert_eq!(resolved["decision"], "approved");
+        assert_eq!(resolved["requested_in"], chat_run.id.as_str());
+    }
+
+    #[tokio::test]
+    async fn a_rejected_action_is_its_own_run() {
+        let mock = Arc::new(MockChatModel::new());
+        mock.push_response(response(
+            None,
+            vec![call(
+                "core_add_preference",
+                serde_json::json!({"kind": "general", "text": "少油"}),
+            )],
+        ));
+        mock.push_response(response(Some("请确认"), vec![]));
+        let (app, _dir) = app_with(&mock).await;
+        let turn = app.send_message("少油").await.unwrap();
+
+        app.reject_action(&turn.pending_actions[0].id)
+            .await
+            .unwrap();
+
+        let (runs, steps) = activity(&app).await;
+        assert_eq!(runs[0].trigger, RunTrigger::ActionRejected);
+        assert_eq!(kinds(&steps), vec![StepKind::ApprovalResolved]);
+        assert_eq!(steps[0].detail["decision"], "rejected");
+    }
+
+    #[tokio::test]
+    async fn hitting_the_iteration_cap_is_a_guardrail_step() {
+        let mock = Arc::new(MockChatModel::new());
+        for _ in 0..MAX_ITERATIONS {
+            mock.push_response(response(
+                None,
+                vec![call("core_get_plan", serde_json::json!({}))],
+            ));
+        }
+        let (app, _dir) = app_with(&mock).await;
+
+        let turn = app.send_message("看看计划").await.unwrap();
+
+        assert_eq!(turn.reply, TOO_MANY_STEPS_REPLY);
+        let (_, steps) = activity(&app).await;
+        let last = steps.last().unwrap();
+        assert_eq!(last.kind, StepKind::Guardrail);
+        assert_eq!(last.detail["rule"], "iteration_cap");
+    }
+
+    #[tokio::test]
+    async fn a_token_budget_refusal_fails_the_run_with_a_guardrail_step() {
+        let mock = Arc::new(MockChatModel::new());
+        mock.push_response(response(Some("不会到这里"), vec![]));
+        let (builder, _dir) = builder().await;
+        let app = builder
+            .chat_model_override(mock.clone())
+            .daily_token_budget(Some(0))
+            .build()
+            .await
+            .unwrap();
+
+        assert!(app.send_message("你好").await.is_err());
+
+        let (runs, steps) = activity(&app).await;
+        assert_eq!(runs[0].status, RunStatus::Failed);
+        assert_eq!(runs[0].error_code.as_deref(), Some("budget_exceeded"));
+        assert_eq!(kinds(&steps), vec![StepKind::Guardrail]);
+        assert_eq!(steps[0].detail["rule"], "token_budget");
+        assert!(mock.received_requests().is_empty());
     }
 }

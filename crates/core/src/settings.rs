@@ -161,6 +161,23 @@ impl Settings {
         self.set_json("onboarding_complete", &on, now).await
     }
 
+    /// Whether the web UI shows the Activity tab (`docs/AUDIT_LOG_SPEC.md` §6.3). Only a
+    /// display preference: the activity log records either way. Default on.
+    pub async fn activity_tab_visible(&self) -> Result<bool, CoreError> {
+        Ok(self
+            .get_json::<bool>("activity_tab_visible")
+            .await?
+            .unwrap_or(true))
+    }
+
+    pub async fn set_activity_tab_visible(
+        &self,
+        visible: bool,
+        now: DateTime<Utc>,
+    ) -> Result<(), CoreError> {
+        self.set_json("activity_tab_visible", &visible, now).await
+    }
+
     /// The language the assistant talks to the user in: the web UI's locale, synced on every
     /// page load. [`Language::default`] until the first sync.
     pub async fn language(&self) -> Result<Language, CoreError> {

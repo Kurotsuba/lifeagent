@@ -9,6 +9,7 @@ use chrono::NaiveDate;
 use lifeagent_llm::error::LlmError;
 use lifeagent_llm::router::LlmRouter;
 use lifeagent_llm::types::ToolSpec;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::PgPool;
 use thiserror::Error;
@@ -68,11 +69,58 @@ impl PluginContext {
     }
 }
 
-/// What a tool call returns: JSON handed back to the LLM as the tool result, plus a short
-/// human-readable line for UI activity chips.
+/// What a tool call returns: JSON handed back to the LLM as the tool result, plus a summary of
+/// what it did for the UI's activity chips and the activity log.
 pub struct ToolOutput {
     pub content: Value,
-    pub summary: String,
+    pub summary: ToolSummary,
+}
+
+/// What a tool call did, as data each UI words in its own language (`toolSummaries` in
+/// `apps/web/src/i18n/`): `{"kind": ..., ...params}`, like approval previews. Kinds are
+/// `snake_case` and start with the owning plugin's id (`core_` for core tools), so plugins
+/// can't collide. Numbers in params are the ones Rust computed. See
+/// `docs/AUDIT_LOG_SPEC.md` §3.6.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct ToolSummary(pub Value);
+
+impl ToolSummary {
+    pub fn new(kind: &str) -> Self {
+        Self(serde_json::json!({ "kind": kind }))
+    }
+
+    /// Adds one param. A value that can't be serialized (never the case for the plain data
+    /// tools pass) becomes `null` rather than failing the tool call.
+    pub fn with(mut self, key: &str, value: impl Serialize) -> Self {
+        if let Value::Object(map) = &mut self.0 {
+            map.insert(
+                key.to_string(),
+                serde_json::to_value(value).unwrap_or(Value::Null),
+            );
+        }
+        self
+    }
+
+    pub fn kind(&self) -> &str {
+        self.0.get("kind").and_then(Value::as_str).unwrap_or("")
+    }
+}
+
+/// `kind key=value ...`, for the CLI and test messages; the UI words summaries itself.
+impl std::fmt::Display for ToolSummary {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.kind())?;
+        if let Value::Object(map) = &self.0 {
+            for (key, value) in map.iter().filter(|(k, _)| k.as_str() != "kind") {
+                match value {
+                    Value::String(s) => write!(f, " {key}={s}")?,
+                    other => write!(f, " {key}={other}")?,
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 /// A plugin's contribution to the next plan (M5).

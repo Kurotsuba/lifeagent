@@ -2,7 +2,7 @@
 
 use chrono::NaiveDate;
 use lifeagent_core::events::EventSource;
-use lifeagent_core::plugin::{PluginContext, PluginError, ToolOutput};
+use lifeagent_core::plugin::{PluginContext, PluginError, ToolOutput, ToolSummary};
 use lifeagent_core::time::parse_local_datetime;
 use lifeagent_llm::types::ToolSpec;
 use serde::Deserialize;
@@ -270,11 +270,9 @@ async fn log_meal(ctx: &PluginContext, args: Value) -> Result<ToolOutput, Plugin
     });
     Ok(ToolOutput {
         content,
-        summary: format!(
-            "已记录{} · {:.0} kcal",
-            meal.meal_type.zh_label(),
-            meal.total.kcal
-        ),
+        summary: ToolSummary::new("diet_meal_logged")
+            .with("meal_type", meal.meal_type)
+            .with("kcal", meal.total.kcal.round()),
     })
 }
 
@@ -292,7 +290,7 @@ async fn get_intake(ctx: &PluginContext, args: Value) -> Result<ToolOutput, Plug
     };
     Ok(ToolOutput {
         content: intake::intake_json(ctx, date).await?,
-        summary: format!("查看了 {date} 的饮食记录"),
+        summary: ToolSummary::new("diet_intake_viewed").with("date", date),
     })
 }
 
@@ -337,7 +335,7 @@ async fn update_food(ctx: &PluginContext, args: Value) -> Result<ToolOutput, Plu
             "note": "Saved. Only meals logged from now on use these values; meals already \
                      logged keep their numbers.",
         }),
-        summary: format!("已更新食物：{}", food.name),
+        summary: ToolSummary::new("diet_food_updated").with("name", &food.name),
     })
 }
 
@@ -393,7 +391,7 @@ async fn update_dish(ctx: &PluginContext, args: Value) -> Result<ToolOutput, Plu
             "note": "Saved. Only meals logged from now on use these values; meals already \
                      logged keep their numbers.",
         }),
-        summary: format!("已更新菜品：{}", dish.name),
+        summary: ToolSummary::new("diet_dish_updated").with("name", &dish.name),
     })
 }
 
@@ -408,7 +406,9 @@ async fn add_alias(ctx: &PluginContext, args: Value) -> Result<ToolOutput, Plugi
     let (food, alias) = sources::add_user_alias(ctx, &args.food_name, &args.alias).await?;
     Ok(ToolOutput {
         content: json!({ "food_id": food.id, "name": food.name, "alias": alias }),
-        summary: format!("已添加别名：{} → {}", args.alias.trim(), food.name),
+        summary: ToolSummary::new("diet_alias_added")
+            .with("alias", args.alias.trim())
+            .with("food", &food.name),
     })
 }
 
@@ -422,7 +422,7 @@ async fn remove_alias(ctx: &PluginContext, args: Value) -> Result<ToolOutput, Pl
     let alias = sources::remove_alias(ctx, &args.alias).await?;
     Ok(ToolOutput {
         content: json!({ "alias": alias }),
-        summary: format!("已移除别名：{}", args.alias.trim()),
+        summary: ToolSummary::new("diet_alias_removed").with("alias", args.alias.trim()),
     })
 }
 
@@ -465,7 +465,12 @@ mod tests {
         assert_eq!(out.content["date"], today.to_string());
         assert_eq!(out.content["items"][0]["estimated"], true);
         assert!(out.content["remaining"]["kcal"].is_number());
-        assert_eq!(out.summary, "已记录午餐 · 376 kcal");
+        assert_eq!(
+            out.summary,
+            ToolSummary::new("diet_meal_logged")
+                .with("meal_type", "lunch")
+                .with("kcal", 376.0)
+        );
 
         let event = env.ctx.events.latest(MEAL_EVENT).await.unwrap().unwrap();
         let stored: MealLogged = serde_json::from_value(event.payload).unwrap();
@@ -669,7 +674,10 @@ mod tests {
         .unwrap();
 
         assert_eq!(out.content["per_serving"]["kcal"], 733.0);
-        assert_eq!(out.summary, "已更新菜品：牛めし（並盛）");
+        assert_eq!(
+            out.summary,
+            ToolSummary::new("diet_dish_updated").with("name", "牛めし（並盛）")
+        );
         let dish = SourceChain::load(&env.ctx)
             .await
             .unwrap()
@@ -711,7 +719,12 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(out.summary, "已添加别名：卤蛋 → 卤鸡蛋");
+        assert_eq!(
+            out.summary,
+            ToolSummary::new("diet_alias_added")
+                .with("alias", "卤蛋")
+                .with("food", "卤鸡蛋")
+        );
         assert!(SourceChain::load(&env.ctx)
             .await
             .unwrap()
@@ -742,7 +755,10 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(out.content["alias"], "熟米饭");
-        assert_eq!(out.summary, "已移除别名：熟米饭。");
+        assert_eq!(
+            out.summary,
+            ToolSummary::new("diet_alias_removed").with("alias", "熟米饭。")
+        );
         assert!(sources::lookup_redirect(&env.ctx, "熟米饭")
             .await
             .unwrap()

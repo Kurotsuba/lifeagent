@@ -51,6 +51,7 @@ export const zhCN = {
   nav: {
     today: "今日",
     chat: "对话",
+    activity: "活动",
     nutrition: "营养",
     stock: "库存",
     settings: "设置",
@@ -378,6 +379,192 @@ export const zhCN = {
     },
     unknown: (tool: string) => `执行操作：${tool}`,
   },
+  // The Activity page (`docs/AUDIT_LOG_SPEC.md` §6.2): what the agent did, run by run.
+  activity: {
+    hint: "助手代你做的每件事都记在这里：由谁发起、调用了什么、哪些被拦下或在等你确认。",
+    period: (days: number) => `最近 ${days} 天`,
+    stats: {
+      byUser: "由你发起",
+      byScheduler: "自动执行",
+      approvals: "确认请求",
+      approvalsDetail: (approved: number, rejected: number) => `批准 ${approved} · 拒绝 ${rejected}`,
+      guardrails: "安全拦截",
+      tokens: "模型 token",
+      last24h: (used: number, budget: number | null) =>
+        budget === null ? `近 24 小时 ${used}` : `近 24 小时 ${used} / 上限 ${budget}`,
+    },
+    filterAll: "全部",
+    actors: { user: "你", scheduler: "自动" },
+    triggers: {
+      chat_turn: "对话",
+      plan_scheduled: "定时生成计划",
+      plan_manual: "生成计划",
+      plan_revision: "调整计划",
+      action_approved: "批准操作",
+      action_rejected: "拒绝操作",
+    },
+    statuses: {
+      running: "进行中",
+      succeeded: "完成",
+      needs_approval: "等你确认",
+      failed: "失败",
+      interrupted: "中断",
+    },
+    counts: (o: { model_calls: number; tool_calls: number; tokens: number; guardrails: number }) =>
+      [
+        `模型 ${o.model_calls} 次`,
+        `工具 ${o.tool_calls} 次`,
+        `${o.tokens} token`,
+        o.guardrails > 0 ? `拦截 ${o.guardrails} 次` : "",
+      ]
+        .filter((s) => s !== "")
+        .join(" · "),
+    planSaved: (date: string, version: number) => `${date} 的计划 第 ${version} 版`,
+    errorCodes: {
+      invalid_input: "输入无效，或没有可计划的内容",
+      internal: "内部错误",
+      budget_exceeded: "已达到每日 token 上限",
+      busy: "已有计划在生成中",
+      not_configured: "尚未配置模型",
+      action_not_pending: "该操作已处理或已过期",
+      rate_limited: "模型繁忙",
+    } as Record<string, string>,
+    errorCode: (code: string) => `错误：${code}`,
+    empty: "还没有记录。",
+    loadMore: "加载更多",
+    showSteps: "查看步骤",
+    hideSteps: "收起",
+    roles: { conversation: "对话", parser: "解析", planner: "计划" },
+    modelCall: (role: string, model: string, tokens: number, seconds: string, ok: boolean) =>
+      `调用模型（${role}）${model} · ${tokens} token · ${seconds} 秒${ok ? "" : " · 失败"}`,
+    toolOutcomes: {
+      ran: "已执行",
+      invalid_args: "被拒绝",
+      not_found: "未找到",
+      failed: "出错",
+    },
+    arguments: "参数",
+    approvalRequested: "请你确认",
+    approvalResolved: {
+      approved: "你已批准",
+      rejected: "你已拒绝",
+      failed: "已批准，但执行失败",
+      pending: "等待中",
+      expired: "已过期",
+    },
+    fromEarlierRun: "（来自之前的一次对话）",
+    actionStatus: {
+      pending: "仍在等你确认",
+      approved: "已批准",
+      rejected: "已拒绝",
+      failed: "批准后执行失败",
+      expired: "已过期，未执行",
+    },
+    guardrails: {
+      invalid_args: "已拦截：参数或规则不允许",
+      unknown_tool: "已拦截：不存在或未开启的工具",
+      token_budget: "已拦截：超出每日 token 上限",
+      iteration_cap: "已停止：步骤过多",
+    },
+    planValidation: (d: { violations: string[]; retried: boolean; violations_left: number }) =>
+      d.violations.length === 0
+        ? "计划检查：通过"
+        : d.violations_left === 0
+          ? `计划检查：发现 ${d.violations.length} 个问题，重新生成后全部解决`
+          : `计划检查：发现 ${d.violations.length} 个问题，${d.violations_left} 个未解决（已作为提醒保留）`,
+    planSavedStep: (date: string, version: number) => `已保存 ${date} 的计划（第 ${version} 版）`,
+  },
+  // What a tool call did (`ToolSummary`, `crates/core/src/plugin.rs`), keyed by its kind. The
+  // chat's activity chips and the Activity page show these.
+  toolSummaries: {
+    core_plan_viewed: (d: { date: string }) => `查看了 ${d.date} 的计划`,
+    core_plan_generated: (d: { date: string; version: number }) =>
+      `已生成 ${d.date} 的计划（第 ${d.version} 版）`,
+    core_plan_revised: (d: { date: string; version: number }) =>
+      `已调整 ${d.date} 的计划（第 ${d.version} 版）`,
+    core_weight_logged: (d: { kg: number }) => `已记录体重 ${d.kg} kg`,
+    core_allergies_updated: (d: { allergies: string[] }) =>
+      `已更新过敏食物：${d.allergies.length > 0 ? d.allergies.join("、") : "无"}`,
+    core_preference_added: (d: {
+      preference_kind: "dislike" | "general";
+      text: string;
+      valid_from: string | null;
+      valid_until: string | null;
+    }) =>
+      `已记住${d.preference_kind === "dislike" ? "不喜欢的食物" : "偏好"}：${d.text}` +
+      (d.valid_until ? `（至 ${d.valid_until}）` : ""),
+    core_preference_removed: "已删除该偏好",
+    core_entry_deleted: "已删除记录",
+    diet_meal_logged: (d: { meal_type: "breakfast" | "lunch" | "dinner" | "snack"; kcal: number }) =>
+      `已记录${{ breakfast: "早餐", lunch: "午餐", dinner: "晚餐", snack: "加餐" }[d.meal_type]} · ${d.kcal} kcal`,
+    diet_intake_viewed: (d: { date: string }) => `查看了 ${d.date} 的饮食记录`,
+    diet_food_updated: (d: { name: string }) => `已更新食物：${d.name}`,
+    diet_dish_updated: (d: { name: string }) => `已更新菜品：${d.name}`,
+    diet_alias_added: (d: { alias: string; food: string }) => `已添加别名：${d.alias} → ${d.food}`,
+    diet_alias_removed: (d: { alias: string }) => `已移除别名：${d.alias}`,
+    stock_added: (d: { names: string[] }) => `已加入库存：${d.names.join("、")}`,
+    stock_viewed: "查看了库存",
+    stock_updated: (d: { name: string }) => `已更新库存：${d.name}`,
+    training_session_logged: (d: { title: string; minutes: number }) =>
+      `已记录训练：${d.title} ${d.minutes} 分钟`,
+    training_log_viewed: (d: { start_date: string; end_date: string }) =>
+      `查看了 ${d.start_date} 至 ${d.end_date} 的训练记录`,
+    training_day_preference_set: (d: { date: string; cleared: boolean }) =>
+      d.cleared ? `已清除 ${d.date} 的训练偏好` : `已保存 ${d.date} 的训练偏好`,
+    training_preferences_updated: "已更新训练偏好",
+    multimember_members_viewed: (d: { count: number }) => `查看了成员（${d.count} 人）`,
+    multimember_member_added: (d: { name: string }) => `已添加成员：${d.name}`,
+    multimember_member_updated: (d: { name: string }) => `已更新成员：${d.name}`,
+    multimember_member_archived: (d: { name: string }) => `已移除成员：${d.name}`,
+    multimember_attendance_set: (d: {
+      name: string;
+      meal_type: "breakfast" | "lunch" | "dinner";
+      present: boolean;
+      date: string | null;
+    }) =>
+      `${d.name}${d.date ? ` ${d.date} 的` : " 平时的"}${{ breakfast: "早餐", lunch: "午餐", dinner: "晚餐" }[d.meal_type]}：${d.present ? "一起吃" : "不一起吃"}`,
+    multimember_attendance_cleared: (d: {
+      name: string;
+      meal_type: "breakfast" | "lunch" | "dinner";
+      date: string;
+    }) =>
+      `${d.name} ${d.date} 的${{ breakfast: "早餐", lunch: "午餐", dinner: "晚餐" }[d.meal_type]}：恢复平时安排`,
+    multimember_dislike_added: (d: { name: string; text: string }) =>
+      `已记住 ${d.name} 不喜欢：${d.text}`,
+    multimember_dislike_removed: "已删除一条不喜欢的食物",
+  },
+  // Tool names (`ToolSpec.name`) as labels; an unknown tool shows its raw name.
+  tools: {
+    core_get_plan: "查看计划",
+    core_generate_plan: "生成计划",
+    core_revise_plan: "调整计划",
+    core_log_weight: "记录体重",
+    core_update_allergies: "更新过敏食物",
+    core_add_preference: "记住偏好",
+    core_remove_preference: "删除偏好",
+    core_delete_entry: "删除记录",
+    diet_log_meal: "记录饮食",
+    diet_get_intake: "查看饮食记录",
+    diet_update_food: "更新食物",
+    diet_update_dish: "更新菜品",
+    diet_add_alias: "添加别名",
+    diet_remove_alias: "移除别名",
+    stock_add: "加入库存",
+    stock_list: "查看库存",
+    stock_update: "更新库存",
+    training_log_session: "记录训练",
+    training_get_log: "查看训练记录",
+    training_set_day_preference: "设置某天的训练偏好",
+    training_update_preferences: "更新训练偏好",
+    multimember_list_members: "查看成员",
+    multimember_add_member: "添加成员",
+    multimember_update_member: "更新成员",
+    multimember_archive_member: "移除成员",
+    multimember_set_attendance: "设置共餐安排",
+    multimember_clear_attendance_override: "恢复平时的共餐安排",
+    multimember_add_dislike: "记住成员不喜欢的食物",
+    multimember_remove_dislike: "删除成员不喜欢的食物",
+  } as Record<string, string>,
   settings: {
     saveSucceeded: "已保存",
     saveFailed: "保存失败，请重试。",
@@ -392,6 +579,8 @@ export const zhCN = {
     },
     features: {
       hint: "可选功能开启后会出现在侧边栏，并加入每日计划。",
+      activityTab: "显示「活动」页",
+      activityTabHint: "助手的每次操作都会被记录；这里只决定是否在侧边栏显示该页。",
       names: {
         training: "训练记录与计划",
         stock: "库存管理",
