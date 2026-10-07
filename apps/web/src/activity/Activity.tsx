@@ -378,8 +378,13 @@ function StepItem({ step, onChanged }: { step: ActivityStep; onChanged: () => vo
     }
     case "approval_requested": {
       const d = step.detail;
+      // Highlighted only while it still waits for the user.
+      const tone =
+        step.action_status === "pending"
+          ? "rounded-md bg-amber-50 px-2 py-1.5 text-amber-900 dark:bg-amber-950/40 dark:text-amber-200"
+          : "text-neutral-800 dark:text-neutral-200";
       return (
-        <li className="rounded-md bg-amber-50 px-2 py-1.5 text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+        <li className={tone}>
           <span className="font-medium">{t.approvalRequested}</span>
           <span className="block [overflow-wrap:anywhere]">
             {describeActionPreview(d.preview, d.tool)}

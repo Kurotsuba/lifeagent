@@ -429,9 +429,16 @@ type RunRow = (
     Option<String>,
 );
 
-/// The status as read: `running` past the cutoff reads as `interrupted` (also used to filter).
-const STATUS_AS_READ: &str =
-    "CASE WHEN status = 'running' AND started_at < $1 THEN 'interrupted' ELSE status END";
+/// The status as read (also used to filter): `running` past the cutoff (`$1`) reads as
+/// `interrupted`, and `needs_approval` reads as `succeeded` once none of the run's actions still
+/// waits for the user (approved, rejected, failed, or expired before `$2`).
+const STATUS_AS_READ: &str = "CASE
+    WHEN status = 'running' AND started_at < $1 THEN 'interrupted'
+    WHEN status = 'needs_approval' AND NOT EXISTS (
+        SELECT 1 FROM pending_actions p
+        WHERE p.run_id = agent_runs.id AND p.status = 'pending' AND p.created_at >= $2
+    ) THEN 'succeeded'
+    ELSE status END";
 
 impl AuditLog {
     pub fn new(db: PgPool, clock: Arc<dyn Clock>, events: EventStore) -> Self {
@@ -474,6 +481,11 @@ impl AuditLog {
         (self.clock.now() - Duration::minutes(INTERRUPTED_AFTER_MINUTES)).to_rfc3339()
     }
 
+    /// Pending actions created before this have expired (`crate::approvals`).
+    fn expiry_cutoff(&self) -> String {
+        (self.clock.now() - Duration::hours(crate::approvals::EXPIRY_HOURS)).to_rfc3339()
+    }
+
     /// Runs newest first, `limit` (1..=100) per page.
     pub async fn list(&self, filter: &RunFilter, limit: u32) -> Result<RunPage, CoreError> {
         let limit = limit.clamp(1, 100);
@@ -481,13 +493,14 @@ impl AuditLog {
             "SELECT id, trigger, actor, {STATUS_AS_READ}, input_excerpt, outcome_json, error_code,
                     logical_date, started_at, finished_at
              FROM agent_runs
-             WHERE ($2::text IS NULL OR id < $2)
-               AND ($3::text IS NULL OR actor = $3)
-               AND ($4::text IS NULL OR {STATUS_AS_READ} = $4)
+             WHERE ($3::text IS NULL OR id < $3)
+               AND ($4::text IS NULL OR actor = $4)
+               AND ($5::text IS NULL OR {STATUS_AS_READ} = $5)
              ORDER BY id DESC
-             LIMIT $5"
+             LIMIT $6"
         )))
         .bind(self.interrupted_cutoff())
+        .bind(self.expiry_cutoff())
         .bind(filter.before.as_deref())
         .bind(filter.actor.map(Actor::as_str))
         .bind(filter.status.map(RunStatus::as_str))
@@ -511,9 +524,10 @@ impl AuditLog {
         let row: Option<RunRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "SELECT id, trigger, actor, {STATUS_AS_READ}, input_excerpt, outcome_json, error_code,
                     logical_date, started_at, finished_at
-             FROM agent_runs WHERE id = $2"
+             FROM agent_runs WHERE id = $3"
         )))
         .bind(self.interrupted_cutoff())
+        .bind(self.expiry_cutoff())
         .bind(id)
         .fetch_optional(&self.db)
         .await?;
@@ -645,7 +659,8 @@ mod tests {
 
     #[tokio::test]
     async fn a_run_records_its_steps_in_order_and_its_outcome() {
-        let (log, _clock, _db) = log().await;
+        let (log, clock, _db) = log().await;
+        let approvals = crate::approvals::ApprovalStore::new(log.db.clone(), clock.clone());
         let mut rx = log.events.subscribe();
         let run = log
             .start(
@@ -668,9 +683,13 @@ mod tests {
                 tool_call_detail("diet_log_meal", &json!({"text": "燕麦"}), "ran", None, None),
             )
             .await;
+            let action = approvals
+                .create("core_add_preference", &json!({}), &json!({}))
+                .await
+                .unwrap();
             record(
                 StepKind::ApprovalRequested,
-                json!({"tool": "core_add_preference", "action_id": "a1"}),
+                json!({"tool": "core_add_preference", "action_id": action.id}),
             )
             .await;
         })
@@ -706,6 +725,37 @@ mod tests {
             rx.try_recv(),
             Ok(AppEvent::ActivityRecorded { run_id }) if run_id == run.id()
         ));
+    }
+
+    #[tokio::test]
+    async fn a_run_stops_needing_approval_once_its_actions_expire() {
+        let (log, clock, _db) = log().await;
+        let approvals = crate::approvals::ApprovalStore::new(log.db.clone(), clock.clone());
+        let run = log
+            .start(RunTrigger::ChatTurn, Actor::User, None, date())
+            .await
+            .unwrap();
+        scope(run.clone(), async {
+            approvals
+                .create("core_add_preference", &json!({}), &json!({}))
+                .await
+                .unwrap();
+            record(StepKind::ApprovalRequested, json!({})).await;
+        })
+        .await;
+        run.finish(RunEnd::Ok).await;
+        let status =
+            |log: AuditLog, id: String| async move { log.get(&id).await.unwrap().unwrap().status };
+        assert_eq!(
+            status(log.clone(), run.id().to_string()).await,
+            RunStatus::NeedsApproval
+        );
+
+        clock.advance(Duration::hours(crate::approvals::EXPIRY_HOURS + 1));
+        assert_eq!(
+            status(log.clone(), run.id().to_string()).await,
+            RunStatus::Succeeded
+        );
     }
 
     #[tokio::test]

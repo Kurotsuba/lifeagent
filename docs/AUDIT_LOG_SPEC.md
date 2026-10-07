@@ -216,6 +216,10 @@ A run that is still `running` and older than 15 minutes is reported as `interrup
 read, the same way `pending_actions` derives `expired`. That covers an instance killed in the
 middle of a turn.
 
+Likewise, a `needs_approval` run reads as `succeeded` once none of the actions it queued is
+still pending (each was approved, rejected, failed or expired). The stored status is left as
+written; the approval itself is its own `action_approved` / `action_rejected` run.
+
 ### 4.1 Triggers
 
 | Trigger | Entry point | Actor |

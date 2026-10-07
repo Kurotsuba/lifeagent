@@ -2399,6 +2399,14 @@ mod tests {
         let resolved = &steps[1].detail;
         assert_eq!(resolved["decision"], "approved");
         assert_eq!(resolved["requested_in"], chat_run.id.as_str());
+        // Nothing waits any more, so the chat run no longer reads as needing approval.
+        let settled = app.audit().get(&chat_run.id).await.unwrap().unwrap();
+        assert_eq!(settled.status, RunStatus::Succeeded);
+        let filter = RunFilter {
+            status: Some(RunStatus::NeedsApproval),
+            ..RunFilter::default()
+        };
+        assert!(app.audit().list(&filter, 50).await.unwrap().runs.is_empty());
     }
 
     #[tokio::test]
@@ -2423,6 +2431,8 @@ mod tests {
         assert_eq!(runs[0].trigger, RunTrigger::ActionRejected);
         assert_eq!(kinds(&steps), vec![StepKind::ApprovalResolved]);
         assert_eq!(steps[0].detail["decision"], "rejected");
+        assert_eq!(runs[1].trigger, RunTrigger::ChatTurn);
+        assert_eq!(runs[1].status, RunStatus::Succeeded);
     }
 
     /// `MAX_ITERATIONS` rounds that each call a tool, so the turn hits the cap.

@@ -474,7 +474,7 @@ export const zhCN = {
       failed: "出错",
     },
     arguments: "参数",
-    approvalRequested: "请你确认",
+    approvalRequested: "请求你确认",
     approvalResolved: {
       approved: "你已批准",
       rejected: "你已拒绝",
