@@ -45,7 +45,7 @@ export const ja: Strings = {
   nav: {
     today: "今日",
     chat: "チャット",
-    activity: "アクティビティ",
+    activity: "アシスタント履歴",
     nutrition: "栄養",
     stock: "在庫",
     settings: "設定",
@@ -586,7 +586,7 @@ export const ja: Strings = {
     },
     features: {
       hint: "オプション機能をオンにすると、サイドバーに表示され、毎日のプランに加わります。",
-      activityTab: "「アクティビティ」ページを表示",
+      activityTab: "「アシスタント履歴」ページを表示",
       activityTabHint: "アシスタントの操作は常に記録されます。ここではページをサイドバーに表示するかだけを選びます。",
       names: {
         training: "トレーニング記録とプラン",

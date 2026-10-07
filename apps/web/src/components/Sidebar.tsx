@@ -6,11 +6,11 @@ import type { Tab } from "../App";
 const TABS: { id: Tab; label: string }[] = [
   { id: "today", label: strings.nav.today },
   { id: "chat", label: strings.nav.chat },
-  { id: "activity", label: strings.nav.activity },
   { id: "nutrition", label: strings.nav.nutrition },
   { id: "training", label: strings.nav.training },
   { id: "members", label: strings.nav.members },
   { id: "stock", label: strings.nav.stock },
+  { id: "activity", label: strings.nav.activity },
   { id: "settings", label: strings.nav.settings },
 ];
 

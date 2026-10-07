@@ -45,7 +45,7 @@ export const en: Strings = {
   nav: {
     today: "Today",
     chat: "Chat",
-    activity: "Activity",
+    activity: "Assistant log",
     nutrition: "Nutrition",
     stock: "Stock",
     settings: "Settings",
@@ -588,7 +588,7 @@ export const en: Strings = {
     },
     features: {
       hint: "Optional features appear in the sidebar and join the daily plan once turned on.",
-      activityTab: "Show the Activity page",
+      activityTab: "Show the Assistant log page",
       activityTabHint: "The assistant's actions are always recorded; this only decides whether the page shows in the sidebar.",
       names: {
         training: "Training log & plan",

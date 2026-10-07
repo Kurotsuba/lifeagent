@@ -51,7 +51,7 @@ export const zhCN = {
   nav: {
     today: "今日",
     chat: "对话",
-    activity: "活动",
+    activity: "助手记录",
     nutrition: "营养",
     stock: "库存",
     settings: "设置",
@@ -602,7 +602,7 @@ export const zhCN = {
     },
     features: {
       hint: "可选功能开启后会出现在侧边栏，并加入每日计划。",
-      activityTab: "显示「活动」页",
+      activityTab: "显示「助手记录」页",
       activityTabHint: "助手的每次操作都会被记录；这里只决定是否在侧边栏显示该页。",
       names: {
         training: "训练记录与计划",
