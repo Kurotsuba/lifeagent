@@ -2884,3 +2884,20 @@ quietly shape every later plan or number, and protect safety.
   the allergies the owner named; adding members is rare, so the extra step is cheap.
 - Calls the tool would refuse anyway (invalid values, unknown food, alias or member) run and fail
   without asking, as before.
+
+## 2026-10-07 — Chat iteration cap: 12 rounds and a wrap-up reply
+
+A user's whole-day report ("三餐基本按照今天的食谱完成，晚上多喝了碗鸡汤，一只鸡腿。明天中午准备吃韭菜虾仁饺子")
+hit the 6-round cap: plan lookup plus one meal log per round used it up, the rest was silently
+dropped (stock moved only for what got logged), and the fixed Chinese reply was never stored, so
+the UI showed nothing useful after refetching history.
+
+- **`MAX_ITERATIONS` 6 → 12.** Rounds, not tool calls; one round can still run several calls.
+- **Wrap-up call at the cap.** One more conversation call with a closing system instruction not
+  to call tools and to say what was recorded and what wasn't. The tools stay declared (some
+  providers refuse a history with tool calls but no tools); any calls it returns are dropped
+  unrun, and only its text is stored, so the history never ends on an unanswered call. If it
+  fails or returns no text, the turn still succeeds — the tools' work is already saved.
+- **`ChatTurn.notice`** (`empty_reply` | `too_many_steps`) replaces the hardcoded Chinese
+  replies, worded by the UI in all three locales (`chat.notices`). `reply` is empty when it's
+  set. The web chat shows the notice after the messages, with the turn's activity chips.

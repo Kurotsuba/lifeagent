@@ -7,6 +7,7 @@ import {
   type HistoryMessage,
   type PendingAction,
   type ToolSummary,
+  type TurnNotice,
 } from "../api/types";
 import { inputClass } from "../components/Field";
 import { primaryButtonClass } from "../components/buttonStyles";
@@ -29,6 +30,12 @@ export function Chat({ draftText, onDraftConsumed }: ChatProps) {
   // last rendered assistant message by content rather than folded into `history` itself.
   const [lastLiveReply, setLastLiveReply] = useState<{
     content: string;
+    activities: ToolSummary[];
+  } | null>(null);
+  // The live turn ended without a model reply: shown after the messages, with the turn's
+  // activities (there's no reply bubble to hang them on), until the next send.
+  const [liveNotice, setLiveNotice] = useState<{
+    notice: TurnNotice;
     activities: ToolSummary[];
   } | null>(null);
   const [pendingActions, setPendingActions] = useState<PendingAction[]>([]);
@@ -78,6 +85,7 @@ export function Chat({ draftText, onDraftConsumed }: ChatProps) {
     setError(null);
     setText("");
     setResolvedActions([]);
+    setLiveNotice(null);
     const optimisticUser: HistoryMessage = {
       role: "user",
       content: trimmed,
@@ -92,7 +100,12 @@ export function Chat({ draftText, onDraftConsumed }: ChatProps) {
     });
     try {
       const turn = await sendMessage(trimmed);
-      setLastLiveReply({ content: turn.reply, activities: turn.activities });
+      if (turn.notice) {
+        setLastLiveReply(null);
+        setLiveNotice({ notice: turn.notice, activities: turn.activities });
+      } else {
+        setLastLiveReply({ content: turn.reply, activities: turn.activities });
+      }
       setPendingActions((p) => [
         ...p,
         ...turn.pending_actions.filter((a) => !p.some((q) => q.id === a.id)),
@@ -118,6 +131,11 @@ export function Chat({ draftText, onDraftConsumed }: ChatProps) {
   }
 
   const visible = history.filter((m) => m.role !== "tool");
+  const items = displayItems(visible);
+  // A turn that ended with a notice has no reply to drop its thinking bubble; the notice ends it.
+  if (liveNotice && !sending && items[items.length - 1]?.kind === "thinking") items.pop();
+  // A thinking bubble at the end already shows the turn is in progress.
+  const showSending = sending && items[items.length - 1]?.kind !== "thinking";
 
   function handleResolved(action: PendingAction) {
     setPendingActions((p) => p.filter((a) => a.id !== action.id));
@@ -136,9 +154,21 @@ export function Chat({ draftText, onDraftConsumed }: ChatProps) {
           {loaded && visible.length === 0 ? (
             <p className="text-sm text-neutral-500 dark:text-neutral-400">{strings.chat.empty}</p>
           ) : null}
-          {visible.map((m, i) => {
+          {items.map((item, i) => {
+            if (item.kind === "thinking") {
+              return (
+                <div key={i} className="flex justify-start">
+                  <div className="max-w-[75%] rounded-lg bg-neutral-100 px-3 py-2 text-sm dark:bg-neutral-800">
+                    <p className="italic text-neutral-500 dark:text-neutral-400">
+                      {item.rounds > 1 ? strings.chat.deepThinking : strings.chat.thinking}
+                    </p>
+                  </div>
+                </div>
+              );
+            }
+            const m = item.message;
             const isLastAssistant =
-              i === visible.length - 1 &&
+              i === items.length - 1 &&
               m.role === "assistant" &&
               lastLiveReply?.content === m.content;
             const chips = isLastAssistant ? lastLiveReply!.activities : [];
@@ -155,30 +185,23 @@ export function Chat({ draftText, onDraftConsumed }: ChatProps) {
                       : "bg-neutral-100 text-neutral-900 dark:bg-neutral-800 dark:text-neutral-100")
                   }
                 >
-                  {m.role === "assistant" && !m.content?.trim() ? (
-                    <p className="italic text-neutral-500 dark:text-neutral-400">
-                      {strings.chat.thinking}
-                    </p>
-                  ) : (
-                    <p className="whitespace-pre-wrap [overflow-wrap:anywhere]">{m.content}</p>
-                  )}
-                  {chips.length > 0 ? (
-                    <div className="mt-2 flex flex-wrap gap-1">
-                      {chips.map((chip, j) => (
-                        <span
-                          key={j}
-                          className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
-                        >
-                          {describeToolSummary(chip)}
-                        </span>
-                      ))}
-                    </div>
-                  ) : null}
+                  <p className="whitespace-pre-wrap [overflow-wrap:anywhere]">{m.content}</p>
+                  <ActivityChips activities={chips} />
                 </div>
               </div>
             );
           })}
-          {sending ? (
+          {liveNotice && !sending ? (
+            <div className="flex justify-start">
+              <div className="max-w-[75%] rounded-lg bg-neutral-100 px-3 py-2 text-sm text-neutral-900 dark:bg-neutral-800 dark:text-neutral-100">
+                <p className="italic text-neutral-500 dark:text-neutral-400">
+                  {strings.chat.notices[liveNotice.notice]}
+                </p>
+                <ActivityChips activities={liveNotice.activities} />
+              </div>
+            </div>
+          ) : null}
+          {showSending ? (
             <div className="flex justify-start">
               <div className="max-w-[75%] rounded-lg bg-neutral-100 px-3 py-2 text-sm text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400">
                 {strings.chat.sending}
@@ -228,6 +251,47 @@ export function Chat({ draftText, onDraftConsumed }: ChatProps) {
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+type DisplayItem =
+  | { kind: "message"; message: HistoryMessage }
+  | { kind: "thinking"; rounds: number };
+
+/**
+ * The messages to render. A run of text-less assistant messages (one per tool-call round)
+ * becomes a single thinking bubble that counts the rounds, shown only while it ends the list:
+ * once a reply or the next user message follows, that turn is over and the bubble is dropped.
+ */
+function displayItems(messages: HistoryMessage[]): DisplayItem[] {
+  const items: DisplayItem[] = [];
+  for (const message of messages) {
+    const last = items[items.length - 1];
+    if (message.role === "assistant" && !message.content?.trim()) {
+      if (last?.kind === "thinking") last.rounds += 1;
+      else items.push({ kind: "thinking", rounds: 1 });
+    } else {
+      if (last?.kind === "thinking") items.pop();
+      items.push({ kind: "message", message });
+    }
+  }
+  return items;
+}
+
+/** What the turn's tool calls did, one chip each. */
+function ActivityChips({ activities }: { activities: ToolSummary[] }) {
+  if (activities.length === 0) return null;
+  return (
+    <div className="mt-2 flex flex-wrap gap-1">
+      {activities.map((chip, j) => (
+        <span
+          key={j}
+          className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
+        >
+          {describeToolSummary(chip)}
+        </span>
+      ))}
     </div>
   );
 }

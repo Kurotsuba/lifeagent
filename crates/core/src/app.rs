@@ -11,7 +11,7 @@ use chrono::{DateTime, Datelike, Local, NaiveDate, NaiveDateTime, NaiveTime, Utc
 use lifeagent_llm::router::{
     LlmRouter, ModelsConfig, ProviderConfig, ProviderKind, RoleBinding, RoleRequest,
 };
-use lifeagent_llm::types::{ChatModel, Message, ResponseFormat, Role, ToolCall};
+use lifeagent_llm::types::{ChatModel, Message, ResponseFormat, Role, ToolCall, ToolSpec};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::PgPool;
@@ -39,16 +39,35 @@ use crate::tools::ToolRegistry;
 use crate::usage::DbUsageSink;
 
 /// Loop cap for `send_message` (§7.11): stop after this many tool-call rounds rather than
-/// let a confused model spin forever.
-const MAX_ITERATIONS: u32 = 6;
+/// let a confused model spin forever. A whole-day report ("ate the plan's three meals, plus
+/// soup at night, dumplings tomorrow") takes a plan lookup and several logs, often one per
+/// round, so this leaves room for that.
+const MAX_ITERATIONS: u32 = 12;
 
-const EMPTY_REPLY: &str = "（模型没有返回内容，请再试一次。）";
-const TOO_MANY_STEPS_REPLY: &str = "（处理步骤过多，已停止。请换个说法再试一次。）";
+/// Appended (not stored) for the one extra model call made when the loop hits
+/// [`MAX_ITERATIONS`], so the user hears what was done instead of a bare error.
+const WRAP_UP_INSTRUCTION: &str = "The step limit for this message has been reached. Do not \
+    call any tools. Reply to the user now: say briefly what you recorded or changed in this \
+    turn, and what you did not get to, so they can send that part again.";
+
+/// Why a turn's `reply` came from the app rather than the model; the UI words it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TurnNotice {
+    /// The model answered with neither text nor tool calls.
+    EmptyReply,
+    /// The turn hit [`MAX_ITERATIONS`] and the wrap-up call produced no text either. Tool
+    /// calls that ran before the cap are kept (see `activities`).
+    TooManySteps,
+}
 
 /// The result of one `send_message` turn.
 #[derive(Debug, Clone, PartialEq, Default, Serialize)]
 pub struct ChatTurn {
+    /// The model's reply; empty when `notice` is set.
     pub reply: String,
+    /// Set when the model gave no usable reply, for the UI to show in its place.
+    pub notice: Option<TurnNotice>,
     /// What each tool call that ran did, as data the UI words (`ToolSummary`).
     pub activities: Vec<ToolSummary>,
     /// Tool calls from this turn that wait for the user's approval (`crate::approvals`).
@@ -965,9 +984,13 @@ impl CoreApp {
                 .await?;
 
             if resp.tool_calls.is_empty() {
-                let reply = resp.content.unwrap_or_else(|| EMPTY_REPLY.to_string());
+                let (reply, notice) = match resp.content {
+                    Some(text) if !text.trim().is_empty() => (text, None),
+                    _ => (String::new(), Some(TurnNotice::EmptyReply)),
+                };
                 return Ok(ChatTurn {
                     reply,
+                    notice,
                     activities,
                     pending_actions,
                 });
@@ -1054,11 +1077,60 @@ impl CoreApp {
             serde_json::json!({ "rule": "iteration_cap", "limit": MAX_ITERATIONS }),
         )
         .await;
+        let reply = self
+            .wrap_up_reply(&router, system_prompt, boundary, tool_specs)
+            .await?;
+        let notice = reply.is_none().then_some(TurnNotice::TooManySteps);
         Ok(ChatTurn {
-            reply: TOO_MANY_STEPS_REPLY.to_string(),
+            reply: reply.unwrap_or_default(),
+            notice,
             activities,
             pending_actions,
         })
+    }
+
+    /// One last model call after the loop hit [`MAX_ITERATIONS`], told not to use tools, so
+    /// the user hears what the turn did. The tools stay declared because some providers refuse
+    /// a history with tool calls but no tools; any calls it makes anyway are dropped, never run.
+    /// Only its text is stored, so the history never ends on an unanswered tool call. `None`
+    /// when it gives no text or fails: the tools' work is already saved, so a failed summary
+    /// shouldn't fail the turn.
+    async fn wrap_up_reply(
+        &self,
+        router: &Arc<LlmRouter>,
+        system_prompt: String,
+        boundary: NaiveTime,
+        tools: Vec<ToolSpec>,
+    ) -> Result<Option<String>, CoreError> {
+        let history = self.0.conversation.history_window().await?;
+        let mut messages = Self::to_llm_messages(system_prompt, &history, boundary)?;
+        messages.push(Message::System {
+            content: WRAP_UP_INSTRUCTION.to_string(),
+        });
+        let request = RoleRequest {
+            messages,
+            tools,
+            max_tokens: None,
+            response_format: ResponseFormat::Text,
+        };
+        let text = match router.complete(Role::Conversation, request).await {
+            Ok(resp) => resp.content.filter(|t| !t.trim().is_empty()),
+            Err(e) => {
+                tracing::warn!(error = %e, "wrap-up call after the iteration cap failed");
+                None
+            }
+        };
+        if let Some(text) = &text {
+            self.0
+                .conversation
+                .append(NewMessage {
+                    role: MessageRole::Assistant,
+                    content: Some(text.clone()),
+                    ..Default::default()
+                })
+                .await?;
+        }
+        Ok(text)
     }
 
     /// Runs one tool call from the conversation model, or stores it as a pending action if its
@@ -1827,7 +1899,8 @@ mod tests {
         let app = builder.chat_model_override(mock).build().await.unwrap();
 
         let turn = app.send_message("你好").await.unwrap();
-        assert_eq!(turn.reply, EMPTY_REPLY);
+        assert_eq!(turn.reply, "");
+        assert_eq!(turn.notice, Some(TurnNotice::EmptyReply));
     }
 
     #[test]
@@ -2352,24 +2425,72 @@ mod tests {
         assert_eq!(steps[0].detail["decision"], "rejected");
     }
 
-    #[tokio::test]
-    async fn hitting_the_iteration_cap_is_a_guardrail_step() {
-        let mock = Arc::new(MockChatModel::new());
+    /// `MAX_ITERATIONS` rounds that each call a tool, so the turn hits the cap.
+    fn push_capped_rounds(mock: &MockChatModel) {
         for _ in 0..MAX_ITERATIONS {
             mock.push_response(response(
                 None,
                 vec![call("core_get_plan", serde_json::json!({}))],
             ));
         }
+    }
+
+    #[tokio::test]
+    async fn hitting_the_iteration_cap_ends_with_a_wrap_up_reply_without_tools() {
+        let mock = Arc::new(MockChatModel::new());
+        push_capped_rounds(&mock);
+        // The wrap-up call tries a tool anyway: dropped, only its text is kept.
+        mock.push_response(response(
+            Some("已记录早餐和午餐，晚餐还没记录"),
+            vec![call("core_get_plan", serde_json::json!({}))],
+        ));
         let (app, _dir) = app_with(&mock).await;
 
         let turn = app.send_message("看看计划").await.unwrap();
 
-        assert_eq!(turn.reply, TOO_MANY_STEPS_REPLY);
+        assert_eq!(turn.reply, "已记录早餐和午餐，晚餐还没记录");
+        assert_eq!(turn.notice, None);
+        let requests = mock.received_requests();
+        assert_eq!(requests.len(), MAX_ITERATIONS as usize + 1);
+        let wrap_up = requests.last().unwrap();
+        assert!(matches!(
+            wrap_up.messages.last(),
+            Some(Message::System { content }) if content == WRAP_UP_INSTRUCTION
+        ));
+        // Stored without the dropped call, so the next turn's history isn't left on an
+        // unanswered tool call.
+        let history = app.get_history(5).await.unwrap();
+        assert_eq!(
+            history.last().unwrap().content.as_deref(),
+            Some("已记录早餐和午餐，晚餐还没记录")
+        );
         let (_, steps) = activity(&app).await;
-        let last = steps.last().unwrap();
-        assert_eq!(last.kind, StepKind::Guardrail);
-        assert_eq!(last.detail["rule"], "iteration_cap");
+        let cap = steps
+            .iter()
+            .find(|s| s.kind == StepKind::Guardrail)
+            .unwrap();
+        assert_eq!(cap.detail["rule"], "iteration_cap");
+        assert_eq!(
+            steps
+                .iter()
+                .filter(|s| s.kind == StepKind::ToolCall)
+                .count(),
+            MAX_ITERATIONS as usize
+        );
+    }
+
+    #[tokio::test]
+    async fn a_failed_wrap_up_still_returns_the_turn_with_a_notice() {
+        let mock = Arc::new(MockChatModel::new());
+        push_capped_rounds(&mock);
+        mock.push_error(lifeagent_llm::error::LlmError::Http("down".into()));
+        let (app, _dir) = app_with(&mock).await;
+
+        let turn = app.send_message("看看计划").await.unwrap();
+
+        assert_eq!(turn.reply, "");
+        assert_eq!(turn.notice, Some(TurnNotice::TooManySteps));
+        assert_eq!(turn.activities.len(), MAX_ITERATIONS as usize);
     }
 
     #[tokio::test]

@@ -334,7 +334,14 @@ export const zhCN = {
     sending: "发送中…",
     empty: "还没有对话，说点什么吧",
     thinking: "思考中",
+    // Several model rounds in a row without text: the assistant is still working, not stuck.
+    deepThinking: "深度思考中",
     sendFailed: "发送失败",
+    // Shown in place of a reply (`TurnNotice`), keyed by its value.
+    notices: {
+      empty_reply: "模型没有返回内容，请再试一次。",
+      too_many_steps: "处理步骤过多，已停止。下面是已完成的操作，没完成的部分请再发一次。",
+    },
   },
   // Tool calls waiting for the user's approval (`PendingAction`, `crates/core/src/approvals.rs`).
   approvals: {

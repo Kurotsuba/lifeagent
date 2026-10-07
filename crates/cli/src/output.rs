@@ -1,13 +1,17 @@
 //! Small print helpers shared by the subcommands.
 
 use anyhow::Result;
-use lifeagent_core::app::ChatTurn;
+use lifeagent_core::app::{ChatTurn, TurnNotice};
 use serde::Serialize;
 
 /// A `send_message` turn's reply, then each activity on its own bullet line, then each change
 /// waiting for approval — what `chat` and `say` print (§11).
 pub fn print_turn(turn: &ChatTurn) {
-    println!("{}", turn.reply);
+    match turn.notice {
+        Some(TurnNotice::EmptyReply) => println!("(the model returned no reply)"),
+        Some(TurnNotice::TooManySteps) => println!("(stopped: too many steps)"),
+        None => println!("{}", turn.reply),
+    }
     for activity in &turn.activities {
         println!("  · {activity}");
     }

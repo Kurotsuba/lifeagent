@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use chrono::Utc;
-use lifeagent_core::app::CoreAppBuilder;
+use lifeagent_core::app::{CoreAppBuilder, TurnNotice};
 use lifeagent_core::clock::FixedClock;
 use lifeagent_core::events::EventSource;
 use lifeagent_core::plugin::{
@@ -233,7 +233,8 @@ async fn invalid_tool_args_return_an_error_the_model_can_retry_from() {
 async fn stops_after_the_iteration_cap_with_no_empty_tool_calls() {
     let (builder, _dir) = builder().await;
     let mock = Arc::new(MockChatModel::new());
-    for i in 0..6 {
+    // The cap (12 rounds), then the wrap-up call, which tries one more call anyway.
+    for i in 0..13 {
         mock.push_response(tool_call_response(
             &format!("call_{i}"),
             "test_log_thing",
@@ -248,10 +249,13 @@ async fn stops_after_the_iteration_cap_with_no_empty_tool_calls() {
 
     let turn = app.send_message("一直调用工具").await.unwrap();
 
-    assert_eq!(turn.reply, "（处理步骤过多，已停止。请换个说法再试一次。）");
-    assert_eq!(turn.activities.len(), 6);
-    // Exactly 6 rounds were sent to the model — the cap, not one more.
-    assert_eq!(mock.received_requests().len(), 6);
+    // The wrap-up gave no text: the UI words the notice.
+    assert_eq!(turn.reply, "");
+    assert_eq!(turn.notice, Some(TurnNotice::TooManySteps));
+    // Its call was dropped, not run.
+    assert_eq!(turn.activities.len(), 12);
+    // 12 rounds plus the wrap-up — not one more.
+    assert_eq!(mock.received_requests().len(), 13);
 }
 
 #[tokio::test]

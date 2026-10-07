@@ -124,8 +124,13 @@ export type ToolSummary =
   | { kind: "multimember_dislike_added"; name: string; text: string }
   | { kind: "multimember_dislike_removed" };
 
+/** Why a turn has no model reply (`TurnNotice` in `crates/core/src/app.rs`). */
+export type TurnNotice = "empty_reply" | "too_many_steps";
+
 export interface ChatTurn {
+  /** Empty when `notice` is set. */
   reply: string;
+  notice: TurnNotice | null;
   activities: ToolSummary[];
   /** Tool calls from this turn that wait for the user's approval. */
   pending_actions: PendingAction[];

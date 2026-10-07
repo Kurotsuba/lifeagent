@@ -328,7 +328,12 @@ export const ja: Strings = {
     sending: "送信中…",
     empty: "まだ会話がありません。何か話しかけてみましょう",
     thinking: "考え中",
+    deepThinking: "じっくり考え中",
     sendFailed: "送信に失敗しました",
+    notices: {
+      empty_reply: "モデルから返答がありませんでした。もう一度お試しください。",
+      too_many_steps: "処理の手順が多すぎたため停止しました。完了した操作は下のとおりです。残りはもう一度送ってください。",
+    },
   },
   approvals: {
     title: "確認が必要です",

@@ -329,7 +329,12 @@ export const en: Strings = {
     sending: "Sending…",
     empty: "No messages yet. Say something!",
     thinking: "Thinking",
+    deepThinking: "Thinking hard",
     sendFailed: "Couldn't send",
+    notices: {
+      empty_reply: "The model didn't return a reply. Please try again.",
+      too_many_steps: "Stopped after too many steps. What got done is listed below; send the rest again.",
+    },
   },
   approvals: {
     title: "Needs your approval",
