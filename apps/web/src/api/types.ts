@@ -154,7 +154,30 @@ export type ActionPreview =
       description: string | null;
     }
   | { kind: "archive_member"; name: string }
-  | { kind: "update_member_allergies"; name: string; allergies: string[] };
+  | { kind: "update_member_allergies"; name: string; allergies: string[] }
+  | { kind: "add_member"; name: string; allergies: string[] }
+  | {
+      kind: "update_training_notes";
+      notes: string;
+      previous_notes: string;
+      /** The same call also changes goal, days, minutes or equipment. */
+      other_changes: boolean;
+    }
+  | {
+      kind: "update_nutrition";
+      name: string;
+      brand: string | null;
+      basis: NutritionBasis;
+      /** The current values; null for a new food or dish. */
+      before: DietMacros | null;
+      after: DietMacros;
+      reasons: NutritionChangeReason[];
+    }
+  | { kind: "add_food_alias"; alias: string; food: string }
+  | { kind: "remove_food_alias"; alias: string; target: string };
+
+export type NutritionBasis = "per_100g" | "per_serving";
+export type NutritionChangeReason = "large_change" | "kcal_mismatch";
 
 export interface PendingAction {
   id: string;

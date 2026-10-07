@@ -82,9 +82,9 @@ pub fn validate_per_100g(n: &Macros) -> Result<(), MacroViolation> {
 /// macro-derived energy when the two disagree by more than `max(20, 15%)`.
 pub fn check_nutrition(n: &Macros) -> Result<Macros, String> {
     validate_per_100g(n).map_err(|e| e.to_string())?;
-    let e = 4.0 * n.protein_g + 4.0 * (n.carbs_g - n.fiber_g) + 9.0 * n.fat_g + 2.0 * n.fiber_g;
+    let e = macro_energy(n);
     let mut checked = *n;
-    if (n.kcal - e).abs() > f64::max(20.0, 0.15 * e) {
+    if kcal_disagrees_with_macros(n) {
         tracing::debug!(
             given = n.kcal,
             computed = e,
@@ -93,6 +93,17 @@ pub fn check_nutrition(n: &Macros) -> Result<Macros, String> {
         checked.kcal = e;
     }
     Ok(checked)
+}
+
+/// Energy from the macros: 4 kcal/g protein and digestible carbs, 9 kcal/g fat, 2 kcal/g fiber.
+pub fn macro_energy(n: &Macros) -> f64 {
+    4.0 * n.protein_g + 4.0 * (n.carbs_g - n.fiber_g) + 9.0 * n.fat_g + 2.0 * n.fiber_g
+}
+
+/// Whether `kcal` and the macro-derived energy disagree by more than `max(20, 15%)` (§8.3).
+pub fn kcal_disagrees_with_macros(n: &Macros) -> bool {
+    let e = macro_energy(n);
+    (n.kcal - e).abs() > f64::max(20.0, 0.15 * e)
 }
 
 /// Character bigrams of `s`; empty for strings under 2 characters.

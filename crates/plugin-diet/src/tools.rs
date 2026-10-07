@@ -9,7 +9,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::dish_resolver::{self, DishOutcome};
-use crate::foods::validate_per_100g;
+use crate::foods::{kcal_disagrees_with_macros, normalize, validate_per_100g};
 use crate::intake::{self, MEAL_EVENT};
 use crate::model::{ItemKind, Macros, MealItem, MealLogged, MealType};
 use crate::parser::parse_meal;
@@ -66,7 +66,8 @@ pub fn specs() -> Vec<ToolSpec> {
             description: "Correct the per-100 g nutrition of a food in the local food table \
                 when the user gives better values (e.g. from a package label). Creates the \
                 food if it doesn't exist. Only meals logged afterwards use the new values; \
-                meals already logged keep theirs."
+                meals already logged keep theirs. A large change, or kcal that doesn't match the \
+                macros, waits for the user's approval in the app."
                 .into(),
             parameters: json!({
                 "type": "object",
@@ -88,7 +89,8 @@ pub fn specs() -> Vec<ToolSpec> {
                 receipt or the chain's own site. Creates the dish if it doesn't exist. Pass \
                 `brand` when the item belongs to a specific chain; omit it only for a brandless \
                 dish (e.g. a canteen item). Only meals logged afterwards use the new values; \
-                meals already logged keep theirs."
+                meals already logged keep theirs. A large change, or kcal that doesn't match the \
+                macros, waits for the user's approval in the app."
                 .into(),
             parameters: json!({
                 "type": "object",
@@ -110,7 +112,8 @@ pub fn specs() -> Vec<ToolSpec> {
             description: "Remove a name redirect, so that name is looked up on its own again \
                 (and estimated if it is not in the food table). Use when the user says a food \
                 was matched to the wrong entry, e.g. '熟米饭不是那个稻米饭(蒸)，按估算算'. The \
-                name is not matched to a table entry again until the imported food data changes."
+                name is not matched to a table entry again until the imported food data changes. \
+                Waits for the user's approval in the app."
                 .into(),
             parameters: json!({
                 "type": "object",
@@ -121,7 +124,8 @@ pub fn specs() -> Vec<ToolSpec> {
         ToolSpec {
             name: "diet_add_alias".into(),
             description: "Add another name for a food already in the food table (e.g. \
-                '卤蛋' for '卤鸡蛋'), so meals that use that name match it."
+                '卤蛋' for '卤鸡蛋'), so meals that use that name match it. Waits for the user's \
+                approval in the app."
                 .into(),
             parameters: json!({
                 "type": "object",
@@ -133,6 +137,158 @@ pub fn specs() -> Vec<ToolSpec> {
             }),
         },
     ]
+}
+
+/// Below these, a change to a food's per-100 g values never counts as large, however big in
+/// percent (cucumber 14 → 18 kcal is a label correction, not an attack).
+const FOOD_FLOOR: ChangeFloor = ChangeFloor {
+    kcal: 20.0,
+    grams: 5.0,
+};
+/// The same for a dish's per-serving values, which run several times larger.
+const DISH_FLOOR: ChangeFloor = ChangeFloor {
+    kcal: 50.0,
+    grams: 5.0,
+};
+/// A change larger than this share of the current value counts as large.
+const LARGE_CHANGE_SHARE: f64 = 0.3;
+
+struct ChangeFloor {
+    kcal: f64,
+    grams: f64,
+}
+
+/// Which diet tool calls wait for the user's approval (`lifeagent_core::approvals`). Food and
+/// dish values and name redirects feed every later meal total and plan, so one injected
+/// "rice = 10 kcal" or "salad → fried chicken" would quietly skew all of them:
+/// - a food or dish correction that moves kcal, protein, carbs or fat by more than 30% of the
+///   current value (and more than a small floor), or whose kcal doesn't match its macros —
+///   ordinary label corrections run right away;
+/// - adding or removing a name redirect.
+///
+/// A call the tool would refuse anyway (impossible values, unknown food or alias) runs and fails
+/// without asking.
+pub async fn approval_preview(
+    ctx: &PluginContext,
+    name: &str,
+    args: &Value,
+) -> Result<Option<Value>, PluginError> {
+    match name {
+        "diet_update_food" => {
+            let args: UpdateFoodArgs = parse_args(args.clone())?;
+            let after = food_values(ctx, &args).await?;
+            if validate_per_100g(&after).is_err() {
+                return Ok(None);
+            }
+            let before = SourceChain::load(ctx)
+                .await?
+                .lookup(&args.food_name)
+                .await?
+                .map(|f| f.per_100g);
+            Ok(nutrition_preview(
+                args.food_name.trim(),
+                None,
+                "per_100g",
+                before,
+                after,
+                &FOOD_FLOOR,
+            ))
+        }
+        "diet_update_dish" => {
+            let args: UpdateDishArgs = parse_args(args.clone())?;
+            let after = dish_values(ctx, &args).await?;
+            if sources::validate_dish_macros(&after, args.serving_g).is_err() {
+                return Ok(None);
+            }
+            let before = SourceChain::load(ctx)
+                .await?
+                .lookup_dish(args.brand.as_deref().unwrap_or(""), &args.dish_name)
+                .await?
+                .map(|d| d.per_serving);
+            Ok(nutrition_preview(
+                args.dish_name.trim(),
+                args.brand.as_deref().map(str::trim),
+                "per_serving",
+                before,
+                after,
+                &DISH_FLOOR,
+            ))
+        }
+        "diet_add_alias" => {
+            let args: AddAliasArgs = parse_args(args.clone())?;
+            let alias_key = normalize(&args.alias);
+            let chain = SourceChain::load(ctx).await?;
+            let Some(food) = chain.lookup(&args.food_name).await? else {
+                return Ok(None);
+            };
+            // Empty, the food's own name, or a name that already resolves: the tool returns
+            // or refuses without changing anything.
+            if alias_key.is_empty()
+                || alias_key == food.name_key
+                || chain.lookup(&alias_key).await?.is_some()
+            {
+                return Ok(None);
+            }
+            Ok(Some(json!({
+                "kind": "add_food_alias",
+                "alias": args.alias.trim(),
+                "food": food.name,
+            })))
+        }
+        "diet_remove_alias" => {
+            let args: RemoveAliasArgs = parse_args(args.clone())?;
+            let Some(redirect) = sources::lookup_redirect(ctx, &args.alias).await? else {
+                return Ok(None);
+            };
+            Ok(Some(json!({
+                "kind": "remove_food_alias",
+                "alias": args.alias.trim(),
+                "target": redirect.target,
+            })))
+        }
+        _ => Ok(None),
+    }
+}
+
+/// The preview for a food or dish correction, or `None` when it is neither large nor
+/// inconsistent. Without a current entry there is nothing to compare, so only the kcal check
+/// applies.
+fn nutrition_preview(
+    name: &str,
+    brand: Option<&str>,
+    basis: &str,
+    before: Option<Macros>,
+    after: Macros,
+    floor: &ChangeFloor,
+) -> Option<Value> {
+    let mut reasons = Vec::new();
+    if before.is_some_and(|b| is_large_change(&b, &after, floor)) {
+        reasons.push("large_change");
+    }
+    if kcal_disagrees_with_macros(&after) {
+        reasons.push("kcal_mismatch");
+    }
+    if reasons.is_empty() {
+        return None;
+    }
+    Some(json!({
+        "kind": "update_nutrition",
+        "name": name,
+        "brand": brand,
+        "basis": basis,
+        "before": before.map(|b| b.to_json()),
+        "after": after.to_json(),
+        "reasons": reasons,
+    }))
+}
+
+fn is_large_change(before: &Macros, after: &Macros, floor: &ChangeFloor) -> bool {
+    let moved =
+        |b: f64, a: f64, floor: f64| (a - b).abs() > f64::max(LARGE_CHANGE_SHARE * b, floor);
+    moved(before.kcal, after.kcal, floor.kcal)
+        || moved(before.protein_g, after.protein_g, floor.grams)
+        || moved(before.carbs_g, after.carbs_g, floor.grams)
+        || moved(before.fat_g, after.fat_g, floor.grams)
 }
 
 pub async fn call(ctx: &PluginContext, name: &str, args: Value) -> Result<ToolOutput, PluginError> {
@@ -306,23 +462,7 @@ struct UpdateFoodArgs {
 
 async fn update_food(ctx: &PluginContext, args: Value) -> Result<ToolOutput, PluginError> {
     let args: UpdateFoodArgs = parse_args(args)?;
-    // Without a new fiber value, keep the food's current chain-winner value
-    // (`docs/NUTRITION_SOURCES.md` §7.2).
-    let fiber_g = match args.fiber_g {
-        Some(f) => f,
-        None => SourceChain::load(ctx)
-            .await?
-            .lookup(&args.food_name)
-            .await?
-            .map_or(0.0, |f| f.per_100g.fiber_g),
-    };
-    let per_100g = Macros {
-        kcal: args.kcal,
-        protein_g: args.protein_g,
-        carbs_g: args.carbs_g,
-        fat_g: args.fat_g,
-        fiber_g,
-    };
+    let per_100g = food_values(ctx, &args).await?;
     // User values always win (§16), so no kcal correction — but reject impossible ones.
     validate_per_100g(&per_100g).map_err(|e| PluginError::InvalidArgs(e.to_string()))?;
 
@@ -336,6 +476,26 @@ async fn update_food(ctx: &PluginContext, args: Value) -> Result<ToolOutput, Plu
                      logged keep their numbers.",
         }),
         summary: ToolSummary::new("diet_food_updated").with("name", &food.name),
+    })
+}
+
+/// The per-100 g values `diet_update_food` saves. Without a new fiber value, the food keeps its
+/// current chain-winner value (`docs/NUTRITION_SOURCES.md` §7.2).
+async fn food_values(ctx: &PluginContext, args: &UpdateFoodArgs) -> Result<Macros, PluginError> {
+    let fiber_g = match args.fiber_g {
+        Some(f) => f,
+        None => SourceChain::load(ctx)
+            .await?
+            .lookup(&args.food_name)
+            .await?
+            .map_or(0.0, |f| f.per_100g.fiber_g),
+    };
+    Ok(Macros {
+        kcal: args.kcal,
+        protein_g: args.protein_g,
+        carbs_g: args.carbs_g,
+        fat_g: args.fat_g,
+        fiber_g,
     })
 }
 
@@ -353,23 +513,7 @@ struct UpdateDishArgs {
 
 async fn update_dish(ctx: &PluginContext, args: Value) -> Result<ToolOutput, PluginError> {
     let args: UpdateDishArgs = parse_args(args)?;
-    // Without a new fiber value, keep the dish's current chain-winner value, as `update_food`
-    // does (`docs/NUTRITION_SOURCES.md` §7.2).
-    let fiber_g = match args.fiber_g {
-        Some(f) => f,
-        None => SourceChain::load(ctx)
-            .await?
-            .lookup_dish(args.brand.as_deref().unwrap_or(""), &args.dish_name)
-            .await?
-            .map_or(0.0, |d| d.per_serving.fiber_g),
-    };
-    let per_serving = Macros {
-        kcal: args.kcal,
-        protein_g: args.protein_g,
-        carbs_g: args.carbs_g,
-        fat_g: args.fat_g,
-        fiber_g,
-    };
+    let per_serving = dish_values(ctx, &args).await?;
     sources::validate_dish_macros(&per_serving, args.serving_g)
         .map_err(|e| PluginError::InvalidArgs(e.to_string()))?;
 
@@ -392,6 +536,26 @@ async fn update_dish(ctx: &PluginContext, args: Value) -> Result<ToolOutput, Plu
                      logged keep their numbers.",
         }),
         summary: ToolSummary::new("diet_dish_updated").with("name", &dish.name),
+    })
+}
+
+/// The per-serving values `diet_update_dish` saves. Without a new fiber value, the dish keeps
+/// its current chain-winner value, as `food_values` does (`docs/NUTRITION_SOURCES.md` §7.2).
+async fn dish_values(ctx: &PluginContext, args: &UpdateDishArgs) -> Result<Macros, PluginError> {
+    let fiber_g = match args.fiber_g {
+        Some(f) => f,
+        None => SourceChain::load(ctx)
+            .await?
+            .lookup_dish(args.brand.as_deref().unwrap_or(""), &args.dish_name)
+            .await?
+            .map_or(0.0, |d| d.per_serving.fiber_g),
+    };
+    Ok(Macros {
+        kcal: args.kcal,
+        protein_g: args.protein_g,
+        carbs_g: args.carbs_g,
+        fat_g: args.fat_g,
+        fiber_g,
     })
 }
 
@@ -639,6 +803,119 @@ mod tests {
             .unwrap();
         assert_eq!(egg.source_kind, crate::model::SourceKind::Manual);
         assert_eq!(egg.per_100g.kcal, 150.0);
+    }
+
+    #[tokio::test]
+    async fn only_large_or_inconsistent_nutrition_changes_need_approval() {
+        let env = env().await;
+        upsert_manual_food(&env.ctx, "鸡蛋", EGG).await.unwrap();
+        let preview = |name: &'static str, args: Value| {
+            let ctx = &env.ctx;
+            async move { approval_preview(ctx, name, &args).await.unwrap() }
+        };
+        let egg = |kcal: f64, protein_g: f64, carbs_g: f64, fat_g: f64| {
+            json!({"food_name": "鸡蛋", "kcal": kcal, "protein_g": protein_g,
+                   "carbs_g": carbs_g, "fat_g": fat_g})
+        };
+
+        // A label correction runs right away.
+        assert_eq!(
+            preview("diet_update_food", egg(150.0, 13.0, 1.0, 10.0)).await,
+            None
+        );
+        // kcal 144 → 60 with matching macros: large.
+        assert_eq!(
+            preview("diet_update_food", egg(60.0, 6.0, 1.0, 4.0)).await,
+            Some(json!({
+                "kind": "update_nutrition", "name": "鸡蛋", "brand": null, "basis": "per_100g",
+                "before": EGG.to_json(),
+                "after": {"kcal": 60.0, "protein_g": 6.0, "carbs_g": 1.0, "fat_g": 4.0,
+                          "fiber_g": 0.0},
+                "reasons": ["large_change"],
+            }))
+        );
+        // Same macros, kcal 144 → 110: under 30%, but no longer matches the macros.
+        assert_eq!(
+            preview("diet_update_food", egg(110.0, 13.3, 2.8, 8.8))
+                .await
+                .unwrap()["reasons"],
+            json!(["kcal_mismatch"])
+        );
+        // A new food is only checked for consistency.
+        let new_food = |kcal: f64| {
+            json!({"food_name": "新食品", "kcal": kcal, "protein_g": 10, "carbs_g": 10,
+                   "fat_g": 0})
+        };
+        assert_eq!(preview("diet_update_food", new_food(80.0)).await, None);
+        assert_eq!(
+            preview("diet_update_food", new_food(10.0)).await.unwrap()["reasons"],
+            json!(["kcal_mismatch"])
+        );
+        // Impossible values are refused by the tool without asking.
+        assert_eq!(
+            preview("diet_update_food", egg(100.0, 60.0, 60.0, 0.0)).await,
+            None
+        );
+
+        // Dishes use a larger kcal floor: 700 → 740 runs, 700 → 300 waits.
+        let dish = |kcal: f64, carbs_g: f64| {
+            json!({"dish_name": "牛めし（並盛）", "brand": "松屋", "kcal": kcal,
+                   "protein_g": 25, "carbs_g": carbs_g, "fat_g": 28})
+        };
+        call(&env.ctx, "diet_update_dish", dish(700.0, 90.0))
+            .await
+            .unwrap();
+        assert_eq!(preview("diet_update_dish", dish(740.0, 100.0)).await, None);
+        let big = preview("diet_update_dish", dish(300.0, 0.0)).await.unwrap();
+        assert_eq!(big["brand"], "松屋");
+        assert_eq!(big["basis"], "per_serving");
+        assert_eq!(big["before"]["kcal"], 700.0);
+        assert_eq!(big["reasons"], json!(["large_change"]));
+    }
+
+    #[tokio::test]
+    async fn adding_or_removing_a_name_redirect_needs_approval() {
+        let env = env().await;
+        upsert_manual_food(&env.ctx, "卤鸡蛋", EGG).await.unwrap();
+        upsert_manual_food(&env.ctx, "鸡蛋", EGG).await.unwrap();
+        let preview = |name: &'static str, args: Value| {
+            let ctx = &env.ctx;
+            async move { approval_preview(ctx, name, &args).await.unwrap() }
+        };
+
+        assert_eq!(
+            preview(
+                "diet_add_alias",
+                json!({"food_name": "卤鸡蛋", "alias": " 卤蛋 "})
+            )
+            .await,
+            Some(json!({"kind": "add_food_alias", "alias": "卤蛋", "food": "卤鸡蛋"}))
+        );
+        // Unknown food, the food's own name, or a name that already resolves: no approval.
+        for args in [
+            json!({"food_name": "不存在", "alias": "卤蛋"}),
+            json!({"food_name": "卤鸡蛋", "alias": "卤鸡蛋"}),
+            json!({"food_name": "卤鸡蛋", "alias": "鸡蛋"}),
+        ] {
+            assert_eq!(preview("diet_add_alias", args).await, None);
+        }
+
+        call(
+            &env.ctx,
+            "diet_add_alias",
+            json!({"food_name": "卤鸡蛋", "alias": "卤蛋"}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            preview("diet_remove_alias", json!({"alias": "卤蛋"})).await,
+            Some(json!({"kind": "remove_food_alias", "alias": "卤蛋", "target": "卤鸡蛋"}))
+        );
+        assert_eq!(
+            preview("diet_remove_alias", json!({"alias": "没有"})).await,
+            None
+        );
+        assert_eq!(preview("diet_get_intake", json!({})).await, None);
     }
 
     #[tokio::test]

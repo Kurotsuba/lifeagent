@@ -2862,3 +2862,25 @@ prompt-injected model from changing allergies or planting a preference.
   `get_app_state`. Hiding it changes nothing else.
 - **Not done:** a test asserting that no INFO `agent step` line carries arguments or excerpts.
   The line is built from ids, kinds, tool names, outcomes and rules only (`RunHandle::log_step`).
+
+## 2026-10-07 — More tool calls that wait for approval
+
+Extends "Approval for sensitive tool calls" (2026-10-05) to the other chat changes that last,
+quietly shape every later plan or number, and protect safety.
+
+- **Training notes.** `training_update_preferences` waits when `notes` changes: the notes hold
+  injuries the planner must respect. Goal, days, minutes and equipment alone run right away;
+  when the same call changes them too, the preview says so (`other_changes`).
+- **Big nutrition corrections only.** `diet_update_food` / `diet_update_dish` wait when kcal,
+  protein, carbs or fat moves by more than 30% of what the name currently resolves to and more
+  than a floor (foods per 100 g: 20 kcal / 5 g; dishes per serving: 50 kcal / 5 g), or when kcal
+  disagrees with the macros by more than `max(20, 15%)` (the §8.3 tolerance). Ordinary label
+  corrections stay one step. A new food or dish has nothing to compare against, so only the kcal
+  check applies to it: a self-consistent fake entry for a new name still goes through.
+- **Name redirects.** `diet_add_alias` and `diet_remove_alias` always wait, since a redirect
+  silently changes what every later meal with that name logs.
+- **Adding a member.** `multimember_add_member` always waits, with the allergies in the preview.
+  Gating only a non-empty allergy list would miss the dangerous case, a member saved without
+  the allergies the owner named; adding members is rare, so the extra step is cheap.
+- Calls the tool would refuse anyway (invalid values, unknown food, alias or member) run and fail
+  without asking, as before.

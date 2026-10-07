@@ -97,7 +97,7 @@ pub fn specs() -> Vec<ToolSpec> {
             description: "Update the user's standing training preferences when they state a \
                 lasting change: goal, training days per week (1–7), usual session length in \
                 minutes (10–180), equipment/place, or notes such as injuries. Only pass the \
-                fields that change."
+                fields that change. A change to `notes` waits for the user's approval in the app."
                 .into(),
             parameters: json!({
                 "type": "object",
@@ -114,6 +114,39 @@ pub fn specs() -> Vec<ToolSpec> {
             }),
         },
     ]
+}
+
+/// A change to the training notes waits for the user's approval (`lifeagent_core::approvals`):
+/// they hold injuries and similar limits the planner must respect, so a prompt-injected edit
+/// that drops "bad left knee" would plan squats. Goal, days, minutes and equipment run right
+/// away, and so does a call the tool would refuse anyway.
+pub async fn approval_preview(
+    ctx: &PluginContext,
+    name: &str,
+    args: &Value,
+) -> Result<Option<Value>, PluginError> {
+    if name != "training_update_preferences" {
+        return Ok(None);
+    }
+    let args: UpdatePreferencesArgs = parse_args(args.clone())?;
+    if args.notes.is_none() {
+        return Ok(None);
+    }
+    let current = prefs::get(ctx).await?;
+    let updated = merged(&current, args);
+    if updated.check().is_err() || updated.notes.trim() == current.notes.trim() {
+        return Ok(None);
+    }
+    let other_changes = updated.goal != current.goal
+        || updated.days_per_week != current.days_per_week
+        || updated.session_minutes != current.session_minutes
+        || updated.equipment.trim() != current.equipment.trim();
+    Ok(Some(json!({
+        "kind": "update_training_notes",
+        "notes": updated.notes.trim(),
+        "previous_notes": current.notes.trim(),
+        "other_changes": other_changes,
+    })))
 }
 
 pub async fn call(ctx: &PluginContext, name: &str, args: Value) -> Result<ToolOutput, PluginError> {
@@ -292,18 +325,23 @@ struct UpdatePreferencesArgs {
 async fn update_preferences(ctx: &PluginContext, args: Value) -> Result<ToolOutput, PluginError> {
     let args: UpdatePreferencesArgs = parse_args(args)?;
     let current = prefs::get(ctx).await?;
-    let updated = TrainingPreferences {
+    prefs::save(ctx, &merged(&current, args)).await?;
+    Ok(ToolOutput {
+        content: json!({ "preferences": prefs::get(ctx).await? }),
+        summary: ToolSummary::new("training_preferences_updated"),
+    })
+}
+
+/// `current` with the fields `args` passes replaced.
+fn merged(current: &TrainingPreferences, args: UpdatePreferencesArgs) -> TrainingPreferences {
+    let current = current.clone();
+    TrainingPreferences {
         goal: args.goal.unwrap_or(current.goal),
         days_per_week: args.days_per_week.unwrap_or(current.days_per_week),
         session_minutes: args.session_minutes.unwrap_or(current.session_minutes),
         equipment: args.equipment.unwrap_or(current.equipment),
         notes: args.notes.unwrap_or(current.notes),
-    };
-    prefs::save(ctx, &updated).await?;
-    Ok(ToolOutput {
-        content: json!({ "preferences": prefs::get(ctx).await? }),
-        summary: ToolSummary::new("training_preferences_updated"),
-    })
+    }
 }
 
 #[cfg(test)]
@@ -419,6 +457,49 @@ mod tests {
             .await,
             Err(PluginError::InvalidArgs(_))
         ));
+    }
+
+    #[tokio::test]
+    async fn only_a_notes_change_needs_approval() {
+        let env = env().await;
+        call(
+            &env.ctx,
+            "training_update_preferences",
+            json!({"notes": "左膝旧伤"}),
+        )
+        .await
+        .unwrap();
+        let preview = |args: Value| {
+            let ctx = &env.ctx;
+            async move {
+                approval_preview(ctx, "training_update_preferences", &args)
+                    .await
+                    .unwrap()
+            }
+        };
+
+        assert_eq!(
+            preview(json!({"notes": "", "days_per_week": 4})).await,
+            Some(json!({
+                "kind": "update_training_notes",
+                "notes": "",
+                "previous_notes": "左膝旧伤",
+                "other_changes": true,
+            }))
+        );
+        // Other fields, the same notes, or a call the tool refuses: no approval.
+        assert_eq!(preview(json!({"days_per_week": 4})).await, None);
+        assert_eq!(preview(json!({"notes": " 左膝旧伤 "})).await, None);
+        assert_eq!(
+            preview(json!({"notes": "x", "days_per_week": 9})).await,
+            None
+        );
+        assert_eq!(
+            approval_preview(&env.ctx, "training_get_log", &json!({}))
+                .await
+                .unwrap(),
+            None
+        );
     }
 
     #[tokio::test]

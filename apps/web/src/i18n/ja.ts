@@ -368,6 +368,22 @@ export const ja: Strings = {
       archive_member: (d: { name: string }) => `メンバーを削除：${d.name}`,
       update_member_allergies: (d: { name: string; allergies: string[] }) =>
         `${d.name} さんのアレルギーを変更：${d.allergies.length > 0 ? d.allergies.join("、") : "なし"}`,
+      add_member: (d: { name: string; allergies: string[] }) =>
+        `メンバーを追加：${d.name}（アレルギー：${d.allergies.length > 0 ? d.allergies.join("、") : "なし"}）`,
+      update_training_notes: (d: { notes: string; previous_notes: string; other_changes: boolean }) =>
+        `トレーニングのメモ（けが等）を変更：${d.notes || "なし"}` +
+        (d.previous_notes ? `（変更前：${d.previous_notes}）` : "") +
+        (d.other_changes ? "、ほかのトレーニング設定も変更" : ""),
+      update_nutrition: (d) =>
+        `${d.brand ? `${d.brand} ` : ""}${d.name} の栄養値を変更（${d.basis === "per_100g" ? "100g あたり" : "1 食あたり"}）：` +
+        `${d.before ? `${d.before.kcal} → ` : ""}${d.after.kcal} kcal · ` +
+        `たんぱく質 ${d.after.protein_g}g · 炭水化物 ${d.after.carbs_g}g · 脂質 ${d.after.fat_g}g` +
+        d.reasons
+          .map((r) => (r === "large_change" ? "（大きな変更）" : "（カロリーが三大栄養素と合いません）"))
+          .join(""),
+      add_food_alias: (d: { alias: string; food: string }) => `「${d.alias}」を「${d.food}」として記録`,
+      remove_food_alias: (d: { alias: string; target: string }) =>
+        `「${d.alias}」を「${d.target}」として扱うのをやめる`,
     },
     unknown: (tool: string) => `操作を実行：${tool}`,
   },

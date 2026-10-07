@@ -112,6 +112,21 @@ async fn members_are_managed_from_chat_once_the_plugin_is_on() {
             "dietary_pattern": "omnivore", "allergies": ["えび"]
         }),
     )]));
+    mock.push_response(text_response("承認してください"));
+    // Adding a member waits for the owner, who sees the allergies before approving.
+    let turn = app.send_message("Akiも一緒に食べます。").await.unwrap();
+    assert!(offered(1).iter().any(|n| n == "multimember_add_member"));
+    assert_eq!(turn.pending_actions.len(), 1);
+    assert_eq!(
+        turn.pending_actions[0].preview,
+        json!({"kind": "add_member", "name": "Aki", "allergies": ["えび"]})
+    );
+    let ctx = app.plugin_context();
+    assert!(store::list_members(&ctx).await.unwrap().is_empty());
+    app.approve_action(&turn.pending_actions[0].id)
+        .await
+        .unwrap();
+
     mock.push_response(tool_response(vec![
         (
             "multimember_set_attendance",
@@ -125,13 +140,11 @@ async fn members_are_managed_from_chat_once_the_plugin_is_on() {
     ]));
     mock.push_response(text_response("登録しました"));
     let turn = app
-        .send_message("Akiも一緒に食べます。明日の夜は飲み会。セロリが苦手。")
+        .send_message("明日の夜は飲み会。セロリが苦手。")
         .await
         .unwrap();
     assert_eq!(turn.reply, "登録しました");
-    assert!(offered(1).iter().any(|n| n == "multimember_add_member"));
 
-    let ctx = app.plugin_context();
     let members = store::list_members(&ctx).await.unwrap();
     assert_eq!(members.len(), 1);
     let aki = &members[0];

@@ -376,6 +376,29 @@ export const zhCN = {
       archive_member: (d: { name: string }) => `移除成员：${d.name}`,
       update_member_allergies: (d: { name: string; allergies: string[] }) =>
         `把 ${d.name} 的过敏食物改为：${d.allergies.length > 0 ? d.allergies.join("、") : "无"}`,
+      add_member: (d: { name: string; allergies: string[] }) =>
+        `添加成员：${d.name}（过敏食物：${d.allergies.length > 0 ? d.allergies.join("、") : "无"}）`,
+      update_training_notes: (d: { notes: string; previous_notes: string; other_changes: boolean }) =>
+        `把训练备注（伤病等）改为：${d.notes || "无"}` +
+        (d.previous_notes ? `（原为：${d.previous_notes}）` : "") +
+        (d.other_changes ? "，并修改其他训练设置" : ""),
+      update_nutrition: (d: {
+        name: string;
+        brand: string | null;
+        basis: "per_100g" | "per_serving";
+        before: { kcal: number } | null;
+        after: { kcal: number; protein_g: number; carbs_g: number; fat_g: number };
+        reasons: ("large_change" | "kcal_mismatch")[];
+      }) =>
+        `修改 ${d.brand ? `${d.brand} ` : ""}${d.name} 的营养值（${d.basis === "per_100g" ? "每 100 克" : "每份"}）：` +
+        `${d.before ? `${d.before.kcal} → ` : ""}${d.after.kcal} 千卡 · ` +
+        `蛋白质 ${d.after.protein_g}g · 碳水 ${d.after.carbs_g}g · 脂肪 ${d.after.fat_g}g` +
+        d.reasons
+          .map((r) => (r === "large_change" ? "（变化较大）" : "（热量与三大营养素不符）"))
+          .join(""),
+      add_food_alias: (d: { alias: string; food: string }) => `把“${d.alias}”当作“${d.food}”记录`,
+      remove_food_alias: (d: { alias: string; target: string }) =>
+        `不再把“${d.alias}”当作“${d.target}”`,
     },
     unknown: (tool: string) => `执行操作：${tool}`,
   },

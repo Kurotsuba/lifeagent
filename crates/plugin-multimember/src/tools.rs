@@ -65,7 +65,8 @@ pub fn specs() -> Vec<ToolSpec> {
                 "Add a member: another person who regularly shares meals with the owner. Don't \
                  assume or ask how they are related to the owner. Members must be aged 16–70; ask for every required field you \
                  don't know rather than guessing. `attendance` sets which main meals they \
-                 usually eat with the owner; without it, dinner every day. {NOT_FOR_LOGGING}"
+                 usually eat with the owner; without it, dinner every day. Waits for the owner's \
+                 approval in the app. {NOT_FOR_LOGGING}"
             ),
             parameters: json!({
                 "type": "object",
@@ -164,15 +165,27 @@ pub fn specs() -> Vec<ToolSpec> {
     ]
 }
 
-/// Removing a member, and changing a member's allergies (hard constraints for shared meals),
-/// wait for the owner's approval (`lifeagent_core::approvals`). An unknown member runs, and
-/// fails, without asking.
+/// Adding a member (the preview shows their allergies, so a member saved without the ones the
+/// owner named is caught), removing one, and changing a member's allergies (hard constraints for
+/// shared meals) wait for the owner's approval (`lifeagent_core::approvals`). An unknown member,
+/// or a profile the tool would refuse, runs and fails without asking.
 pub async fn approval_preview(
     ctx: &PluginContext,
     name: &str,
     args: &Value,
 ) -> Result<Option<Value>, PluginError> {
     match name {
+        "multimember_add_member" => {
+            let a: AddArgs = parse_args(args.clone())?;
+            let Ok(profile) = a.profile.normalized(ctx.today().await?) else {
+                return Ok(None);
+            };
+            Ok(Some(json!({
+                "kind": "add_member",
+                "name": profile.display_name,
+                "allergies": profile.allergies,
+            })))
+        }
         "multimember_archive_member" => {
             let a: MemberArg = parse_args(args.clone())?;
             let Ok(m) = store::resolve(ctx, &a.member).await else {
@@ -455,17 +468,32 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn removing_a_member_or_changing_their_allergies_needs_approval() {
+    async fn adding_or_removing_a_member_or_changing_their_allergies_needs_approval() {
         let env = env().await;
         let ctx = &env.ctx;
-        call(ctx, "multimember_add_member", aki_args())
-            .await
-            .unwrap();
         let preview = |args: Value| async move {
             approval_preview(ctx, args["tool"].as_str().unwrap(), &args["args"])
                 .await
                 .unwrap()
         };
+        let mut no_allergies = aki_args();
+        no_allergies["display_name"] = json!(" Ken ");
+        no_allergies["allergies"] = json!([" "]);
+        assert_eq!(
+            preview(json!({"tool": "multimember_add_member", "args": no_allergies})).await,
+            Some(json!({"kind": "add_member", "name": "Ken", "allergies": []}))
+        );
+        // A profile the tool refuses (too young) runs and fails instead of asking.
+        let mut child = aki_args();
+        child["birth_date"] = json!(format!("{}-01-01", today(ctx).await.year() - 5));
+        assert_eq!(
+            preview(json!({"tool": "multimember_add_member", "args": child})).await,
+            None
+        );
+
+        call(ctx, "multimember_add_member", aki_args())
+            .await
+            .unwrap();
 
         assert_eq!(
             preview(json!({"tool": "multimember_archive_member", "args": {"member": "aki"}})).await,

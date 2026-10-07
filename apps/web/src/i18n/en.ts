@@ -369,6 +369,22 @@ export const en: Strings = {
       archive_member: (d: { name: string }) => `Remove member: ${d.name}`,
       update_member_allergies: (d: { name: string; allergies: string[] }) =>
         `Change ${d.name}'s allergies to: ${d.allergies.length > 0 ? d.allergies.join(", ") : "none"}`,
+      add_member: (d: { name: string; allergies: string[] }) =>
+        `Add member: ${d.name} (allergies: ${d.allergies.length > 0 ? d.allergies.join(", ") : "none"})`,
+      update_training_notes: (d: { notes: string; previous_notes: string; other_changes: boolean }) =>
+        `Change training notes (injuries etc.) to: ${d.notes || "none"}` +
+        (d.previous_notes ? ` (was: ${d.previous_notes})` : "") +
+        (d.other_changes ? ", and other training settings" : ""),
+      update_nutrition: (d) =>
+        `Change nutrition of ${d.brand ? `${d.brand} ` : ""}${d.name} (${d.basis === "per_100g" ? "per 100 g" : "per serving"}): ` +
+        `${d.before ? `${d.before.kcal} → ` : ""}${d.after.kcal} kcal · ` +
+        `Protein ${d.after.protein_g}g · Carbs ${d.after.carbs_g}g · Fat ${d.after.fat_g}g` +
+        d.reasons
+          .map((r) => (r === "large_change" ? " (large change)" : " (kcal doesn't match the macros)"))
+          .join(""),
+      add_food_alias: (d: { alias: string; food: string }) => `Log "${d.alias}" as "${d.food}"`,
+      remove_food_alias: (d: { alias: string; target: string }) =>
+        `Stop logging "${d.alias}" as "${d.target}"`,
     },
     unknown: (tool: string) => `Run: ${tool}`,
   },
