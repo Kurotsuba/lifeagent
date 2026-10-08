@@ -140,8 +140,53 @@ pub type PlanDraft = BTreeMap<String, Value>;
 /// The result of validating and enriching a plugin's raw planner output for one section (M5).
 pub struct PlanSection {
     pub data: Value,
-    pub warnings: Vec<String>,
-    pub violations: Vec<String>,
+    pub warnings: Vec<PlanNote>,
+    pub violations: Vec<PlanNote>,
+}
+
+/// A plan warning or violation, as data each UI words in its own language (`planNotes` in
+/// `apps/web/src/i18n/`): `{"kind": ..., "text": ..., ...params}`, like [`ToolSummary`]. Kinds
+/// are `snake_case` and start with the owning plugin's id (`core_` for core). `text` is the
+/// English wording: the planner's retry message uses it, and a UI shows it for a kind it doesn't
+/// know. Numbers in params are the ones Rust computed. Plans stored before notes were data hold
+/// plain zh-CN strings, which deserialize as a bare JSON string.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct PlanNote(pub Value);
+
+impl PlanNote {
+    pub fn new(kind: &str, text: impl Into<String>) -> Self {
+        Self(serde_json::json!({ "kind": kind, "text": text.into() }))
+    }
+
+    /// Adds one param, like [`ToolSummary::with`].
+    pub fn with(mut self, key: &str, value: impl Serialize) -> Self {
+        if let Value::Object(map) = &mut self.0 {
+            map.insert(
+                key.to_string(),
+                serde_json::to_value(value).unwrap_or(Value::Null),
+            );
+        }
+        self
+    }
+
+    /// `""` for a legacy plain-string note.
+    pub fn kind(&self) -> &str {
+        self.0.get("kind").and_then(Value::as_str).unwrap_or("")
+    }
+
+    pub fn text(&self) -> &str {
+        match &self.0 {
+            Value::String(s) => s,
+            other => other.get("text").and_then(Value::as_str).unwrap_or(""),
+        }
+    }
+}
+
+impl std::fmt::Display for PlanNote {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.text())
+    }
 }
 
 #[derive(Debug, Error)]
@@ -369,6 +414,19 @@ pub async fn apply_migrations(
 mod tests {
     use super::*;
     use chrono::Utc;
+
+    #[test]
+    fn plan_notes_read_new_and_legacy_shapes() {
+        let note = PlanNote::new("diet_x", "English text").with("grams", 12.5);
+        assert_eq!(note.kind(), "diet_x");
+        assert_eq!(note.to_string(), "English text");
+        assert_eq!(note.0["grams"], 12.5);
+
+        // A warning stored before notes were data.
+        let legacy: Vec<PlanNote> = serde_json::from_str(r#"["脂肪偏高"]"#).unwrap();
+        assert_eq!(legacy[0].kind(), "");
+        assert_eq!(legacy[0].text(), "脂肪偏高");
+    }
 
     fn manifest(migrations: Vec<PluginMigration>) -> PluginManifest {
         PluginManifest {

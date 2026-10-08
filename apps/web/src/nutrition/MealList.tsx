@@ -2,7 +2,7 @@ import { useState } from "react";
 import { deleteEntry } from "../api/commands";
 import { commandErrorMessage, type DietLoggedMeal } from "../api/types";
 import { ConfirmDeleteButton } from "../components/ConfirmDeleteButton";
-import { strings } from "../i18n";
+import { sourceDisplayName, strings } from "../i18n";
 
 const t = strings.today.diet;
 
@@ -45,7 +45,12 @@ export function MealList({ meals, onDeleted }: MealListProps) {
             </p>
             <p className="mt-1 text-neutral-600 dark:text-neutral-400">
               {meal.items.map((item, i) => (
-                <span key={`${meal.entry_id}-${i}`} title={item.source_name ?? undefined}>
+                <span key={`${meal.entry_id}-${i}`} title={
+                    item.source_name === null
+                      ? undefined
+                      : sourceDisplayName(item.source_kind, item.source_name)
+                  }
+                >
                   {i > 0 ? strings.common.listSeparator : ""}
                   {item.kind === "dish" ? (
                     <>

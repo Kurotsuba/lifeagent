@@ -338,7 +338,10 @@ async fn a_shared_dinner_is_planned_with_guest_constraints_and_portions() {
         Some(Message::User { content }) => content.clone(),
         other => panic!("{other:?}"),
     };
-    assert!(retry.contains("含Aki的过敏原“えび”"), "{retry}");
+    assert!(
+        retry.contains("contains Aki's allergen \"えび\""),
+        "{retry}"
+    );
 
     let diet = &plan.content.sections["diet"];
     let dinner = &diet["meals"][2];
@@ -380,14 +383,16 @@ async fn a_shared_dinner_is_planned_with_guest_constraints_and_portions() {
 
     assert!(plan.content.sections.contains_key("multimember"));
     assert!(
-        plan.warnings.iter().any(|w| w.contains("Ken")),
+        plan.warnings
+            .iter()
+            .any(|w| w.kind() == "multimember_out_of_age_range" && w.0["name"] == "Ken"),
         "{:?}",
         plan.warnings
     );
     assert!(
         plan.warnings
             .iter()
-            .any(|w| w.contains("Aki不喜欢的“セロリ”")),
+            .any(|w| w.kind() == "diet_guest_disliked" && w.0["guest"] == "Aki"),
         "{:?}",
         plan.warnings
     );

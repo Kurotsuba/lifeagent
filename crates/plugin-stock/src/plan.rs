@@ -5,7 +5,9 @@
 //! plan leaves unused.
 
 use chrono::NaiveDate;
-use lifeagent_core::plugin::{PlanDraft, PlanInput, PlanSection, PluginContext, PluginError};
+use lifeagent_core::plugin::{
+    PlanDraft, PlanInput, PlanNote, PlanSection, PluginContext, PluginError,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -136,7 +138,11 @@ pub async fn finalize(
             return Ok(PlanSection {
                 data: Value::Null,
                 warnings: Vec::new(),
-                violations: vec![format!("“stock”部分格式不符：{e}")],
+                violations: vec![PlanNote::new(
+                    "stock_invalid_structure",
+                    format!("The stock section has the wrong shape: {e}"),
+                )
+                .with("reason", e.to_string())],
             })
         }
     };
@@ -153,7 +159,7 @@ fn check(
     stock: &[StockItem],
     date: NaiveDate,
     raw: RawSection,
-) -> (StockPlanSection, Vec<String>, Vec<String>) {
+) -> (StockPlanSection, Vec<PlanNote>, Vec<PlanNote>) {
     let mut warnings = Vec::new();
     let mut violations = Vec::new();
 
@@ -163,27 +169,50 @@ fn check(
             .iter()
             .find(|s| name_key(&s.name) == name_key(&line.name))
         else {
-            violations.push(format!("“{}”不在库存中，不能列入 uses", line.name));
+            violations.push(
+                PlanNote::new(
+                    "stock_not_in_stock",
+                    format!("\"{}\" is not in stock, so it cannot be in uses", line.name),
+                )
+                .with("name", &line.name),
+            );
             continue;
         };
         if item.unit != line.unit {
-            violations.push(format!(
-                "“{}”的单位应为 {}，而不是 {}",
-                item.name,
-                item.unit.as_str(),
-                line.unit.as_str()
-            ));
+            violations.push(
+                PlanNote::new(
+                    "stock_wrong_unit",
+                    format!(
+                        "\"{}\" is stocked in {}, not {}",
+                        item.name,
+                        item.unit.as_str(),
+                        line.unit.as_str()
+                    ),
+                )
+                .with("name", &item.name)
+                .with("unit", item.unit)
+                .with("planned_unit", line.unit),
+            );
             continue;
         }
         if line.amount > item.quantity + 1e-6 {
-            violations.push(format!(
-                "“{}”用量 {} {} 超过库存 {} {}",
-                item.name,
-                line.amount,
-                item.unit.as_str(),
-                item.quantity,
-                item.unit.as_str()
-            ));
+            violations.push(
+                PlanNote::new(
+                    "stock_over_quantity",
+                    format!(
+                        "\"{}\" uses {} {} but only {} {} is in stock",
+                        item.name,
+                        line.amount,
+                        item.unit.as_str(),
+                        item.quantity,
+                        item.unit.as_str()
+                    ),
+                )
+                .with("name", &item.name)
+                .with("amount", line.amount)
+                .with("quantity", item.quantity)
+                .with("unit", item.unit),
+            );
         }
         uses.push(PlanLine {
             name: item.name.clone(),
@@ -202,10 +231,17 @@ fn check(
                 .iter()
                 .any(|u| name_key(&u.name) == name_key(&item.name))
         {
-            warnings.push(format!(
-                "库存中的“{}”将于 {expires} 到期，计划未使用",
-                item.name
-            ));
+            warnings.push(
+                PlanNote::new(
+                    "stock_expiring_unused",
+                    format!(
+                        "\"{}\" in stock expires on {expires} and the plan doesn't use it",
+                        item.name
+                    ),
+                )
+                .with("name", &item.name)
+                .with("expires_on", expires),
+            );
         }
     }
 
@@ -345,7 +381,12 @@ mod tests {
         );
         assert_eq!(
             warnings,
-            vec!["库存中的“豆腐”将于 2026-10-05 到期，计划未使用".to_string()]
+            vec![PlanNote::new(
+                "stock_expiring_unused",
+                "\"豆腐\" in stock expires on 2026-10-05 and the plan doesn't use it"
+            )
+            .with("name", "豆腐")
+            .with("expires_on", "2026-10-05")]
         );
     }
 

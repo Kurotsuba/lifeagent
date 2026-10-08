@@ -197,6 +197,8 @@ export const ja: Strings = {
       adjusting: "調整中…",
       adjustPrefill: "明日のプランを調整してください：",
       warningsTitle: "注意",
+      medicalDisclaimer:
+        "プロフィールに健康状態が記録されています。このプランは生活習慣の提案にすぎません。医師や管理栄養士の指示を優先してください。",
       dayTotal: (kcal: number, target: number) => `1 日の合計 ${kcal} / ${target} kcal`,
       trainingLine: (title: string, minutes: number) => `トレーニング：${title} · ${minutes} 分`,
       trainingRest: "トレーニング：休養日",
@@ -281,6 +283,7 @@ export const ja: Strings = {
     },
     plan: {
       restDay: "休養日",
+      untitled: "トレーニング",
       minutes: (minutes: number) => `${minutes} 分`,
       kcal: (kcal: number) => `約 ${kcal} kcal`,
       timeOfDay: {
@@ -478,13 +481,100 @@ export const ja: Strings = {
       token_budget: "ブロック：1 日のトークン上限を超えています",
       iteration_cap: "停止：ステップが多すぎます",
     },
-    planValidation: (d: { violations: string[]; retried: boolean; violations_left: number }) =>
+    planValidation: (d: { violations: readonly unknown[]; retried: boolean; violations_left: number }) =>
       d.violations.length === 0
         ? "プランのチェック：問題なし"
         : d.violations_left === 0
           ? `プランのチェック：${d.violations.length} 件の問題を検出し、作り直してすべて解消`
           : `プランのチェック：${d.violations.length} 件の問題を検出、${d.violations_left} 件は未解消（注意として表示）`,
     planSavedStep: (date: string, version: number) => `${date} のプランを保存しました（第 ${version} 版）`,
+  },
+  planNotes: {
+    unmet: (text: string) => `未解消：${text}`,
+    core_section_missing: (d: { section: string }) => `プランに「${d.section}」の項目がありません`,
+    diet_invalid_structure: "食事プランの形式が正しくありません",
+    diet_item_unnamed: "名前のない食品があります",
+    diet_grams_out_of_range: (d: { name: string; grams: number; min: number; max: number }) =>
+      `「${d.name}」の量 ${d.grams} g が ${d.min}〜${d.max} g の範囲外です`,
+    diet_allergen: (d: {
+      meal_type: "breakfast" | "lunch" | "dinner" | "snack";
+      meal_title: string;
+      name: string;
+      allergen: string;
+    }) =>
+      `${{ breakfast: "朝食", lunch: "昼食", dinner: "夕食", snack: "間食" }[d.meal_type]}「${d.meal_title}」の「${d.name}」にアレルゲン「${d.allergen}」が含まれています`,
+    diet_disliked: (d: { name: string; term: string }) =>
+      `「${d.name}」に苦手な「${d.term}」が含まれています`,
+    diet_main_meal_count: (d: { count: number }) =>
+      `主食事（朝食・昼食・夕食）は 3 食必要ですが、${d.count} 食です`,
+    diet_meal_count: (d: { count: number; max: number }) =>
+      `食事の回数は 3〜${d.max} 回にしてください（現在 ${d.count} 回）`,
+    diet_kcal_off_target: (d: { actual: number; target: number; low: number; high: number }) =>
+      `1 日のエネルギー ${d.actual} kcal が目標 ${d.target} kcal の ±8%（${d.low}〜${d.high}）を外れています`,
+    diet_protein_low: (d: { actual: number; target: number }) =>
+      `たんぱく質 ${d.actual} g が目標 ${d.target} g の 90% を下回っています`,
+    diet_fat_off_target: (d: { actual: number; target: number }) =>
+      `脂質 ${d.actual} g が目標 ${d.target} g から 20% 以上ずれています`,
+    diet_carbs_off_target: (d: { actual: number; target: number }) =>
+      `炭水化物 ${d.actual} g が目標 ${d.target} g から 20% 以上ずれています`,
+    diet_fiber_low: (d: { actual: number; target: number }) =>
+      `食物繊維 ${d.actual} g が目標 ${d.target} g の 70% を下回っています`,
+    diet_guest_allergen: (d: {
+      meal_type: "breakfast" | "lunch" | "dinner" | "snack";
+      meal_title: string;
+      name: string;
+      guest: string;
+      allergen: string;
+    }) =>
+      `${{ breakfast: "朝食", lunch: "昼食", dinner: "夕食", snack: "間食" }[d.meal_type]}「${d.meal_title}」の「${d.name}」に${d.guest}さんのアレルゲン「${d.allergen}」が含まれています`,
+    diet_guest_disliked: (d: { name: string; guest: string; term: string }) =>
+      `「${d.name}」に${d.guest}さんの苦手な「${d.term}」が含まれています`,
+    diet_shared_pattern: (d: {
+      meal_type: "breakfast" | "lunch" | "dinner" | "snack";
+      meal_title: string;
+      pattern: "omnivore" | "vegetarian" | "vegan" | "pescatarian";
+      name: string;
+      term: string;
+    }) =>
+      `${{ breakfast: "朝食", lunch: "昼食", dinner: "夕食", snack: "間食" }[d.meal_type]}「${d.meal_title}」は一緒に食べる食事のため${{ omnivore: "制限なし", vegetarian: "ベジタリアン", vegan: "ヴィーガン", pescatarian: "ペスカタリアン" }[d.pattern]}に合わせる必要があります：「${d.name}」に「${d.term}」が含まれています`,
+    diet_guest_scale_clamped: (d: { guest: string; scale: number; min: number; max: number }) =>
+      `${d.guest}さんの盛り付け倍率を ${d.min}〜${d.max} の範囲に制限しました（${d.scale}）`,
+    stock_invalid_structure: "在庫プランの形式が正しくありません",
+    stock_not_in_stock: (d: { name: string }) => `「${d.name}」は在庫にないため使えません`,
+    stock_wrong_unit: (d: { name: string; unit: "g" | "ml" | "piece"; planned_unit: "g" | "ml" | "piece" }) =>
+      `「${d.name}」の単位は${{ g: "g", ml: "ml", piece: "個" }[d.unit]}で、${{ g: "g", ml: "ml", piece: "個" }[d.planned_unit]}ではありません`,
+    stock_over_quantity: (d: { name: string; amount: number; quantity: number; unit: "g" | "ml" | "piece" }) =>
+      `「${d.name}」の使用量 ${d.amount} ${{ g: "g", ml: "ml", piece: "個" }[d.unit]}が在庫 ${d.quantity} ${{ g: "g", ml: "ml", piece: "個" }[d.unit]}を超えています`,
+    stock_expiring_unused: (d: { name: string; expires_on: string }) =>
+      `在庫の「${d.name}」は ${d.expires_on} に期限切れになりますが、プランで使われていません`,
+    training_invalid_structure: "トレーニングプランの形式が正しくありません",
+    training_invalid_exercise: (d: {
+      name: string;
+      problem: "name_empty" | "name_too_long" | "sets" | "reps" | "weight" | "duration" | "distance";
+    }) =>
+      `「${d.name}」：${
+        {
+          name_empty: "種目名を入力してください",
+          name_too_long: "種目名が長すぎます",
+          sets: "セット数は 1〜20 にしてください",
+          reps: "回数は 1〜200 にしてください",
+          weight: "重量は 0〜500 kg にしてください",
+          duration: "時間は 0〜300 分にしてください",
+          distance: "距離は 0〜300 km にしてください",
+        }[d.problem]
+      }`,
+    training_rest_day_too_hard: "休養日は低強度のストレッチや可動域トレーニングのみにしてください",
+    training_no_exercises: "トレーニング日には種目を 1 つ以上入れてください",
+    training_too_long: (d: { minutes: number; max: number }) =>
+      `トレーニング時間 ${d.minutes} 分が上限の ${d.max} 分を超えています`,
+    training_over_usual: (d: { minutes: number; usual: number }) =>
+      `トレーニング時間 ${d.minutes} 分がいつもの ${d.usual} 分を大きく超えています`,
+    training_hard_after_break: "直近 7 日間にトレーニング記録がありません。低〜中強度から始めましょう",
+    training_big_jump: (d: { longest: number }) =>
+      `直近 7 日間で最長のトレーニング（${d.longest} 分）より 1.5 倍以上長くなっています。少しずつ増やしましょう`,
+    training_third_hard_day: "前の 2 日間が高強度でした。強度を下げるか休養しましょう",
+    multimember_out_of_age_range: (d: { name: string; age: number; min: number; max: number }) =>
+      `「${d.name}」さんは ${d.min}〜${d.max} 歳の範囲外（${d.age} 歳）のため、一緒に食べる食事に含めていません`,
   },
   toolSummaries: {
     core_plan_viewed: (d: { date: string }) => `${d.date} のプランを確認しました`,

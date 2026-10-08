@@ -151,6 +151,7 @@ pub fn plan_label(section: &Value) -> String {
     let title = section
         .get("title")
         .and_then(Value::as_str)
+        .filter(|t| !t.trim().is_empty())
         .unwrap_or("训练");
     let minutes = section
         .get("duration_min")

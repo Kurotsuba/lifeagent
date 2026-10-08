@@ -17,7 +17,14 @@ import {
   type RunStatus,
 } from "../api/types";
 import { primaryButtonClass, secondaryButtonClass } from "../components/buttonStyles";
-import { describeActionPreview, describeToolSummary, locale, strings, toolLabel } from "../i18n";
+import {
+  describeActionPreview,
+  describePlanNote,
+  describeToolSummary,
+  locale,
+  strings,
+  toolLabel,
+} from "../i18n";
 
 const t = strings.activity;
 const PAGE = 30;
@@ -432,7 +439,7 @@ function StepItem({ step, onChanged }: { step: ActivityStep; onChanged: () => vo
             <ul className={"mt-0.5 list-disc pl-4 " + muted}>
               {d.violations.map((v, i) => (
                 <li key={i} className="[overflow-wrap:anywhere]">
-                  {v}
+                  {describePlanNote(v)}
                 </li>
               ))}
             </ul>

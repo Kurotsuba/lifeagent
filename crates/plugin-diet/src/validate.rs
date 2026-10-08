@@ -1,10 +1,11 @@
 //! Finalize and validate the diet plan section, per `docs/PHASE1_SPEC.md` §8.10.
 //!
 //! Violations trigger one planner retry and, if still unmet, are shown to the user as
-//! warnings; warnings are only shown. Both are therefore written in zh-CN.
+//! warnings; warnings are only shown. Both are `PlanNote`s the UI words (`planNotes`), with
+//! English text for the planner.
 
 use chrono::NaiveDate;
-use lifeagent_core::plugin::{PlanDraft, PlanSection, PluginContext, PluginError};
+use lifeagent_core::plugin::{PlanDraft, PlanNote, PlanSection, PluginContext, PluginError};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
@@ -42,12 +43,19 @@ struct PlannedItem {
     grams: f64,
 }
 
-fn invalid(reason: String) -> PlanSection {
+fn invalid(note: PlanNote) -> PlanSection {
     PlanSection {
         data: Value::Null,
         warnings: Vec::new(),
-        violations: vec![format!("结构无效：{reason}")],
+        violations: vec![note],
     }
+}
+
+/// `{name, actual, target}` for a day total off its target, numbers rounded as shown.
+fn macro_note(kind: &str, text: String, actual: f64, target: f64) -> PlanNote {
+    PlanNote::new(kind, text)
+        .with("actual", actual.round())
+        .with("target", target.round())
 }
 
 /// Case-insensitive substring match in either direction (§8.10), so "虾" flags "虾仁" and
@@ -72,7 +80,15 @@ pub async fn finalize(
 ) -> Result<PlanSection, PluginError> {
     let planned: PlannedSection = match serde_json::from_value(raw) {
         Ok(p) => p,
-        Err(e) => return Ok(invalid(e.to_string())),
+        Err(e) => {
+            return Ok(invalid(
+                PlanNote::new(
+                    "diet_invalid_structure",
+                    format!("The diet section has the wrong shape: {e}"),
+                )
+                .with("reason", e.to_string()),
+            ))
+        }
     };
     if planned
         .meals
@@ -80,7 +96,10 @@ pub async fn finalize(
         .flat_map(|m| &m.items)
         .any(|i| i.name.trim().is_empty())
     {
-        return Ok(invalid("有食物没有名称".into()));
+        return Ok(invalid(PlanNote::new(
+            "diet_item_unnamed",
+            "A food item has no name",
+        )));
     }
     let exercise_kcal = intake::planned_exercise_kcal(prior);
     let targets = intake::targets_with_exercise(ctx, date, exercise_kcal)
@@ -120,7 +139,6 @@ pub async fn finalize(
             );
             (guests, pattern)
         });
-        let meal_label = format!("{}“{}”", meal.meal_type.zh_label(), meal.title);
         for item in &meal.items {
             let food = foods
                 .next()
@@ -129,30 +147,56 @@ pub async fn finalize(
             let names = [planned_name, food.name.as_str()];
 
             if !(MIN_ITEM_GRAMS..=MAX_ITEM_GRAMS).contains(&item.grams) {
-                violations.push(format!(
-                    "“{planned_name}”的份量 {} g 超出 {MIN_ITEM_GRAMS}–{MAX_ITEM_GRAMS} g",
-                    item.grams
-                ));
+                violations.push(
+                    PlanNote::new(
+                        "diet_grams_out_of_range",
+                        format!(
+                            "\"{planned_name}\" is {} g, outside {MIN_ITEM_GRAMS}–{MAX_ITEM_GRAMS} g",
+                            item.grams
+                        ),
+                    )
+                    .with("name", planned_name)
+                    .with("grams", item.grams)
+                    .with("min", MIN_ITEM_GRAMS)
+                    .with("max", MAX_ITEM_GRAMS),
+                );
             }
             for allergy in &profile.allergies {
                 if names.iter().any(|n| matches_term(n, allergy)) {
-                    violations.push(format!(
-                        "{}“{}”中的“{planned_name}”含过敏原“{allergy}”",
-                        meal.meal_type.zh_label(),
-                        meal.title
-                    ));
+                    violations.push(
+                        PlanNote::new(
+                            "diet_allergen",
+                            format!(
+                                "\"{planned_name}\" in {} \"{}\" contains the allergen \"{allergy}\"",
+                                meal.meal_type.as_str(),
+                                meal.title
+                            ),
+                        )
+                        .with("meal_type", meal.meal_type)
+                        .with("meal_title", &meal.title)
+                        .with("name", planned_name)
+                        .with("allergen", allergy),
+                    );
                 }
             }
             for dislike in &dislikes {
                 if names.iter().any(|n| matches_term(n, dislike)) {
-                    warnings.push(format!("“{planned_name}”含不喜欢的“{dislike}”"));
+                    warnings.push(
+                        PlanNote::new(
+                            "diet_disliked",
+                            format!("\"{planned_name}\" contains the disliked \"{dislike}\""),
+                        )
+                        .with("name", planned_name)
+                        .with("term", dislike),
+                    );
                 }
             }
             if let Some((guests, pattern)) = &table {
                 let (v, w) = shared_meals::check_item(
                     guests,
                     *pattern,
-                    &meal_label,
+                    meal.meal_type,
+                    &meal.title,
                     planned_name,
                     &names,
                     matches_term,
@@ -209,49 +253,90 @@ pub async fn finalize(
         .count();
     let max_meals = usize::from(profile.meals_per_day) + 1;
     if main_meals != 3 {
-        violations.push(format!(
-            "正餐（早餐、午餐、晚餐）应为 3 顿，实际 {main_meals} 顿"
-        ));
+        violations.push(
+            PlanNote::new(
+                "diet_main_meal_count",
+                format!("There must be 3 main meals (breakfast, lunch, dinner), got {main_meals}"),
+            )
+            .with("count", main_meals),
+        );
     }
     if !(3..=max_meals).contains(&planned.meals.len()) {
-        violations.push(format!(
-            "总餐数应在 3–{max_meals} 之间，实际 {}",
-            planned.meals.len()
-        ));
+        violations.push(
+            PlanNote::new(
+                "diet_meal_count",
+                format!(
+                    "The number of meals must be 3–{max_meals}, got {}",
+                    planned.meals.len()
+                ),
+            )
+            .with("count", planned.meals.len())
+            .with("max", max_meals),
+        );
     }
 
     let t = targets;
     if outside(day_total.kcal, t.kcal, KCAL_TOLERANCE) {
-        violations.push(format!(
-            "全天热量 {:.0} kcal 超出目标 {:.0} kcal 的 ±8%（{:.0}–{:.0}）",
-            day_total.kcal,
-            t.kcal,
+        let (low, high) = (
             t.kcal * (1.0 - KCAL_TOLERANCE),
-            t.kcal * (1.0 + KCAL_TOLERANCE)
-        ));
+            t.kcal * (1.0 + KCAL_TOLERANCE),
+        );
+        violations.push(
+            macro_note(
+                "diet_kcal_off_target",
+                format!(
+                    "The day's {:.0} kcal is outside ±8% of the {:.0} kcal target ({low:.0}–{high:.0})",
+                    day_total.kcal, t.kcal
+                ),
+                day_total.kcal,
+                t.kcal,
+            )
+            .with("low", low.round())
+            .with("high", high.round()),
+        );
     }
     if day_total.protein_g < MIN_PROTEIN_SHARE * t.protein_g {
-        violations.push(format!(
-            "蛋白质 {:.0} g 低于目标 {:.0} g 的 90%",
-            day_total.protein_g, t.protein_g
+        violations.push(macro_note(
+            "diet_protein_low",
+            format!(
+                "Protein {:.0} g is below 90% of the {:.0} g target",
+                day_total.protein_g, t.protein_g
+            ),
+            day_total.protein_g,
+            t.protein_g,
         ));
     }
     if outside(day_total.fat_g, t.fat_g, MACRO_TOLERANCE) {
-        warnings.push(format!(
-            "脂肪 {:.0} g 偏离目标 {:.0} g 超过 20%",
-            day_total.fat_g, t.fat_g
+        warnings.push(macro_note(
+            "diet_fat_off_target",
+            format!(
+                "Fat {:.0} g is more than 20% off the {:.0} g target",
+                day_total.fat_g, t.fat_g
+            ),
+            day_total.fat_g,
+            t.fat_g,
         ));
     }
     if outside(day_total.carbs_g, t.carbs_g, MACRO_TOLERANCE) {
-        warnings.push(format!(
-            "碳水 {:.0} g 偏离目标 {:.0} g 超过 20%",
-            day_total.carbs_g, t.carbs_g
+        warnings.push(macro_note(
+            "diet_carbs_off_target",
+            format!(
+                "Carbs {:.0} g are more than 20% off the {:.0} g target",
+                day_total.carbs_g, t.carbs_g
+            ),
+            day_total.carbs_g,
+            t.carbs_g,
         ));
     }
     if day_total.fiber_g < MIN_FIBER_SHARE * t.fiber_g {
-        warnings.push(format!(
-            "膳食纤维 {:.0} g 低于目标 {:.0} g 的 70%",
-            day_total.fiber_g, t.fiber_g
+        warnings.push(macro_note(
+            "diet_fiber_low",
+            format!(
+                "Fiber {:.0} g is below 70% of the {:.0} g target",
+                day_total.fiber_g, t.fiber_g
+            ),
+            day_total.fiber_g,
+            t.fiber_g,
         ));
     }
 
@@ -341,8 +426,8 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(section.violations, Vec::<String>::new());
-        assert_eq!(section.warnings, Vec::<String>::new());
+        assert!(section.violations.is_empty());
+        assert!(section.warnings.is_empty());
         let t = intake::targets_for(&env.ctx, date).await.unwrap().unwrap();
         assert_eq!(section.data["total"]["kcal"], t.kcal.round());
         assert_eq!(
@@ -367,7 +452,10 @@ mod tests {
         assert_eq!(section.data["exercise_kcal_added"], 500.0);
         let base = intake::targets_for(&env.ctx, date).await.unwrap().unwrap();
         assert_eq!(section.data["targets"]["kcal"], base.kcal + 500.0);
-        assert!(section.violations.iter().any(|v| v.starts_with("全天热量")));
+        assert!(section
+            .violations
+            .iter()
+            .any(|v| v.kind() == "diet_kcal_off_target"));
     }
 
     #[tokio::test]
@@ -381,7 +469,7 @@ mod tests {
         )
         .await
         .unwrap();
-        assert!(section.violations[0].starts_with("结构无效："));
+        assert!(section.violations[0].kind() == "diet_invalid_structure");
         assert_eq!(section.data, Value::Null);
     }
 
@@ -396,7 +484,10 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(section.violations.iter().any(|v| v.starts_with("全天热量")));
+        assert!(section
+            .violations
+            .iter()
+            .any(|v| v.kind() == "diet_kcal_off_target"));
     }
 
     #[tokio::test]
@@ -412,8 +503,14 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(!section.violations.iter().any(|v| v.starts_with("全天热量")));
-        assert!(section.violations.iter().any(|v| v.starts_with("蛋白质")));
+        assert!(!section
+            .violations
+            .iter()
+            .any(|v| v.kind() == "diet_kcal_off_target"));
+        assert!(section
+            .violations
+            .iter()
+            .any(|v| v.kind() == "diet_protein_low"));
     }
 
     #[tokio::test]
@@ -427,7 +524,10 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(section.violations.iter().any(|v| v.starts_with("正餐")));
+        assert!(section
+            .violations
+            .iter()
+            .any(|v| v.kind() == "diet_main_meal_count"));
 
         // meals_per_day 3 allows up to 4 meals in total; 5 is too many.
         let mut plan = on_target();
@@ -439,7 +539,10 @@ mod tests {
         let section = finalize(&env.ctx, date, plan, &PlanDraft::new())
             .await
             .unwrap();
-        assert!(section.violations.iter().any(|v| v.starts_with("总餐数")));
+        assert!(section
+            .violations
+            .iter()
+            .any(|v| v.kind() == "diet_meal_count"));
     }
 
     #[tokio::test]
@@ -460,7 +563,7 @@ mod tests {
         assert!(section
             .violations
             .iter()
-            .any(|v| v.contains("含过敏原“虾”")));
+            .any(|v| v.kind() == "diet_allergen" && v.0["allergen"] == "虾"));
         assert!(matches_term("花生油", "花生"));
         assert!(matches_term("花生", "花生油"));
         assert!(matches_term("Shrimp", "shrimp"));
@@ -477,7 +580,10 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(section.violations.iter().any(|v| v.contains("1600 g 超出")));
+        assert!(section
+            .violations
+            .iter()
+            .any(|v| v.kind() == "diet_grams_out_of_range" && v.0["grams"] == 1600.0));
     }
 
     #[tokio::test]
@@ -509,7 +615,9 @@ mod tests {
             .unwrap();
 
         assert!(section.violations.is_empty());
-        assert_eq!(section.warnings, vec!["“香菜”含不喜欢的“香菜”"]);
+        assert_eq!(section.warnings.len(), 1);
+        assert_eq!(section.warnings[0].kind(), "diet_disliked");
+        assert_eq!(section.warnings[0].0["term"], "香菜");
     }
 
     #[tokio::test]
@@ -526,7 +634,7 @@ mod tests {
 
         assert!(section.violations.is_empty());
         assert_eq!(section.warnings.len(), 1);
-        assert!(section.warnings[0].starts_with("膳食纤维"));
+        assert!(section.warnings[0].kind() == "diet_fiber_low");
     }
 
     #[tokio::test]
@@ -558,8 +666,14 @@ mod tests {
             .unwrap();
 
         assert!(section.violations.is_empty());
-        assert!(section.warnings.iter().any(|w| w.starts_with("脂肪")));
-        assert!(section.warnings.iter().any(|w| w.starts_with("碳水")));
+        assert!(section
+            .warnings
+            .iter()
+            .any(|w| w.kind() == "diet_fat_off_target"));
+        assert!(section
+            .warnings
+            .iter()
+            .any(|w| w.kind() == "diet_carbs_off_target"));
     }
 
     #[tokio::test]

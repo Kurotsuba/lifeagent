@@ -158,7 +158,7 @@ async fn diet_is_planned_after_training_with_raised_targets() {
         .unwrap();
 
     assert_eq!(plan.content.summary, "晚上慢跑，晚餐补充蛋白质。");
-    assert_eq!(plan.warnings, Vec::<String>::new());
+    assert!(plan.warnings.is_empty(), "{:?}", plan.warnings);
     let training = &plan.content.sections["training"];
     assert_eq!(training["duration_min"], 40.0);
     assert_eq!(training["exercise_kcal"], SESSION_KCAL);

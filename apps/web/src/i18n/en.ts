@@ -197,6 +197,8 @@ export const en: Strings = {
       adjusting: "Adjusting…",
       adjustPrefill: "Adjust tomorrow's plan: ",
       warningsTitle: "Notes",
+      medicalDisclaimer:
+        "Your profile records a health condition. This plan is lifestyle advice only; follow your doctor's or dietitian's guidance first.",
       dayTotal: (kcal: number, target: number) => `Day total ${kcal} / ${target} kcal`,
       trainingLine: (title: string, minutes: number) => `Training: ${title} · ${minutes} min`,
       trainingRest: "Training: rest day",
@@ -282,6 +284,7 @@ export const en: Strings = {
     },
     plan: {
       restDay: "Rest day",
+      untitled: "Training",
       minutes: (minutes: number) => `${minutes} min`,
       kcal: (kcal: number) => `about ${kcal} kcal`,
       timeOfDay: {
@@ -480,13 +483,100 @@ export const en: Strings = {
       token_budget: "Blocked: over the daily token limit",
       iteration_cap: "Stopped: too many steps",
     },
-    planValidation: (d: { violations: string[]; retried: boolean; violations_left: number }) =>
+    planValidation: (d: { violations: readonly unknown[]; retried: boolean; violations_left: number }) =>
       d.violations.length === 0
         ? "Plan check: passed"
         : d.violations_left === 0
           ? `Plan check: ${d.violations.length} issues found, all fixed on a retry`
           : `Plan check: ${d.violations.length} issues found, ${d.violations_left} left (kept as warnings)`,
     planSavedStep: (date: string, version: number) => `Saved the plan for ${date} (version ${version})`,
+  },
+  planNotes: {
+    unmet: (text: string) => `Not fully met: ${text}`,
+    core_section_missing: (d: { section: string }) => `The plan has no "${d.section}" section`,
+    diet_invalid_structure: "The meal plan has an invalid format",
+    diet_item_unnamed: "A food item has no name",
+    diet_grams_out_of_range: (d: { name: string; grams: number; min: number; max: number }) =>
+      `"${d.name}" is ${d.grams} g, outside ${d.min}–${d.max} g`,
+    diet_allergen: (d: {
+      meal_type: "breakfast" | "lunch" | "dinner" | "snack";
+      meal_title: string;
+      name: string;
+      allergen: string;
+    }) =>
+      `"${d.name}" in ${{ breakfast: "breakfast", lunch: "lunch", dinner: "dinner", snack: "snack" }[d.meal_type]} "${d.meal_title}" contains the allergen "${d.allergen}"`,
+    diet_disliked: (d: { name: string; term: string }) =>
+      `"${d.name}" contains "${d.term}", which you dislike`,
+    diet_main_meal_count: (d: { count: number }) =>
+      `There should be 3 main meals (breakfast, lunch, dinner), not ${d.count}`,
+    diet_meal_count: (d: { count: number; max: number }) =>
+      `There should be 3–${d.max} meals in total, not ${d.count}`,
+    diet_kcal_off_target: (d: { actual: number; target: number; low: number; high: number }) =>
+      `The day's ${d.actual} kcal is outside ±8% of the ${d.target} kcal target (${d.low}–${d.high})`,
+    diet_protein_low: (d: { actual: number; target: number }) =>
+      `Protein ${d.actual} g is below 90% of the ${d.target} g target`,
+    diet_fat_off_target: (d: { actual: number; target: number }) =>
+      `Fat ${d.actual} g is more than 20% off the ${d.target} g target`,
+    diet_carbs_off_target: (d: { actual: number; target: number }) =>
+      `Carbs ${d.actual} g are more than 20% off the ${d.target} g target`,
+    diet_fiber_low: (d: { actual: number; target: number }) =>
+      `Fiber ${d.actual} g is below 70% of the ${d.target} g target`,
+    diet_guest_allergen: (d: {
+      meal_type: "breakfast" | "lunch" | "dinner" | "snack";
+      meal_title: string;
+      name: string;
+      guest: string;
+      allergen: string;
+    }) =>
+      `"${d.name}" in ${{ breakfast: "breakfast", lunch: "lunch", dinner: "dinner", snack: "snack" }[d.meal_type]} "${d.meal_title}" contains ${d.guest}'s allergen "${d.allergen}"`,
+    diet_guest_disliked: (d: { name: string; guest: string; term: string }) =>
+      `"${d.name}" contains "${d.term}", which ${d.guest} dislikes`,
+    diet_shared_pattern: (d: {
+      meal_type: "breakfast" | "lunch" | "dinner" | "snack";
+      meal_title: string;
+      pattern: "omnivore" | "vegetarian" | "vegan" | "pescatarian";
+      name: string;
+      term: string;
+    }) =>
+      `${{ breakfast: "Breakfast", lunch: "Lunch", dinner: "Dinner", snack: "Snack" }[d.meal_type]} "${d.meal_title}" is shared and must be ${{ omnivore: "omnivore", vegetarian: "vegetarian", vegan: "vegan", pescatarian: "pescatarian" }[d.pattern]}: "${d.name}" contains "${d.term}"`,
+    diet_guest_scale_clamped: (d: { guest: string; scale: number; min: number; max: number }) =>
+      `${d.guest}'s portion scale was limited to ${d.min}–${d.max} (${d.scale})`,
+    stock_invalid_structure: "The stock plan has an invalid format",
+    stock_not_in_stock: (d: { name: string }) => `"${d.name}" is not in stock, so the plan can't use it`,
+    stock_wrong_unit: (d: { name: string; unit: "g" | "ml" | "piece"; planned_unit: "g" | "ml" | "piece" }) =>
+      `"${d.name}" is stocked in ${{ g: "g", ml: "ml", piece: "pieces" }[d.unit]}, not ${{ g: "g", ml: "ml", piece: "pieces" }[d.planned_unit]}`,
+    stock_over_quantity: (d: { name: string; amount: number; quantity: number; unit: "g" | "ml" | "piece" }) =>
+      `"${d.name}" uses ${d.amount} ${{ g: "g", ml: "ml", piece: "pieces" }[d.unit]}, but only ${d.quantity} ${{ g: "g", ml: "ml", piece: "pieces" }[d.unit]} is in stock`,
+    stock_expiring_unused: (d: { name: string; expires_on: string }) =>
+      `"${d.name}" in stock expires on ${d.expires_on} and the plan doesn't use it`,
+    training_invalid_structure: "The training plan has an invalid format",
+    training_invalid_exercise: (d: {
+      name: string;
+      problem: "name_empty" | "name_too_long" | "sets" | "reps" | "weight" | "duration" | "distance";
+    }) =>
+      `"${d.name}": ${
+        {
+          name_empty: "the name is empty",
+          name_too_long: "the name is too long",
+          sets: "sets must be 1–20",
+          reps: "reps must be 1–200",
+          weight: "weight must be 0–500 kg",
+          duration: "duration must be 0–300 minutes",
+          distance: "distance must be 0–300 km",
+        }[d.problem]
+      }`,
+    training_rest_day_too_hard: "A rest day may only have low-intensity stretching or mobility work",
+    training_no_exercises: "A training day needs at least one exercise",
+    training_too_long: (d: { minutes: number; max: number }) =>
+      `The session's ${d.minutes} minutes exceed the ${d.max}-minute limit`,
+    training_over_usual: (d: { minutes: number; usual: number }) =>
+      `The session's ${d.minutes} minutes are well over your usual ${d.usual}`,
+    training_hard_after_break: "No training in the last 7 days; start at low to moderate intensity",
+    training_big_jump: (d: { longest: number }) =>
+      `Over 1.5× your longest session of the last 7 days (${d.longest} minutes); build up gradually`,
+    training_third_hard_day: "The previous two days were high intensity; go easier or rest",
+    multimember_out_of_age_range: (d: { name: string; age: number; min: number; max: number }) =>
+      `${d.name} is ${d.age}, outside ${d.min}–${d.max}, and was left out of shared meals`,
   },
   toolSummaries: {
     core_plan_viewed: (d: { date: string }) => `Viewed the plan for ${d.date}`,

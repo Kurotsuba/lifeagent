@@ -1,8 +1,9 @@
 //! Finalize and validate the training section. Violations trigger the planner's retry and, if
-//! still unmet, become warnings; warnings are only shown. Both in zh-CN, like the diet section.
+//! still unmet, become warnings; warnings are only shown. Both are `PlanNote`s, like the diet
+//! section's.
 
 use chrono::NaiveDate;
-use lifeagent_core::plugin::{PlanSection, PluginContext, PluginError};
+use lifeagent_core::plugin::{PlanNote, PlanSection, PluginContext, PluginError};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
@@ -34,7 +35,11 @@ fn invalid(reason: String) -> PlanSection {
     PlanSection {
         data: Value::Null,
         warnings: Vec::new(),
-        violations: vec![format!("训练计划结构无效：{reason}")],
+        violations: vec![PlanNote::new(
+            "training_invalid_structure",
+            format!("The training section has the wrong shape: {reason}"),
+        )
+        .with("reason", reason)],
     }
 }
 
@@ -52,8 +57,16 @@ pub async fn finalize(
     let mut warnings = Vec::new();
 
     for e in &planned.exercises {
-        if let Err(reason) = e.check() {
-            violations.push(format!("“{}”：{reason}", e.name.trim()));
+        if let Err(problem) = e.check() {
+            let name = e.name.trim();
+            violations.push(
+                PlanNote::new(
+                    "training_invalid_exercise",
+                    format!("\"{name}\": {problem}"),
+                )
+                .with("name", name)
+                .with("problem", problem),
+            );
         }
     }
     if planned.rest_day {
@@ -62,10 +75,16 @@ pub async fn finalize(
             .iter()
             .any(|e| e.kind != ExerciseKind::Mobility || e.intensity != Intensity::Low)
         {
-            violations.push("休息日只能安排低强度的拉伸或灵活性练习".into());
+            violations.push(PlanNote::new(
+                "training_rest_day_too_hard",
+                "A rest day may only have low-intensity mobility or stretching",
+            ));
         }
     } else if planned.exercises.is_empty() {
-        violations.push("训练日至少需要安排一个动作".into());
+        violations.push(PlanNote::new(
+            "training_no_exercises",
+            "A training day needs at least one exercise",
+        ));
     }
 
     let weight = log::latest_weight(ctx).await?;
@@ -73,16 +92,28 @@ pub async fn finalize(
     let intensity = session_intensity(&planned.exercises);
 
     if minutes > HARD_MAX_MINUTES {
-        violations.push(format!(
-            "训练总时长 {minutes:.0} 分钟超过 {HARD_MAX_MINUTES:.0} 分钟上限"
-        ));
+        violations.push(
+            PlanNote::new(
+                "training_too_long",
+                format!("The session's {minutes:.0} minutes exceed the {HARD_MAX_MINUTES:.0}-minute limit"),
+            )
+            .with("minutes", minutes.round())
+            .with("max", HARD_MAX_MINUTES.round()),
+        );
     }
     if !planned.rest_day {
         let usual = f64::from(prefs.session_minutes);
         if minutes > usual * OVER_USUAL_SHARE {
-            warnings.push(format!(
-                "训练时长 {minutes:.0} 分钟明显超过平时的 {usual:.0} 分钟"
-            ));
+            warnings.push(
+                PlanNote::new(
+                    "training_over_usual",
+                    format!(
+                        "The session's {minutes:.0} minutes are well over the usual {usual:.0}"
+                    ),
+                )
+                .with("minutes", minutes.round())
+                .with("usual", usual.round()),
+            );
         }
         let history =
             log::sessions_between(ctx, days_back(date, HISTORY_DAYS), days_back(date, 1)).await?;
@@ -92,12 +123,21 @@ pub async fn finalize(
             .fold(0.0, f64::max);
         if history.is_empty() {
             if intensity == Intensity::High {
-                warnings.push("近 7 天没有训练记录，建议先从中低强度开始".into());
+                warnings.push(PlanNote::new(
+                    "training_hard_after_break",
+                    "No training in the last 7 days; start at low to moderate intensity",
+                ));
             }
         } else if minutes > longest * MAX_JUMP_SHARE + 10.0 {
-            warnings.push(format!(
-                "比近 7 天最长的一次训练（{longest:.0} 分钟）多出一半以上，注意循序渐进"
-            ));
+            warnings.push(
+                PlanNote::new(
+                    "training_big_jump",
+                    format!(
+                        "Over 1.5× the longest session of the last 7 days ({longest:.0} minutes); build up gradually"
+                    ),
+                )
+                .with("longest", longest.round()),
+            );
         }
         let hard_day = |d: NaiveDate| {
             history
@@ -108,15 +148,15 @@ pub async fn finalize(
             && hard_day(days_back(date, 1))
             && hard_day(days_back(date, 2))
         {
-            warnings.push("前两天都是高强度训练，建议降低强度或安排休息".into());
+            warnings.push(PlanNote::new(
+                "training_third_hard_day",
+                "The previous two days were high intensity; lower the intensity or rest",
+            ));
         }
     }
 
-    let title = match planned.title.trim() {
-        "" if planned.rest_day => "休息日".to_string(),
-        "" => "训练".to_string(),
-        t => t.to_string(),
-    };
+    // Empty when the planner gave none: the UI shows its own "rest day" / "training".
+    let title = planned.title.trim().to_string();
     let exercises: Vec<Value> = planned
         .exercises
         .iter()
@@ -147,6 +187,10 @@ pub async fn finalize(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn kinds(notes: &[PlanNote]) -> Vec<&str> {
+        notes.iter().map(PlanNote::kind).collect()
+    }
     use crate::testutil::{env, log_session_with, seed_profile};
 
     fn squat(sets: u32, intensity: &str) -> Value {
@@ -168,7 +212,7 @@ mod tests {
 
         let section = finalize(&env.ctx, tomorrow, raw).await.unwrap();
 
-        assert_eq!(section.violations, Vec::<String>::new());
+        assert!(section.violations.is_empty());
         // 10 min strength (4 × 2.5) + 20 min cardio = 30 min. At 62 kg:
         // (5 − 1) × 62 × 10/60 = 41.3; (4 − 1) × 62 × 20/60 = 62 → 103 kcal.
         assert_eq!(section.data["duration_min"], 30.0);
@@ -185,12 +229,15 @@ mod tests {
         let section = finalize(&env.ctx, day, json!({"exercises": []}))
             .await
             .unwrap();
-        assert!(section.violations[0].starts_with("训练计划结构无效"));
+        assert_eq!(
+            kinds(&section.violations),
+            vec!["training_invalid_structure"]
+        );
 
         let section = finalize(&env.ctx, day, json!({"rest_day": false, "exercises": []}))
             .await
             .unwrap();
-        assert_eq!(section.violations, vec!["训练日至少需要安排一个动作"]);
+        assert_eq!(kinds(&section.violations), vec!["training_no_exercises"]);
 
         let section = finalize(
             &env.ctx,
@@ -200,8 +247,8 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(
-            section.violations,
-            vec!["休息日只能安排低强度的拉伸或灵活性练习"]
+            kinds(&section.violations),
+            vec!["training_rest_day_too_hard"]
         );
         let section = finalize(
             &env.ctx,
@@ -213,7 +260,7 @@ mod tests {
         .await
         .unwrap();
         assert!(section.violations.is_empty());
-        assert_eq!(section.data["title"], "休息日");
+        assert_eq!(section.data["title"], "");
     }
 
     #[tokio::test]
@@ -226,11 +273,13 @@ mod tests {
             ]})
         };
         let section = finalize(&env.ctx, day, run(200)).await.unwrap();
-        assert!(section.violations[0].contains("超过 180 分钟上限"));
+        assert_eq!(kinds(&section.violations), vec!["training_too_long"]);
+        assert_eq!(section.violations[0].0["max"], 180.0);
 
         let section = finalize(&env.ctx, day, run(60)).await.unwrap();
         assert!(section.violations.is_empty());
-        assert!(section.warnings[0].contains("明显超过平时的 45 分钟"));
+        assert_eq!(kinds(&section.warnings), vec!["training_over_usual"]);
+        assert_eq!(section.warnings[0].0["usual"], 45.0);
     }
 
     #[tokio::test]
@@ -244,19 +293,13 @@ mod tests {
 
         // No history and high intensity.
         let section = finalize(&env.ctx, tomorrow, hiit.clone()).await.unwrap();
-        assert_eq!(
-            section.warnings,
-            vec!["近 7 天没有训练记录，建议先从中低强度开始"]
-        );
+        assert_eq!(kinds(&section.warnings), vec!["training_hard_after_break"]);
 
         // High intensity on both of the two previous days.
         log_session_with(&env.ctx, today, Intensity::High, 20.0).await;
         log_session_with(&env.ctx, today.pred_opt().unwrap(), Intensity::High, 20.0).await;
         let section = finalize(&env.ctx, tomorrow, hiit).await.unwrap();
-        assert_eq!(
-            section.warnings,
-            vec!["前两天都是高强度训练，建议降低强度或安排休息"]
-        );
+        assert_eq!(kinds(&section.warnings), vec!["training_third_hard_day"]);
 
         // Far longer than the longest recent session (20 min).
         let long = json!({"rest_day": false, "title": "骑行", "exercises": [
@@ -265,7 +308,11 @@ mod tests {
         let section = finalize(&env.ctx, tomorrow, long).await.unwrap();
         assert_eq!(
             section.warnings,
-            vec!["比近 7 天最长的一次训练（20 分钟）多出一半以上，注意循序渐进"]
+            vec![PlanNote::new(
+                "training_big_jump",
+                "Over 1.5× the longest session of the last 7 days (20 minutes); build up gradually"
+            )
+            .with("longest", 20.0)]
         );
     }
 }

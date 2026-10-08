@@ -200,7 +200,7 @@ async fn kcal_violation_is_retried_with_the_violation_then_stored_as_version_1()
     assert_eq!(plan.trigger, PlanTrigger::Manual);
     assert_eq!(plan.content.summary, "明天三餐均衡，继续保持！");
     assert!(
-        plan.warnings.iter().all(|w| !w.starts_with("未完全满足")),
+        plan.warnings.iter().all(|w| w.0.get("unmet").is_none()),
         "{:?}",
         plan.warnings
     );
@@ -214,7 +214,7 @@ async fn kcal_violation_is_retried_with_the_violation_then_stored_as_version_1()
     let planner = planner_requests(&env.mock);
     assert_eq!(planner.len(), 2);
     assert!(planner[1].contains("## Section \"diet\""));
-    assert!(planner[1].contains("全天热量"));
+    assert!(planner[1].contains("kcal is outside ±8%"));
 
     assert_eq!(env.app.get_plan(tomorrow).await.unwrap(), Some(plan));
     assert_eq!(

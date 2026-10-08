@@ -295,7 +295,7 @@ export type ActivityStepDetail =
       detail: {
         date: string;
         sections: string[];
-        violations: string[];
+        violations: StoredPlanNote[];
         retried: boolean;
         violations_left: number;
       };
@@ -371,6 +371,7 @@ export interface DietMealItem {
   kcal: number;
   protein_g: number;
   estimated: boolean;
+  source_kind: SourceKind;
   /** The winning source's display name at logging time (`docs/NUTRITION_SOURCES.md` §5), for a
    * tooltip. `null` for meals logged before this field existed. */
   source_name: string | null;
@@ -448,9 +449,76 @@ export interface StoredPlan {
   trigger: PlanTrigger;
   instruction: string | null;
   content: PlanContent;
-  warnings: string[];
+  warnings: StoredPlanNote[];
   created_at: string;
 }
+
+export type ExerciseProblem =
+  | "name_empty"
+  | "name_too_long"
+  | "sets"
+  | "reps"
+  | "weight"
+  | "duration"
+  | "distance";
+
+/** A plan warning or violation's data (`PlanNote` in `crates/core/src/plugin.rs`), worded by
+ * the UI's `planNotes` table. Kinds start with the owning plugin's id. Numbers are the ones Rust
+ * computed and rounded. */
+export type PlanNoteData =
+  | { kind: "core_section_missing"; section: string }
+  | { kind: "diet_invalid_structure"; reason: string }
+  | { kind: "diet_item_unnamed" }
+  | { kind: "diet_grams_out_of_range"; name: string; grams: number; min: number; max: number }
+  | { kind: "diet_allergen"; meal_type: MealType; meal_title: string; name: string; allergen: string }
+  | { kind: "diet_disliked"; name: string; term: string }
+  | { kind: "diet_main_meal_count"; count: number }
+  | { kind: "diet_meal_count"; count: number; max: number }
+  | { kind: "diet_kcal_off_target"; actual: number; target: number; low: number; high: number }
+  | { kind: "diet_protein_low"; actual: number; target: number }
+  | { kind: "diet_fat_off_target"; actual: number; target: number }
+  | { kind: "diet_carbs_off_target"; actual: number; target: number }
+  | { kind: "diet_fiber_low"; actual: number; target: number }
+  | {
+      kind: "diet_guest_allergen";
+      meal_type: MealType;
+      meal_title: string;
+      name: string;
+      guest: string;
+      allergen: string;
+    }
+  | { kind: "diet_guest_disliked"; name: string; guest: string; term: string }
+  | {
+      kind: "diet_shared_pattern";
+      meal_type: MealType;
+      meal_title: string;
+      pattern: DietaryPattern;
+      name: string;
+      term: string;
+    }
+  | { kind: "diet_guest_scale_clamped"; guest: string; scale: number; min: number; max: number }
+  | { kind: "stock_invalid_structure"; reason: string }
+  | { kind: "stock_not_in_stock"; name: string }
+  | { kind: "stock_wrong_unit"; name: string; unit: StockUnit; planned_unit: StockUnit }
+  | { kind: "stock_over_quantity"; name: string; amount: number; quantity: number; unit: StockUnit }
+  | { kind: "stock_expiring_unused"; name: string; expires_on: string }
+  | { kind: "training_invalid_structure"; reason: string }
+  | { kind: "training_invalid_exercise"; name: string; problem: ExerciseProblem }
+  | { kind: "training_rest_day_too_hard" }
+  | { kind: "training_no_exercises" }
+  | { kind: "training_too_long"; minutes: number; max: number }
+  | { kind: "training_over_usual"; minutes: number; usual: number }
+  | { kind: "training_hard_after_break" }
+  | { kind: "training_big_jump"; longest: number }
+  | { kind: "training_third_hard_day" }
+  | { kind: "multimember_out_of_age_range"; name: string; age: number; min: number; max: number };
+
+/** `text` is the server's English wording, for a kind this build doesn't know; `unmet` marks a
+ * violation the planner's retry didn't fix. */
+export type PlanNote = PlanNoteData & { text: string; unmet?: boolean };
+
+/** Plans saved before notes were data hold plain zh-CN strings. */
+export type StoredPlanNote = PlanNote | string;
 
 export interface TodayView {
   logical_date: string;

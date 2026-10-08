@@ -203,6 +203,7 @@ export const zhCN = {
       adjusting: "调整中…",
       adjustPrefill: "调整明天的计划：",
       warningsTitle: "提示",
+      medicalDisclaimer: "你的档案中记录了健康状况，本计划仅为生活方式建议，请以医生或营养师意见为准。",
       dayTotal: (kcal: number, target: number) => `全天合计 ${kcal} / ${target} 千卡`,
       trainingLine: (title: string, minutes: number) => `训练：${title} · ${minutes} 分钟`,
       trainingRest: "训练：休息日",
@@ -287,6 +288,7 @@ export const zhCN = {
     },
     plan: {
       restDay: "休息日",
+      untitled: "训练",
       minutes: (minutes: number) => `${minutes} 分钟`,
       kcal: (kcal: number) => `约 ${kcal} 千卡`,
       timeOfDay: {
@@ -496,13 +498,101 @@ export const zhCN = {
       token_budget: "已拦截：超出每日 token 上限",
       iteration_cap: "已停止：步骤过多",
     },
-    planValidation: (d: { violations: string[]; retried: boolean; violations_left: number }) =>
+    planValidation: (d: { violations: readonly unknown[]; retried: boolean; violations_left: number }) =>
       d.violations.length === 0
         ? "计划检查：通过"
         : d.violations_left === 0
           ? `计划检查：发现 ${d.violations.length} 个问题，重新生成后全部解决`
           : `计划检查：发现 ${d.violations.length} 个问题，${d.violations_left} 个未解决（已作为提醒保留）`,
     planSavedStep: (date: string, version: number) => `已保存 ${date} 的计划（第 ${version} 版）`,
+  },
+  // Plan warnings and violations (`PlanNote`, `crates/core/src/plugin.rs`), keyed by kind. The
+  // plan card and the Assistant log show these.
+  planNotes: {
+    unmet: (text: string) => `未完全满足：${text}`,
+    core_section_missing: (d: { section: string }) => `计划缺少“${d.section}”部分`,
+    diet_invalid_structure: "饮食计划格式无效",
+    diet_item_unnamed: "有食物没有名称",
+    diet_grams_out_of_range: (d: { name: string; grams: number; min: number; max: number }) =>
+      `“${d.name}”的份量 ${d.grams} g 超出 ${d.min}–${d.max} g`,
+    diet_allergen: (d: {
+      meal_type: "breakfast" | "lunch" | "dinner" | "snack";
+      meal_title: string;
+      name: string;
+      allergen: string;
+    }) =>
+      `${{ breakfast: "早餐", lunch: "午餐", dinner: "晚餐", snack: "加餐" }[d.meal_type]}“${d.meal_title}”中的“${d.name}”含过敏原“${d.allergen}”`,
+    diet_disliked: (d: { name: string; term: string }) => `“${d.name}”含不喜欢的“${d.term}”`,
+    diet_main_meal_count: (d: { count: number }) =>
+      `正餐（早餐、午餐、晚餐）应为 3 顿，实际 ${d.count} 顿`,
+    diet_meal_count: (d: { count: number; max: number }) =>
+      `总餐数应在 3–${d.max} 之间，实际 ${d.count}`,
+    diet_kcal_off_target: (d: { actual: number; target: number; low: number; high: number }) =>
+      `全天热量 ${d.actual} kcal 超出目标 ${d.target} kcal 的 ±8%（${d.low}–${d.high}）`,
+    diet_protein_low: (d: { actual: number; target: number }) =>
+      `蛋白质 ${d.actual} g 低于目标 ${d.target} g 的 90%`,
+    diet_fat_off_target: (d: { actual: number; target: number }) =>
+      `脂肪 ${d.actual} g 偏离目标 ${d.target} g 超过 20%`,
+    diet_carbs_off_target: (d: { actual: number; target: number }) =>
+      `碳水 ${d.actual} g 偏离目标 ${d.target} g 超过 20%`,
+    diet_fiber_low: (d: { actual: number; target: number }) =>
+      `膳食纤维 ${d.actual} g 低于目标 ${d.target} g 的 70%`,
+    diet_guest_allergen: (d: {
+      meal_type: "breakfast" | "lunch" | "dinner" | "snack";
+      meal_title: string;
+      name: string;
+      guest: string;
+      allergen: string;
+    }) =>
+      `${{ breakfast: "早餐", lunch: "午餐", dinner: "晚餐", snack: "加餐" }[d.meal_type]}“${d.meal_title}”中的“${d.name}”含${d.guest}的过敏原“${d.allergen}”`,
+    diet_guest_disliked: (d: { name: string; guest: string; term: string }) =>
+      `“${d.name}”含${d.guest}不喜欢的“${d.term}”`,
+    diet_shared_pattern: (d: {
+      meal_type: "breakfast" | "lunch" | "dinner" | "snack";
+      meal_title: string;
+      pattern: "omnivore" | "vegetarian" | "vegan" | "pescatarian";
+      name: string;
+      term: string;
+    }) =>
+      `${{ breakfast: "早餐", lunch: "午餐", dinner: "晚餐", snack: "加餐" }[d.meal_type]}“${d.meal_title}”是共餐，需符合${{ omnivore: "荤素均食", vegetarian: "素食", vegan: "纯素", pescatarian: "鱼素" }[d.pattern]}：“${d.name}”含“${d.term}”`,
+    diet_guest_scale_clamped: (d: { guest: string; scale: number; min: number; max: number }) =>
+      `${d.guest}的份量倍数已限制在 ${d.min}–${d.max} 之间（${d.scale}）`,
+    stock_invalid_structure: "库存计划格式无效",
+    stock_not_in_stock: (d: { name: string }) => `“${d.name}”不在库存中，不能计划使用`,
+    stock_wrong_unit: (d: { name: string; unit: "g" | "ml" | "piece"; planned_unit: "g" | "ml" | "piece" }) =>
+      `“${d.name}”的单位应为${{ g: "克", ml: "毫升", piece: "个" }[d.unit]}，而不是${{ g: "克", ml: "毫升", piece: "个" }[d.planned_unit]}`,
+    stock_over_quantity: (d: { name: string; amount: number; quantity: number; unit: "g" | "ml" | "piece" }) =>
+      `“${d.name}”用量 ${d.amount} ${{ g: "克", ml: "毫升", piece: "个" }[d.unit]}超过库存 ${d.quantity} ${{ g: "克", ml: "毫升", piece: "个" }[d.unit]}`,
+    stock_expiring_unused: (d: { name: string; expires_on: string }) =>
+      `库存中的“${d.name}”将于 ${d.expires_on} 到期，计划未使用`,
+    training_invalid_structure: "训练计划格式无效",
+    training_invalid_exercise: (d: {
+      name: string;
+      problem: "name_empty" | "name_too_long" | "sets" | "reps" | "weight" | "duration" | "distance";
+    }) =>
+      `“${d.name}”：${
+        {
+          name_empty: "动作名称不能为空",
+          name_too_long: "动作名称过长",
+          sets: "组数需在 1–20 之间",
+          reps: "次数需在 1–200 之间",
+          weight: "重量需在 0–500 千克之间",
+          duration: "时长需在 0–300 分钟之间",
+          distance: "距离需在 0–300 公里之间",
+        }[d.problem]
+      }`,
+    training_rest_day_too_hard: "休息日只能安排低强度的拉伸或灵活性练习",
+    training_no_exercises: "训练日至少需要安排一个动作",
+    training_too_long: (d: { minutes: number; max: number }) =>
+      `训练总时长 ${d.minutes} 分钟超过 ${d.max} 分钟上限`,
+    training_over_usual: (d: { minutes: number; usual: number }) =>
+      `训练时长 ${d.minutes} 分钟明显超过平时的 ${d.usual} 分钟`,
+    training_hard_after_break: "近 7 天没有训练记录，建议先从中低强度开始",
+    training_big_jump: (d: { longest: number }) =>
+      `比近 7 天最长的一次训练（${d.longest} 分钟）多出一半以上，注意循序渐进`,
+    training_third_hard_day: "前两天都是高强度训练，建议降低强度或安排休息",
+    multimember_out_of_age_range: (d: { name: string; age: number; min: number; max: number }) =>
+      `“${d.name}”不在 ${d.min}–${d.max} 岁范围内（${d.age} 岁），未计入共餐`,
   },
   // What a tool call did (`ToolSummary`, `crates/core/src/plugin.rs`), keyed by its kind. The
   // chat's activity chips and the Activity page show these.

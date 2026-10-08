@@ -26,7 +26,9 @@ export function TrainingPlanCard({ section }: { section: TrainingPlanSection }) 
 
   return (
     <div className="text-sm">
-      <p className="font-medium text-neutral-900 dark:text-neutral-50">{section.title}</p>
+      <p className="font-medium text-neutral-900 dark:text-neutral-50">
+        {section.title || t.untitled}
+      </p>
       <p className="mt-0.5 text-xs text-neutral-500 dark:text-neutral-400">
         {meta.join(" · ")}
       </p>

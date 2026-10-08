@@ -57,31 +57,59 @@ pub struct Exercise {
 
 pub const MAX_NAME_CHARS: usize = 60;
 
+/// Why an exercise fails [`Exercise::check`]. The serde name is what the UI words
+/// (`planNotes.training_invalid_exercise`); `Display` is English for the LLM.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExerciseProblem {
+    NameEmpty,
+    NameTooLong,
+    Sets,
+    Reps,
+    Weight,
+    Duration,
+    Distance,
+}
+
+impl std::fmt::Display for ExerciseProblem {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NameEmpty => f.write_str("the name must not be empty"),
+            Self::NameTooLong => write!(f, "the name must be at most {MAX_NAME_CHARS} characters"),
+            Self::Sets => f.write_str("sets must be 1–20"),
+            Self::Reps => f.write_str("reps must be 1–200"),
+            Self::Weight => f.write_str("weight must be 0–500 kg"),
+            Self::Duration => f.write_str("duration must be 0–300 minutes"),
+            Self::Distance => f.write_str("distance must be 0–300 km"),
+        }
+    }
+}
+
 impl Exercise {
-    /// Range checks on everything the user or the planner can get wrong, as one zh-CN reason.
-    pub fn check(&self) -> Result<(), String> {
+    /// Range checks on everything the user or the planner can get wrong.
+    pub fn check(&self) -> Result<(), ExerciseProblem> {
         let name = self.name.trim();
         if name.is_empty() {
-            return Err("动作名称不能为空".into());
+            return Err(ExerciseProblem::NameEmpty);
         }
         if name.chars().count() > MAX_NAME_CHARS {
-            return Err(format!("动作名称最多 {MAX_NAME_CHARS} 字"));
+            return Err(ExerciseProblem::NameTooLong);
         }
         let in_range = |v: Option<f64>, lo: f64, hi: f64| v.is_none_or(|v| v > lo && v <= hi);
         if !self.sets.is_none_or(|s| (1..=20).contains(&s)) {
-            return Err("组数需在 1–20 之间".into());
+            return Err(ExerciseProblem::Sets);
         }
         if !self.reps.is_none_or(|r| (1..=200).contains(&r)) {
-            return Err("次数需在 1–200 之间".into());
+            return Err(ExerciseProblem::Reps);
         }
         if !self.weight_kg.is_none_or(|w| (0.0..=500.0).contains(&w)) {
-            return Err("重量需在 0–500 千克之间".into());
+            return Err(ExerciseProblem::Weight);
         }
         if !in_range(self.duration_min, 0.0, 300.0) {
-            return Err("时长需在 0–300 分钟之间".into());
+            return Err(ExerciseProblem::Duration);
         }
         if !in_range(self.distance_km, 0.0, 300.0) {
-            return Err("距离需在 0–300 公里之间".into());
+            return Err(ExerciseProblem::Distance);
         }
         Ok(())
     }

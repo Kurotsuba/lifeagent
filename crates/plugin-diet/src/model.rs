@@ -130,6 +130,16 @@ impl MealType {
         }
     }
 
+    /// The serde name, for English text.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            MealType::Breakfast => "breakfast",
+            MealType::Lunch => "lunch",
+            MealType::Dinner => "dinner",
+            MealType::Snack => "snack",
+        }
+    }
+
     pub fn zh_label(&self) -> &'static str {
         match self {
             MealType::Breakfast => "早餐",
@@ -277,7 +287,7 @@ pub struct MealItem {
 
 impl MealItem {
     /// Display JSON: `{name, kind, brand, grams, servings, kcal, protein_g, estimated,
-    /// source_name}`. `grams` is `null` for a dish item whose `serving_g` is unknown.
+    /// source_kind, source_name}`. `grams` is `null` for a dish item whose `serving_g` is unknown.
     pub fn to_json(&self) -> Value {
         json!({
             "name": self.name,
@@ -288,6 +298,7 @@ impl MealItem {
             "kcal": self.macros.kcal.round(),
             "protein_g": round1(self.macros.protein_g),
             "estimated": self.source == SourceKind::LlmEstimate,
+            "source_kind": self.source,
             "source_name": self.source_name,
         })
     }

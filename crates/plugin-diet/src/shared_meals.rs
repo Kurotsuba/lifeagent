@@ -9,7 +9,7 @@
 //! shared meal also gets `table_grams`, the amount to cook for the whole table.
 
 use chrono::NaiveDate;
-use lifeagent_core::plugin::PlanDraft;
+use lifeagent_core::plugin::{PlanDraft, PlanNote};
 use lifeagent_core::profile::{ActivityLevel, DietaryPattern, Profile, Sex};
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -223,15 +223,6 @@ pub fn pattern_name(p: DietaryPattern) -> &'static str {
     }
 }
 
-fn pattern_zh(p: DietaryPattern) -> &'static str {
-    match p {
-        DietaryPattern::Omnivore => "杂食",
-        DietaryPattern::Pescatarian => "鱼素",
-        DietaryPattern::Vegetarian => "素食",
-        DietaryPattern::Vegan => "纯素",
-    }
-}
-
 const MEAT_TERMS: &[&str] = &[
     "肉",
     "ベーコン",
@@ -384,32 +375,49 @@ pub fn brief_lines(
 
 /// The checks for one item of a shared meal (§6.3), as `(violations, warnings)`: guests'
 /// allergies and the table's dietary pattern are violations; guests' dislikes are warnings.
-/// `names` are the planned and resolved names of the item.
+/// `names` are the planned and resolved names of the item; `meal_title` is the planned meal's.
 pub fn check_item(
     guests: &[&GuestPlan],
     table_pattern: DietaryPattern,
-    meal_label: &str,
+    meal_type: MealType,
+    meal_title: &str,
     item_name: &str,
     names: &[&str],
     matches_term: impl Fn(&str, &str) -> bool,
-) -> (Vec<String>, Vec<String>) {
+) -> (Vec<PlanNote>, Vec<PlanNote>) {
     let mut violations = Vec::new();
     let mut warnings = Vec::new();
     for g in guests {
+        let guest = &g.guest.name;
         for allergy in &g.guest.allergies {
             if names.iter().any(|n| matches_term(n, allergy)) {
-                violations.push(format!(
-                    "{meal_label}中的“{item_name}”含{}的过敏原“{allergy}”",
-                    g.guest.name
-                ));
+                violations.push(
+                    PlanNote::new(
+                        "diet_guest_allergen",
+                        format!(
+                            "\"{item_name}\" in {} \"{meal_title}\" contains {guest}'s allergen \"{allergy}\"",
+                            meal_type.as_str()
+                        ),
+                    )
+                    .with("meal_type", meal_type)
+                    .with("meal_title", meal_title)
+                    .with("name", item_name)
+                    .with("guest", guest)
+                    .with("allergen", allergy),
+                );
             }
         }
         for dislike in &g.guest.dislikes {
             if names.iter().any(|n| matches_term(n, dislike)) {
-                warnings.push(format!(
-                    "“{item_name}”含{}不喜欢的“{dislike}”",
-                    g.guest.name
-                ));
+                warnings.push(
+                    PlanNote::new(
+                        "diet_guest_disliked",
+                        format!("\"{item_name}\" contains \"{dislike}\", which {guest} dislikes"),
+                    )
+                    .with("name", item_name)
+                    .with("guest", guest)
+                    .with("term", dislike),
+                );
             }
         }
     }
@@ -417,25 +425,44 @@ pub fn check_item(
         .into_iter()
         .find(|t| names.iter().any(|n| matches_term(n, t)))
     {
-        violations.push(format!(
-            "{meal_label}是共餐，需符合{}：“{item_name}”含“{term}”",
-            pattern_zh(table_pattern)
-        ));
+        violations.push(
+            PlanNote::new(
+                "diet_shared_pattern",
+                format!(
+                    "{} \"{meal_title}\" is shared and must be {}: \"{item_name}\" contains \"{term}\"",
+                    meal_type.as_str(),
+                    pattern_name(table_pattern)
+                ),
+            )
+            .with("meal_type", meal_type)
+            .with("meal_title", meal_title)
+            .with("pattern", table_pattern)
+            .with("name", item_name)
+            .with("term", term),
+        );
     }
     (violations, warnings)
 }
 
 /// One warning per guest whose scale was clamped.
-pub fn clamp_warnings(shared: &SharedMeals) -> Vec<String> {
+pub fn clamp_warnings(shared: &SharedMeals) -> Vec<PlanNote> {
     shared
         .guests
         .iter()
         .filter(|g| g.clamped)
         .map(|g| {
-            format!(
-                "{}的份量倍数已限制在 {MIN_SCALE}–{MAX_SCALE} 之间（{:.2}）",
-                g.guest.name, g.scale
+            let scale = (g.scale * 100.0).round() / 100.0;
+            PlanNote::new(
+                "diet_guest_scale_clamped",
+                format!(
+                    "{}'s portion scale was limited to {MIN_SCALE}–{MAX_SCALE} ({scale})",
+                    g.guest.name
+                ),
             )
+            .with("guest", &g.guest.name)
+            .with("scale", scale)
+            .with("min", MIN_SCALE)
+            .with("max", MAX_SCALE)
         })
         .collect()
 }
@@ -556,7 +583,8 @@ mod tests {
             check_item(
                 &guests,
                 DietaryPattern::Vegetarian,
-                "晚餐“x”",
+                MealType::Dinner,
+                "x",
                 name,
                 &[name],
                 contains,
@@ -564,13 +592,22 @@ mod tests {
         };
 
         let (v, w) = check("鶏むね肉");
-        assert_eq!(v, vec!["晚餐“x”是共餐，需符合素食：“鶏むね肉”含“肉”"]);
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].kind(), "diet_shared_pattern");
+        assert_eq!(v[0].0["meal_type"], "dinner");
+        assert_eq!(v[0].0["pattern"], "vegetarian");
+        assert_eq!(v[0].0["term"], "肉");
         assert!(w.is_empty());
         let (v, _) = check("くるみパン");
-        assert_eq!(v, vec!["晚餐“x”中的“くるみパン”含v的过敏原“くるみ”"]);
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].kind(), "diet_guest_allergen");
+        assert_eq!(v[0].0["guest"], "v");
+        assert_eq!(v[0].0["allergen"], "くるみ");
         let (v, w) = check("セロリ炒め");
         assert!(v.is_empty());
-        assert_eq!(w, vec!["“セロリ炒め”含v不喜欢的“セロリ”"]);
+        assert_eq!(w.len(), 1);
+        assert_eq!(w[0].kind(), "diet_guest_disliked");
+        assert_eq!(w[0].0["term"], "セロリ");
         assert_eq!(check("豆腐"), (vec![], vec![]));
     }
 

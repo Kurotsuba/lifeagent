@@ -17,7 +17,7 @@ import {
 import { ConfirmDeleteButton } from "../components/ConfirmDeleteButton";
 import { inputClass } from "../components/Field";
 import { primaryButtonClass, secondaryButtonClass } from "../components/buttonStyles";
-import { describeImportMessage, strings } from "../i18n";
+import { describeImportMessage, sourceDisplayName, strings } from "../i18n";
 import { LoadState } from "./LoadState";
 
 const t = strings.settings.foodData;
@@ -215,9 +215,11 @@ function SourceRow({
     // The controls wrap under the name when the row is too narrow for both (phones).
     <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 rounded-md border border-neutral-200 px-3 py-2 text-sm dark:border-neutral-700">
       <div className="min-w-0 flex-1 basis-48">
-        <p className="truncate text-neutral-900 dark:text-neutral-50">{source.name}</p>
+        <p className="truncate text-neutral-900 dark:text-neutral-50">
+          {sourceDisplayName(source.kind, source.name)}
+        </p>
         <p className="text-xs text-neutral-500 dark:text-neutral-400">
-          {label} ·{" "}
+          {locked ? null : `${label} · `}
           {source.dish_count > 0
             ? t.foodAndDishCount(source.food_count, source.dish_count)
             : t.foodCount(source.food_count)}

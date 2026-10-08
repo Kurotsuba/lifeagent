@@ -13,7 +13,7 @@ import {
 } from "../api/types";
 import { primaryButtonClass, secondaryButtonClass } from "../components/buttonStyles";
 import { inputClass } from "../components/Field";
-import { strings } from "../i18n";
+import { describePlanNote, strings } from "../i18n";
 import { SharedMeal } from "./SharedMeal";
 
 const t = strings.today.tomorrowPlan;
@@ -137,7 +137,10 @@ export function TomorrowPlanCard({ plan, planTime, onAdjust, onChanged }: Tomorr
         <p className="mb-3 text-sm font-medium text-neutral-700 dark:text-neutral-300">
           {training.rest_day
             ? t.trainingRest
-            : t.trainingLine(training.title, Math.round(training.duration_min))}
+            : t.trainingLine(
+                training.title || strings.training.plan.untitled,
+                Math.round(training.duration_min),
+              )}
         </p>
       ) : null}
 
@@ -184,16 +187,15 @@ export function TomorrowPlanCard({ plan, planTime, onAdjust, onChanged }: Tomorr
           <p className="mb-1 font-medium">{t.warningsTitle}</p>
           <ul className="list-inside list-disc">
             {plan.warnings.map((w, i) => (
-              <li key={i}>{w}</li>
+              <li key={i}>{describePlanNote(w)}</li>
             ))}
           </ul>
         </div>
       ) : null}
 
+      {/* The stored text is fixed zh-CN; its presence is what matters. */}
       {plan.content.disclaimer ? (
-        <p className="mb-3 text-xs text-neutral-500 dark:text-neutral-400">
-          {plan.content.disclaimer}
-        </p>
+        <p className="mb-3 text-xs text-neutral-500 dark:text-neutral-400">{t.medicalDisclaimer}</p>
       ) : null}
 
       {shownError ? (

@@ -4,6 +4,9 @@ import type {
   ErrorDetail,
   ImportMessage,
   MacroViolation,
+  PlanNoteData,
+  SourceKind,
+  StoredPlanNote,
   ToolSummary,
 } from "../api/types";
 import { en } from "./en";
@@ -49,6 +52,8 @@ const _importComplete: MessagesFor<
 const _macrosComplete: MessagesFor<MacroViolation, "rule"> = zhCN.macroViolations;
 const _previewsComplete: MessagesFor<ActionPreview, "kind"> = zhCN.approvals.previews;
 const _toolSummariesComplete: MessagesFor<ToolSummary, "kind"> = zhCN.toolSummaries;
+const _planNotesComplete: MessagesFor<PlanNoteData, "kind"> = zhCN.planNotes;
+void _planNotesComplete;
 void _toolSummariesComplete;
 void _previewsComplete;
 void _errorsComplete;
@@ -114,6 +119,24 @@ function render<T>(entry: Entry<T>, d: T): string | undefined {
  * know it. */
 export function toolLabel(tool: string): string {
   return strings.tools[tool] ?? tool;
+}
+
+/** A plan warning or violation in the current language. A kind this build doesn't know falls
+ * back to the server's English `text`; a note saved before notes were data is shown as stored. */
+export function describePlanNote(note: StoredPlanNote): string {
+  if (typeof note === "string") return note;
+  const entry = (strings.planNotes as Record<string, Entry<never>>)[note.kind];
+  const text = render(entry, note as never) ?? note.text;
+  return note.unmet ? strings.planNotes.unmet(text) : text;
+}
+
+/** A food source's display name. The two built-in sources are seeded with a fixed zh-CN name
+ * in the database, so they are named from the current locale; datasets keep the name the user
+ * gave them. */
+export function sourceDisplayName(kind: SourceKind, name: string): string {
+  if (kind === "user") return strings.settings.foodData.kindManual;
+  if (kind === "llm_estimate") return strings.settings.foodData.kindEstimate;
+  return name;
 }
 
 /** What a tool call did, in the current language. A kind this build doesn't know (a newer

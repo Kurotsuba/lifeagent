@@ -15,7 +15,9 @@ use tokio::sync::Mutex;
 use crate::clock::Clock;
 use crate::error::{CoreError, ValidationRule};
 use crate::events::{AppEvent, EventStore};
-use crate::plugin::{enabled_plugins, PlanDraft, PlanInput, PlanSection, Plugin, PluginContext};
+use crate::plugin::{
+    enabled_plugins, PlanDraft, PlanInput, PlanNote, PlanSection, Plugin, PluginContext,
+};
 use crate::preferences::PreferenceKind;
 use crate::untrusted;
 
@@ -92,7 +94,7 @@ pub struct StoredPlan {
     /// The user's change request, for `revision` plans.
     pub instruction: Option<String>,
     pub content: PlanContent,
-    pub warnings: Vec<String>,
+    pub warnings: Vec<PlanNote>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -139,7 +141,7 @@ impl PlanStore {
         trigger: PlanTrigger,
         instruction: Option<&str>,
         content: &PlanContent,
-        warnings: &[String],
+        warnings: &[PlanNote],
     ) -> Result<StoredPlan, CoreError> {
         let mut tx = self.db.begin().await?;
         let max: Option<i64> =
@@ -277,12 +279,9 @@ const PLANNER_REQUEST: &str = r#"## User's request for this plan
 {request}
 Follow it as long as allergies stay excluded and the targets are met."#;
 
-/// §7.12 step 6: prefix for violations still unmet after the retry, moved into warnings.
-const UNMET_PREFIX: &str = "未完全满足：";
-
-/// §7.12 step 7.
+/// §7.12 step 7. The UI shows its own wording (`medicalDisclaimer`) when this is set.
 const MEDICAL_DISCLAIMER: &str =
-    "你的档案中记录了健康状况，本计划仅为生活方式建议，请以医生或营养师意见为准。";
+    "Your profile records a health condition. This plan is lifestyle advice only; follow your doctor's or dietitian's guidance first.";
 
 /// What the planner returns (§7.12 step 3).
 #[derive(Debug, Serialize, Deserialize)]
@@ -471,11 +470,12 @@ impl PlanService {
         let mut warnings = Vec::new();
         for (id, section) in sections {
             warnings.extend(section.warnings);
+            // §7.12 step 6: violations still unmet after the retry, marked for the UI.
             warnings.extend(
                 section
                     .violations
-                    .iter()
-                    .map(|v| format!("{UNMET_PREFIX}{v}")),
+                    .into_iter()
+                    .map(|v| v.with("unmet", true)),
             );
             content_sections.insert(id, section.data);
         }
@@ -561,7 +561,7 @@ async fn plan_stage(
     let mut output: PlannerOutput =
         complete_json(&ctx.llm, Role::Planner, messages.clone()).await?;
     let mut sections = finalize_all(ctx, date, inputs, &output, draft).await?;
-    let violations: Vec<String> = sections
+    let violations: Vec<PlanNote> = sections
         .iter()
         .flat_map(|(_, s)| s.violations.iter().cloned())
         .collect();
@@ -690,7 +690,11 @@ async fn finalize_all(
             None => PlanSection {
                 data: Value::Null,
                 warnings: Vec::new(),
-                violations: vec![format!("计划缺少“{}”部分", input.section)],
+                violations: vec![PlanNote::new(
+                    "core_section_missing",
+                    format!("The plan has no \"{}\" section", input.section),
+                )
+                .with("section", &input.section)],
             },
         };
         sections.push((input.section.clone(), section));
@@ -733,6 +737,14 @@ mod tests {
     }
 
     const DAY: NaiveDate = NaiveDate::from_ymd_opt(2026, 9, 25).unwrap();
+
+    fn note(text: &str) -> PlanNote {
+        PlanNote::new("test_note", text)
+    }
+
+    fn texts(notes: &[PlanNote]) -> Vec<&str> {
+        notes.iter().map(PlanNote::text).collect()
+    }
 
     /// Contributes one section, "test". A raw section `{"ok": true}` passes; anything else
     /// has a violation. Always adds the warning "注意".
@@ -783,8 +795,8 @@ mod tests {
             let ok = raw.get("ok") == Some(&Value::Bool(true));
             Ok(PlanSection {
                 data: raw,
-                warnings: vec!["注意".into()],
-                violations: if ok { vec![] } else { vec!["not ok".into()] },
+                warnings: vec![note("注意")],
+                violations: if ok { vec![] } else { vec![note("not ok")] },
             })
         }
     }
@@ -987,8 +999,8 @@ mod tests {
         ) -> Result<Option<PlanSection>, crate::plugin::PluginError> {
             Ok((!self.data.is_null()).then(|| PlanSection {
                 data: self.data.clone(),
-                warnings: vec!["computed warning".into()],
-                violations: vec!["computed violation".into()],
+                warnings: vec![note("computed warning")],
+                violations: vec![note("computed violation")],
             }))
         }
     }
@@ -1030,7 +1042,7 @@ mod tests {
             52
         );
         assert_eq!(
-            plan.warnings,
+            texts(&plan.warnings),
             vec!["computed warning", "computed violation"]
         );
 
@@ -1079,7 +1091,7 @@ mod tests {
         .await
         .unwrap();
         assert!(!plan.content.sections.contains_key("guests"));
-        assert_eq!(plan.warnings, Vec::<String>::new());
+        assert!(plan.warnings.is_empty());
     }
 
     #[tokio::test]
@@ -1126,7 +1138,7 @@ mod tests {
 
         assert_eq!(plan.version, 1);
         assert_eq!(plan.content.summary, "second");
-        assert_eq!(plan.warnings, vec!["注意"]);
+        assert_eq!(texts(&plan.warnings), vec!["注意"]);
         let requests = mock.received_requests();
         assert_eq!(requests.len(), 2);
         let retry = last_user_message(&requests[1]);
@@ -1151,7 +1163,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn violations_left_after_the_retry_become_prefixed_warnings() {
+    async fn violations_left_after_the_retry_become_marked_warnings() {
         let (ctx, mock, _dir) = crate::test_support::context().await;
         for _ in 0..2 {
             mock.push_response(planner_reply(
@@ -1165,7 +1177,9 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(plan.warnings, vec!["注意", "未完全满足：not ok"]);
+        assert_eq!(texts(&plan.warnings), vec!["注意", "not ok"]);
+        assert_eq!(plan.warnings[0].0.get("unmet"), None);
+        assert_eq!(plan.warnings[1].0["unmet"], true);
         assert_eq!(mock.received_requests().len(), 2);
     }
 
@@ -1184,7 +1198,7 @@ mod tests {
             .unwrap();
 
         let retry = last_user_message(&mock.received_requests()[1]);
-        assert!(retry.contains("计划缺少“test”部分"));
+        assert!(retry.contains("- The plan has no \"test\" section"));
     }
 
     #[tokio::test]
@@ -1443,7 +1457,7 @@ mod tests {
                 PlanTrigger::Manual,
                 None,
                 &content("v1"),
-                &["w".to_string()],
+                &[note("w").with("grams", 12.5)],
             )
             .await
             .unwrap();

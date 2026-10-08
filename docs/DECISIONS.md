@@ -2901,3 +2901,27 @@ the UI showed nothing useful after refetching history.
 - **`ChatTurn.notice`** (`empty_reply` | `too_many_steps`) replaces the hardcoded Chinese
   replies, worded by the UI in all three locales (`chat.notices`). `reply` is empty when it's
   set. The web chat shows the notice after the messages, with the turn's activity chips.
+
+## 2026-10-07 — Plan warnings, the disclaimer and built-in source names are worded by the UI
+
+A Japanese UI showed "手动录入 / AI 估算" in Settings → food data (the names seeded into
+`diet_food_sources`), and plan warnings, unmet violations, the medical disclaimer and the
+training plan's fallback title were fixed zh-CN text from Rust. This replaces the earlier "violation
+and warning text is zh-CN" decisions above.
+
+- **`PlanNote`** (`crates/core/src/plugin.rs`): `PlanSection.warnings`/`violations` and
+  `StoredPlan.warnings` are `{"kind", "text", ...params}`, like `ToolSummary`. Kinds start with
+  the plugin id; params carry the numbers Rust computed (rounded as shown). The UI words them via
+  `planNotes` in all three locales; `text` is English, used by the planner's retry message and as
+  the UI's fallback for an unknown kind. Violations left after the retry get `"unmet": true`
+  instead of the "未完全满足：" prefix. Plans saved earlier keep plain strings, which still
+  deserialize (bare JSON strings) and are shown as stored. `Exercise::check` returns an
+  `ExerciseProblem` enum for the same reason.
+- **Disclaimer:** `PlanContent.disclaimer` is still set (now in English) when the profile has
+  medical notes; the UI shows its own `medicalDisclaimer` whenever it is present.
+- **Built-in food sources** keep their seeded names in the database; the UI names `user` and
+  `llm_estimate` sources from its own table (`sourceDisplayName`), in Settings and in the meal
+  tooltip (`MealItem` display JSON now carries `source_kind`). Datasets keep the user's name.
+- **Training title:** an empty planner title stays empty; the UI shows "rest day"/"training".
+- LLM-only text (context snippets, briefs, tool errors) stays as it was: the model reads any
+  language and replies in the user's.

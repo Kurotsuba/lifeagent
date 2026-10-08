@@ -3,7 +3,7 @@
 //! stored data only; core never shows it to the planner LLM.
 
 use chrono::NaiveDate;
-use lifeagent_core::plugin::{PlanSection, PluginContext, PluginError};
+use lifeagent_core::plugin::{PlanNote, PlanSection, PluginContext, PluginError};
 use serde::Serialize;
 use serde_json::Value;
 
@@ -50,11 +50,19 @@ pub async fn computed_section(
     let mut guests = Vec::new();
     for m in members.iter().filter(|m| attending(m)) {
         if !m.in_age_range_on(date) {
-            warnings.push(format!(
-                "“{}”不在 {MIN_AGE}–{MAX_AGE} 岁范围内（{} 岁），未计入共餐",
-                m.profile.display_name,
-                m.age_on(date)
-            ));
+            let (name, age) = (&m.profile.display_name, m.age_on(date));
+            warnings.push(
+                PlanNote::new(
+                    "multimember_out_of_age_range",
+                    format!(
+                        "{name} is {age}, outside {MIN_AGE}–{MAX_AGE}, and was left out of shared meals"
+                    ),
+                )
+                .with("name", name)
+                .with("age", age)
+                .with("min", MIN_AGE)
+                .with("max", MAX_AGE),
+            );
             continue;
         }
         let p = &m.profile;
@@ -185,7 +193,7 @@ mod tests {
         assert_eq!(section.data["guests"], json!([]));
         assert_eq!(section.warnings.len(), 1);
         assert!(
-            section.warnings[0].contains("Aki"),
+            section.warnings[0].0["name"] == "Aki",
             "{:?}",
             section.warnings
         );
