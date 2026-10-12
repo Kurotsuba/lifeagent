@@ -42,6 +42,7 @@ export function Chat({ draftText, onDraftConsumed }: ChatProps) {
   // Approved/rejected here since the last message, kept on screen with their outcome until then.
   const [resolvedActions, setResolvedActions] = useState<PendingAction[]>([]);
   const [text, setText] = useState("");
+  const [readOnly, setReadOnly] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -70,6 +71,7 @@ export function Chat({ draftText, onDraftConsumed }: ChatProps) {
   useEffect(() => {
     if (draftText !== null) {
       setText(draftText);
+      setReadOnly(false);
       onDraftConsumed();
     }
   }, [draftText]);
@@ -99,7 +101,7 @@ export function Chat({ draftText, onDraftConsumed }: ChatProps) {
       return last?.role === "user" && last.content === trimmed ? h : [...h, optimisticUser];
     });
     try {
-      const turn = await sendMessage(trimmed);
+      const turn = await sendMessage(trimmed, readOnly);
       if (turn.notice) {
         setLastLiveReply(null);
         setLiveNotice({ notice: turn.notice, activities: turn.activities });
@@ -231,6 +233,19 @@ export function Chat({ draftText, onDraftConsumed }: ChatProps) {
       ) : null}
 
       <div className="border-t border-neutral-200 px-4 py-3 md:px-6 dark:border-neutral-700">
+        <div className="mx-auto mb-2 max-w-2xl text-xs text-neutral-600 dark:text-neutral-400">
+          <label className="inline-flex cursor-pointer items-center gap-2">
+            <input
+              type="checkbox"
+              checked={readOnly}
+              disabled={sending}
+              onChange={(e) => setReadOnly(e.target.checked)}
+              aria-describedby={readOnly ? "chat-read-only-hint" : undefined}
+            />
+            {strings.chat.readOnly}
+          </label>
+          {readOnly ? <p id="chat-read-only-hint" className="mt-1">{strings.chat.readOnlyHint}</p> : null}
+        </div>
         <div className="mx-auto flex max-w-2xl items-end gap-2">
           <textarea
             className={`${inputClass} mt-0 min-h-[2.5rem] resize-none placeholder:truncate`}

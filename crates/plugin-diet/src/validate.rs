@@ -1,8 +1,8 @@
 //! Finalize and validate the diet plan section, per `docs/PHASE1_SPEC.md` §8.10.
 //!
-//! Violations trigger one planner retry and, if still unmet, are shown to the user as
-//! warnings; warnings are only shown. Both are `PlanNote`s the UI words (`planNotes`), with
-//! English text for the planner.
+//! Violations trigger one planner retry. Invalid structure, invalid portions and detected
+//! allergens block publication if still unmet; target deviations can remain as warnings.
+//! Both are `PlanNote`s the UI words (`planNotes`), with English text for the planner.
 
 use chrono::NaiveDate;
 use lifeagent_core::plugin::{PlanDraft, PlanNote, PlanSection, PluginContext, PluginError};
@@ -47,7 +47,7 @@ fn invalid(note: PlanNote) -> PlanSection {
     PlanSection {
         data: Value::Null,
         warnings: Vec::new(),
-        violations: vec![note],
+        violations: vec![note.blocking()],
     }
 }
 
@@ -58,12 +58,48 @@ fn macro_note(kind: &str, text: String, actual: f64, target: f64) -> PlanNote {
         .with("target", target.round())
 }
 
-/// Case-insensitive substring match in either direction (§8.10), so "虾" flags "虾仁" and
-/// "花生油" flags "花生".
+/// Name matching only, not ingredient identification. CJK keeps the substring matching in
+/// either direction (§8.10), so "虾" flags "虾仁" and "花生油" flags "花生". ASCII word
+/// edges must be bounded: "egg" matches "eggs", but not "eggplant", even in mixed text.
 fn matches_term(name: &str, term: &str) -> bool {
+    fn bounded_contains(text: &str, term: &str) -> bool {
+        let first_is_ascii_word = term
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_alphanumeric());
+        let last_is_ascii_word = term
+            .chars()
+            .next_back()
+            .is_some_and(|c| c.is_ascii_alphanumeric());
+        let ends_with_ascii_letter = term
+            .chars()
+            .next_back()
+            .is_some_and(|c| c.is_ascii_alphabetic());
+        let boundary = |tail: &str| {
+            tail.chars()
+                .next()
+                .is_none_or(|c| !c.is_ascii_alphanumeric())
+        };
+        text.match_indices(term).any(|(start, _)| {
+            if first_is_ascii_word
+                && text[..start]
+                    .chars()
+                    .next_back()
+                    .is_some_and(|c| c.is_ascii_alphanumeric())
+            {
+                return false;
+            }
+            let tail = &text[start + term.len()..];
+            !last_is_ascii_word
+                || boundary(tail)
+                || (ends_with_ascii_letter && tail.strip_prefix('s').is_some_and(boundary))
+        })
+    }
     let name = name.trim().to_lowercase();
     let term = term.trim().to_lowercase();
-    !name.is_empty() && !term.is_empty() && (name.contains(&term) || term.contains(&name))
+    !name.is_empty()
+        && !term.is_empty()
+        && (bounded_contains(&name, &term) || bounded_contains(&term, &name))
 }
 
 fn outside(actual: f64, target: f64, tolerance: f64) -> bool {
@@ -158,7 +194,8 @@ pub async fn finalize(
                     .with("name", planned_name)
                     .with("grams", item.grams)
                     .with("min", MIN_ITEM_GRAMS)
-                    .with("max", MAX_ITEM_GRAMS),
+                    .with("max", MAX_ITEM_GRAMS)
+                    .blocking(),
                 );
             }
             for allergy in &profile.allergies {
@@ -175,7 +212,8 @@ pub async fn finalize(
                         .with("meal_type", meal.meal_type)
                         .with("meal_title", &meal.title)
                         .with("name", planned_name)
-                        .with("allergen", allergy),
+                        .with("allergen", allergy)
+                        .blocking(),
                     );
                 }
             }
@@ -470,6 +508,7 @@ mod tests {
         .await
         .unwrap();
         assert!(section.violations[0].kind() == "diet_invalid_structure");
+        assert!(section.violations[0].blocks_plan());
         assert_eq!(section.data, Value::Null);
     }
 
@@ -545,6 +584,71 @@ mod tests {
             .any(|v| v.kind() == "diet_meal_count"));
     }
 
+    #[test]
+    fn name_matching_respects_ascii_words_inside_mixed_text() {
+        for name in [
+            "eggplant",
+            "烤eggplant",
+            "eggplants（烤）",
+            "graham",
+            "graham crackers",
+        ] {
+            let term = if name.contains("graham") {
+                "ham"
+            } else {
+                "egg"
+            };
+            assert!(!matches_term(name, term), "{name} must not match {term}");
+            assert!(!matches_term(term, name), "reverse must not match either");
+        }
+        for (name, term) in [
+            ("egg", "eggs"),
+            ("boiled eggs", "egg"),
+            ("鸡蛋eggs（煮）", "egg"),
+            ("peanuts", "peanut"),
+            ("HAM sandwich", "ham"),
+            ("虾仁", "虾"),
+            ("shrimp虾仁", "虾"),
+            ("花生", "花生油"),
+        ] {
+            assert!(matches_term(name, term), "{name} must match {term}");
+        }
+        assert!(!matches_term("", "egg"));
+        assert!(!matches_term("egg", "  "));
+    }
+
+    #[tokio::test]
+    async fn eggplant_is_not_blocked_as_egg_but_actual_eggs_are() {
+        let (env, date) = setup().await;
+        set_profile(&env, |p| p.allergies = vec!["egg".into()]).await;
+        for name in ["烤eggplant", "boiled eggs"] {
+            upsert_manual_food(&env.ctx, name, RICE).await.unwrap();
+        }
+        let mut plan = on_target();
+        plan["meals"][1]["items"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"name": "烤eggplant", "grams": 1}));
+        let section = finalize(&env.ctx, date, plan.clone(), &PlanDraft::new())
+            .await
+            .unwrap();
+        assert!(!section
+            .violations
+            .iter()
+            .any(|v| v.kind() == "diet_allergen"));
+        plan["meals"][1]["items"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"name": "boiled eggs", "grams": 1}));
+        let section = finalize(&env.ctx, date, plan, &PlanDraft::new())
+            .await
+            .unwrap();
+        assert!(section
+            .violations
+            .iter()
+            .any(|v| v.kind() == "diet_allergen" && v.blocks_plan()));
+    }
+
     #[tokio::test]
     async fn allergy_match_in_either_direction_is_a_violation() {
         let (env, date) = setup().await;
@@ -563,7 +667,7 @@ mod tests {
         assert!(section
             .violations
             .iter()
-            .any(|v| v.kind() == "diet_allergen" && v.0["allergen"] == "虾"));
+            .any(|v| v.kind() == "diet_allergen" && v.0["allergen"] == "虾" && v.blocks_plan()));
         assert!(matches_term("花生油", "花生"));
         assert!(matches_term("花生", "花生油"));
         assert!(matches_term("Shrimp", "shrimp"));
@@ -583,7 +687,9 @@ mod tests {
         assert!(section
             .violations
             .iter()
-            .any(|v| v.kind() == "diet_grams_out_of_range" && v.0["grams"] == 1600.0));
+            .any(|v| v.kind() == "diet_grams_out_of_range"
+                && v.0["grams"] == 1600.0
+                && v.blocks_plan()));
     }
 
     #[tokio::test]

@@ -327,6 +327,8 @@ export const ja: Strings = {
   },
   chat: {
     inputPlaceholder: "メッセージを入力（Enter で送信、Shift+Enter で改行）",
+    readOnly: "質問のみ（記録を変更しない）",
+    readOnlyHint: "翻訳・説明・計算向け。健康情報、食事記録、プランは変更しません。会話は保存されます。",
     send: "送信",
     sending: "送信中…",
     empty: "まだ会話がありません。何か話しかけてみましょう",
@@ -440,6 +442,7 @@ export const ja: Strings = {
       internal: "内部エラー",
       budget_exceeded: "1 日のトークン上限に達しました",
       busy: "別のプランを作成中です",
+      plan_blocked: "プランが安全性の確認を通過せず、保存されませんでした",
       not_configured: "モデルが未設定です",
       action_not_pending: "この操作は処理済みか期限切れです",
       rate_limited: "モデルが混み合っています",
@@ -455,6 +458,7 @@ export const ja: Strings = {
     toolOutcomes: {
       ran: "実行",
       invalid_args: "拒否",
+      read_only_mode: "質問のみのため未実行",
       not_found: "見つからない",
       failed: "エラー",
     },
@@ -477,12 +481,15 @@ export const ja: Strings = {
     },
     guardrails: {
       invalid_args: "ブロック：引数またはルールで許可されていません",
+      read_only_mode: "ブロック：今回の質問では記録を変更できません",
       unknown_tool: "ブロック：存在しない、またはオフのツールです",
       token_budget: "ブロック：1 日のトークン上限を超えています",
       iteration_cap: "停止：ステップが多すぎます",
     },
-    planValidation: (d: { violations: readonly unknown[]; retried: boolean; violations_left: number }) =>
-      d.violations.length === 0
+    planValidation: (d: { violations: readonly unknown[]; retried: boolean; violations_left: number; blocking_violations_left?: number }) =>
+      (d.blocking_violations_left ?? 0) > 0
+        ? `プランのチェック：安全上の問題が ${d.blocking_violations_left} 件残るため、保存をブロックしました`
+        : d.violations.length === 0
         ? "プランのチェック：問題なし"
         : d.violations_left === 0
           ? `プランのチェック：${d.violations.length} 件の問題を検出し、作り直してすべて解消`
@@ -598,6 +605,7 @@ export const ja: Strings = {
     diet_meal_logged: (d: { meal_type: "breakfast" | "lunch" | "dinner" | "snack"; kcal: number }) =>
       `${{ breakfast: "朝食", lunch: "昼食", dinner: "夕食", snack: "間食" }[d.meal_type]}を記録しました · ${d.kcal} kcal`,
     diet_intake_viewed: (d: { date: string }) => `${d.date} の食事記録を確認しました`,
+    diet_label_calculated: (d: { portion_grams: number }) => `表示値から ${d.portion_grams} g 分を換算しました（摂取記録なし）`,
     diet_food_updated: (d: { name: string }) => `食品を更新しました：${d.name}`,
     diet_dish_updated: (d: { name: string }) => `料理を更新しました：${d.name}`,
     diet_alias_added: (d: { alias: string; food: string }) =>
@@ -646,6 +654,7 @@ export const ja: Strings = {
     core_remove_preference: "好みの削除",
     core_delete_entry: "記録の削除",
     diet_log_meal: "食事の記録",
+    diet_calculate_label: "栄養表示の換算",
     diet_get_intake: "食事記録の確認",
     diet_update_food: "食品の更新",
     diet_update_dish: "料理の更新",
@@ -828,6 +837,7 @@ export const ja: Strings = {
     not_found: "該当するデータが見つかりません。",
     nothing_to_plan: "プロフィールを入力し、体重を一度記録してからプランを作成してください。",
     plan_busy: "プランを作成中です。完了までお待ちください。",
+    plan_blocked: "生成したプランが安全性の確認を通過しなかったため、保存していません。既存のプランは変更されていません。条件を調整して再試行してください。",
     internal: "内部エラーが発生しました。もう一度お試しください。",
     llm_auth: "モデルの認証に失敗しました。API Key が正しいか確認してください。",
     llm_rate_limited: "リクエストが多すぎます。しばらくしてから再試行してください。",

@@ -50,6 +50,10 @@ impl Plugin for TrainingPlugin {
         tools::specs()
     }
 
+    fn is_read_only_tool(&self, name: &str) -> bool {
+        name == "training_get_log"
+    }
+
     async fn approval_preview(
         &self,
         ctx: &PluginContext,

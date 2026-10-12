@@ -70,6 +70,10 @@ impl Plugin for StockPlugin {
         tools::specs()
     }
 
+    fn is_read_only_tool(&self, name: &str) -> bool {
+        name == "stock_list"
+    }
+
     async fn call_tool(
         &self,
         ctx: &PluginContext,

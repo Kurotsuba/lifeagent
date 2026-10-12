@@ -1,6 +1,6 @@
-//! Finalize and validate the training section. Violations trigger the planner's retry and, if
-//! still unmet, become warnings; warnings are only shown. Both are `PlanNote`s, like the diet
-//! section's.
+//! Finalize and validate the training section. Violations trigger the planner's retry.
+//! Invalid structure, invalid exercises and the hard duration limit block publication if
+//! still unmet. Other deviations can remain as warnings, like the diet section's.
 
 use chrono::NaiveDate;
 use lifeagent_core::plugin::{PlanNote, PlanSection, PluginContext, PluginError};
@@ -39,7 +39,8 @@ fn invalid(reason: String) -> PlanSection {
             "training_invalid_structure",
             format!("The training section has the wrong shape: {reason}"),
         )
-        .with("reason", reason)],
+        .with("reason", reason)
+        .blocking()],
     }
 }
 
@@ -65,7 +66,8 @@ pub async fn finalize(
                     format!("\"{name}\": {problem}"),
                 )
                 .with("name", name)
-                .with("problem", problem),
+                .with("problem", problem)
+                .blocking(),
             );
         }
     }
@@ -98,7 +100,8 @@ pub async fn finalize(
                 format!("The session's {minutes:.0} minutes exceed the {HARD_MAX_MINUTES:.0}-minute limit"),
             )
             .with("minutes", minutes.round())
-            .with("max", HARD_MAX_MINUTES.round()),
+            .with("max", HARD_MAX_MINUTES.round())
+            .blocking(),
         );
     }
     if !planned.rest_day {
@@ -233,11 +236,13 @@ mod tests {
             kinds(&section.violations),
             vec!["training_invalid_structure"]
         );
+        assert!(section.violations[0].blocks_plan());
 
         let section = finalize(&env.ctx, day, json!({"rest_day": false, "exercises": []}))
             .await
             .unwrap();
         assert_eq!(kinds(&section.violations), vec!["training_no_exercises"]);
+        assert!(!section.violations[0].blocks_plan());
 
         let section = finalize(
             &env.ctx,
@@ -275,11 +280,13 @@ mod tests {
         let section = finalize(&env.ctx, day, run(200)).await.unwrap();
         assert_eq!(kinds(&section.violations), vec!["training_too_long"]);
         assert_eq!(section.violations[0].0["max"], 180.0);
+        assert!(section.violations[0].blocks_plan());
 
         let section = finalize(&env.ctx, day, run(60)).await.unwrap();
         assert!(section.violations.is_empty());
         assert_eq!(kinds(&section.warnings), vec!["training_over_usual"]);
         assert_eq!(section.warnings[0].0["usual"], 45.0);
+        assert!(!section.warnings[0].blocks_plan());
     }
 
     #[tokio::test]

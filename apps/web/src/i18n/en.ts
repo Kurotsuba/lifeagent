@@ -328,6 +328,8 @@ export const en: Strings = {
   },
   chat: {
     inputPlaceholder: "Type a message (Enter to send, Shift+Enter for a new line)",
+    readOnly: "Ask without changing records",
+    readOnlyHint: "For translations, explanations and calculations. Health data, meal records and plans stay unchanged. The conversation is still saved.",
     send: "Send",
     sending: "Sending…",
     empty: "No messages yet. Say something!",
@@ -442,6 +444,7 @@ export const en: Strings = {
       internal: "Internal error",
       budget_exceeded: "Daily token limit reached",
       busy: "Another plan is being made",
+      plan_blocked: "Plan failed a safety check and was not saved",
       not_configured: "No model configured",
       action_not_pending: "Already handled or expired",
       rate_limited: "The model is busy",
@@ -457,6 +460,7 @@ export const en: Strings = {
     toolOutcomes: {
       ran: "done",
       invalid_args: "refused",
+      read_only_mode: "not run: read-only question",
       not_found: "not found",
       failed: "error",
     },
@@ -479,12 +483,15 @@ export const en: Strings = {
     },
     guardrails: {
       invalid_args: "Blocked: arguments or rules don't allow it",
+      read_only_mode: "Blocked: this question cannot change records",
       unknown_tool: "Blocked: no such tool, or it's switched off",
       token_budget: "Blocked: over the daily token limit",
       iteration_cap: "Stopped: too many steps",
     },
-    planValidation: (d: { violations: readonly unknown[]; retried: boolean; violations_left: number }) =>
-      d.violations.length === 0
+    planValidation: (d: { violations: readonly unknown[]; retried: boolean; violations_left: number; blocking_violations_left?: number }) =>
+      (d.blocking_violations_left ?? 0) > 0
+        ? `Plan check: ${d.blocking_violations_left} safety issues remain; saving was blocked`
+        : d.violations.length === 0
         ? "Plan check: passed"
         : d.violations_left === 0
           ? `Plan check: ${d.violations.length} issues found, all fixed on a retry`
@@ -600,6 +607,7 @@ export const en: Strings = {
     diet_meal_logged: (d: { meal_type: "breakfast" | "lunch" | "dinner" | "snack"; kcal: number }) =>
       `Logged ${{ breakfast: "breakfast", lunch: "lunch", dinner: "dinner", snack: "a snack" }[d.meal_type]} · ${d.kcal} kcal`,
     diet_intake_viewed: (d: { date: string }) => `Viewed meals for ${d.date}`,
+    diet_label_calculated: (d: { portion_grams: number }) => `Calculated label nutrition for ${d.portion_grams} g; no intake recorded`,
     diet_food_updated: (d: { name: string }) => `Updated food: ${d.name}`,
     diet_dish_updated: (d: { name: string }) => `Updated dish: ${d.name}`,
     diet_alias_added: (d: { alias: string; food: string }) => `Added alias: ${d.alias} → ${d.food}`,
@@ -648,6 +656,7 @@ export const en: Strings = {
     core_remove_preference: "Remove a preference",
     core_delete_entry: "Delete an entry",
     diet_log_meal: "Log a meal",
+    diet_calculate_label: "Calculate label nutrition",
     diet_get_intake: "View meals",
     diet_update_food: "Update food",
     diet_update_dish: "Update dish",
@@ -830,6 +839,7 @@ export const en: Strings = {
     not_found: "That item couldn't be found.",
     nothing_to_plan: "Complete your profile and log your weight once, then create a plan.",
     plan_busy: "A plan is already being created. Please wait for it to finish.",
+    plan_blocked: "The generated plan failed a safety check and was not saved. Existing plans are unchanged. Adjust your request and try again.",
     internal: "Something went wrong. Please try again.",
     llm_auth: "The model rejected the API key. Check that it's correct.",
     llm_rate_limited: "Too many requests. Please wait a moment and try again.",

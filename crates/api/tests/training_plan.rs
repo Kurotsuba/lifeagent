@@ -101,6 +101,55 @@ fn planner_prompts(mock: &MockChatModel) -> Vec<String> {
 }
 
 #[tokio::test]
+async fn invalid_training_never_reaches_the_diet_stage() {
+    let db = lifeagent_core::db::TestDb::new().await;
+    let now = local(2026, 9, 24, 10);
+    let mock = Arc::new(MockChatModel::new());
+    let app = CoreAppBuilder::new(db.config.clone())
+        .clock(Arc::new(FixedClock::new(now)))
+        .secrets(Arc::new(MemorySecretStore::new()))
+        .plugin(Arc::new(DietPlugin))
+        .plugin(Arc::new(TrainingPlugin))
+        .chat_model_override(mock.clone())
+        .build()
+        .await
+        .unwrap();
+    app.profile().set(&profile()).await.unwrap();
+    app.events()
+        .append(
+            "body.weight_logged",
+            now,
+            json!({"kg": WEIGHT_KG}),
+            EventSource::Ui,
+        )
+        .await
+        .unwrap();
+    app.set_plugin_enabled("training", true).await.unwrap();
+    let tomorrow = app.logical_today().await.unwrap().succ_opt().unwrap();
+    for _ in 0..2 {
+        mock.push_response(json_response(json!({
+            "summary": "invalid training",
+            "sections": {"training": {
+                "rest_day": false,
+                "exercises": [
+                    {"name": "run", "kind": "cardio", "duration_min": -20}
+                ]
+            }}
+        })));
+    }
+
+    let result = app.generate_plan(tomorrow, PlanTrigger::Manual, None).await;
+
+    assert!(result.is_err());
+    let prompts = planner_prompts(&mock);
+    assert_eq!(prompts.len(), 2, "only training and its retry may run");
+    assert!(prompts
+        .iter()
+        .all(|prompt| !prompt.contains("## Section \"diet\"")));
+    assert!(app.get_plan(tomorrow).await.unwrap().is_none());
+}
+
+#[tokio::test]
 async fn diet_is_planned_after_training_with_raised_targets() {
     let db = lifeagent_core::db::TestDb::new().await;
     let now = local(2026, 9, 24, 10);

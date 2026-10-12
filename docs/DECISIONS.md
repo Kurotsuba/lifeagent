@@ -2925,3 +2925,26 @@ and warning text is zh-CN" decisions above.
 - **Training title:** an empty planner title stays empty; the UI shows "rest day"/"training".
 - LLM-only text (context snippets, briefs, tool errors) stays as it was: the model reads any
   language and replies in the user's.
+
+## 2026-10-11 — Useful in-scope chat with explicit read-only execution and blocking plan checks
+
+Food-label translations, walking encouragement and known label calculations were still refused
+in the deployed incoming revision. The conversation prompt now judges scope by daily-life purpose,
+distinguishes quoted/hypothetical material from actual reports, and delegates label scaling to the
+pure Rust `diet_calculate_label` tool. Unknown label nutrients stay unknown.
+
+An optional `read_only` chat request narrows both the advertised tools and execution permissions;
+the default keeps existing clients' behavior. Plugins explicitly opt read-only tools in. An
+unfinished turn's permission is persisted and cannot increase on retry or process restart.
+The existing approval machinery is preserved. This adds a deterministic boundary for questions
+without requiring confirmation for every ordinary meal report.
+
+Program-generated `PlanNote.blocking` marks detected allergens and invalid structural/numeric
+constraints. Such problems must clear the existing retry or the plan returns `plan_blocked` before
+downstream propagation and publication; ordinary target deviations stay warnings. Existing plans
+remain unchanged. ASCII food-term boundaries prevent `egg` from matching `eggplant`.
+
+The incoming source passed 664 tests; two added safety regressions failed against that source.
+The optimized source passed 685 tests (one existing Google ADC live test ignored), formatting,
+Clippy with warnings denied and the frontend build. Source/model/deployment evidence and limitations
+are separated in [the optimization handoff](OPTIMIZATION_2026-10-11.md). No new deployment was made.

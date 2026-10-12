@@ -427,6 +427,7 @@ impl PlanService {
                     .await
                     .map_err(|e| CoreError::Plugin(format!("{id}: {e}")))?;
                 if let Some(section) = section {
+                    ensure_publishable(id, &section)?;
                     let mut warnings = section.warnings;
                     warnings.extend(section.violations);
                     draft.insert(id.to_string(), section.data.clone());
@@ -470,7 +471,7 @@ impl PlanService {
         let mut warnings = Vec::new();
         for (id, section) in sections {
             warnings.extend(section.warnings);
-            // §7.12 step 6: violations still unmet after the retry, marked for the UI.
+            // Only soft violations reach here; blocking ones never enter the draft.
             warnings.extend(
                 section
                     .violations
@@ -579,7 +580,7 @@ async fn plan_stage(
         sections = finalize_all(ctx, date, inputs, &output, draft).await?;
     }
     // The validator's verdict on this stage: what it found first, whether that sent the
-    // planner back for a retry, and how many violations are left (they become warnings).
+    // planner back for a retry, and whether any remaining violations block publication.
     crate::audit::record(
         crate::audit::StepKind::PlanValidation,
         serde_json::json!({
@@ -588,10 +589,27 @@ async fn plan_stage(
             "violations": violations,
             "retried": retried,
             "violations_left": sections.iter().map(|(_, s)| s.violations.len()).sum::<usize>(),
+            "blocking_violations_left": sections.iter().flat_map(|(_, s)| &s.violations)
+                .filter(|note| note.blocks_plan()).count(),
         }),
     )
     .await;
+    for (id, section) in &sections {
+        ensure_publishable(id, section)?;
+    }
     Ok((output, sections))
+}
+
+/// Check before sharing a section with later plugins or saving any part of the plan.
+/// Keep personal values out of the error: the existing validation audit has the detail.
+fn ensure_publishable(id: &str, section: &PlanSection) -> Result<(), CoreError> {
+    if let Some(note) = section.violations.iter().find(|note| note.blocks_plan()) {
+        return Err(CoreError::PlanBlocked {
+            section: id.to_string(),
+            rule: note.kind().to_string(),
+        });
+    }
+    Ok(())
 }
 
 async fn planner_prompt(
@@ -694,7 +712,8 @@ async fn finalize_all(
                     "core_section_missing",
                     format!("The plan has no \"{}\" section", input.section),
                 )
-                .with("section", &input.section)],
+                .with("section", &input.section)
+                .blocking()],
             },
         };
         sections.push((input.section.clone(), section));
@@ -793,10 +812,15 @@ mod tests {
             _prior: &PlanDraft,
         ) -> Result<PlanSection, crate::plugin::PluginError> {
             let ok = raw.get("ok") == Some(&Value::Bool(true));
+            let violation = if raw.get("blocking") == Some(&Value::Bool(true)) {
+                note("not ok").blocking()
+            } else {
+                note("not ok")
+            };
             Ok(PlanSection {
                 data: raw,
                 warnings: vec![note("注意")],
-                violations: if ok { vec![] } else { vec![note("not ok")] },
+                violations: if ok { vec![] } else { vec![violation] },
             })
         }
     }
@@ -997,10 +1021,15 @@ mod tests {
             _date: NaiveDate,
             _prior: &PlanDraft,
         ) -> Result<Option<PlanSection>, crate::plugin::PluginError> {
+            let violation = if self.data.get("blocking") == Some(&Value::Bool(true)) {
+                note("computed violation").blocking()
+            } else {
+                note("computed violation")
+            };
             Ok((!self.data.is_null()).then(|| PlanSection {
                 data: self.data.clone(),
                 warnings: vec![note("computed warning")],
-                violations: vec![note("computed violation")],
+                violations: vec![violation],
             }))
         }
     }
@@ -1181,6 +1210,72 @@ mod tests {
         assert_eq!(plan.warnings[0].0.get("unmet"), None);
         assert_eq!(plan.warnings[1].0["unmet"], true);
         assert_eq!(mock.received_requests().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn blocking_violation_stops_before_later_stages_and_publication() {
+        let (ctx, mock, _dir) = crate::test_support::context().await;
+        let mut rx = ctx.events.subscribe();
+        for _ in 0..2 {
+            mock.push_response(planner_reply(
+                "unsafe",
+                serde_json::json!({"test": {"ok": false, "blocking": true}}),
+            ));
+        }
+        let result = PlanService::new(vec![
+            Arc::new(SectionPlugin),
+            staged("later", &["test"], false),
+        ])
+        .generate(&ctx, DAY, PlanTrigger::Manual, None)
+        .await;
+
+        assert!(matches!(result, Err(CoreError::PlanBlocked { .. })));
+        assert_eq!(
+            mock.received_requests().len(),
+            2,
+            "later stage must not run"
+        );
+        assert!(ctx.plans.current(DAY).await.unwrap().is_none());
+        while let Ok(event) = rx.try_recv() {
+            assert!(!matches!(event, AppEvent::PlanReady { .. }));
+        }
+    }
+
+    #[tokio::test]
+    async fn corrected_blocking_violation_can_be_published() {
+        let (ctx, mock, _dir) = crate::test_support::context().await;
+        mock.push_response(planner_reply(
+            "unsafe",
+            serde_json::json!({"test": {"ok": false, "blocking": true}}),
+        ));
+        mock.push_response(planner_reply(
+            "corrected",
+            serde_json::json!({"test": {"ok": true}}),
+        ));
+
+        let plan = service()
+            .generate(&ctx, DAY, PlanTrigger::Manual, None)
+            .await
+            .unwrap();
+
+        assert_eq!(plan.content.summary, "corrected");
+        assert_eq!(plan.version, 1);
+        assert_eq!(ctx.plans.current(DAY).await.unwrap(), Some(plan));
+    }
+
+    #[tokio::test]
+    async fn blocking_computed_section_stops_before_the_planner() {
+        let (ctx, mock, _dir) = crate::test_support::context().await;
+        let result = PlanService::new(vec![
+            computed("household", serde_json::json!({"blocking": true})),
+            staged("diet", &["household"], false),
+        ])
+        .generate(&ctx, DAY, PlanTrigger::Manual, None)
+        .await;
+
+        assert!(matches!(result, Err(CoreError::PlanBlocked { .. })));
+        assert!(mock.received_requests().is_empty());
+        assert!(ctx.plans.current(DAY).await.unwrap().is_none());
     }
 
     #[tokio::test]

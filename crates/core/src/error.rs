@@ -62,6 +62,11 @@ pub enum CoreError {
     #[error("a plan is already being generated")]
     PlanBusy,
 
+    /// A generated plan still violates a required constraint after validation and retry.
+    /// Carries rule identifiers only, never profile values or model output.
+    #[error("plan blocked by required constraint in {section}: {rule}")]
+    PlanBlocked { section: String, rule: String },
+
     /// An approval or rejection of an action that was already resolved or has expired
     /// (`crate::approvals`).
     #[error("the action is no longer awaiting approval")]
@@ -82,6 +87,7 @@ impl CoreError {
             }
             CoreError::NotFound(_) => "not_found",
             CoreError::PlanBusy => "busy",
+            CoreError::PlanBlocked { .. } => "plan_blocked",
             CoreError::ActionNotPending => "action_not_pending",
             CoreError::Llm(e) => e.code(),
             CoreError::Db(_) | CoreError::Migrate(_) | CoreError::Json(_) | CoreError::Io(_) => {

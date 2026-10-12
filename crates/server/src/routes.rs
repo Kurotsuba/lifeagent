@@ -52,6 +52,8 @@ fn reply<T: Serialize>(
 #[derive(Deserialize)]
 struct Text {
     text: String,
+    #[serde(default)]
+    read_only: bool,
 }
 #[derive(Deserialize)]
 struct Limit {
@@ -251,7 +253,7 @@ async fn run_command(
         "complete_onboarding" => reply(ops::complete_onboarding(app).await),
         "send_message" => {
             let a: Text = args(&body)?;
-            reply(ops::send_message(app, &a.text).await)
+            reply(ops::send_message_with_mode(app, &a.text, a.read_only).await)
         }
         "get_history" => {
             let a: Limit = args(&body)?;
@@ -638,5 +640,18 @@ mod tests {
         assert_eq!((a.date, a.request), (None, None));
         assert!(args::<Text>(&Bytes::from_static(b"{}")).is_err());
         assert!(args::<Text>(&Bytes::from_static(b"not json")).is_err());
+    }
+
+    #[test]
+    fn chat_read_only_mode_is_explicit_and_defaults_to_legacy_behavior() {
+        let old: Text = args(&Bytes::from_static(br#"{"text":"hello"}"#)).unwrap();
+        assert!(!old.read_only);
+        let read: Text =
+            args(&Bytes::from_static(br#"{"text":"hello","read_only":true}"#)).unwrap();
+        assert!(read.read_only);
+        assert!(args::<Text>(&Bytes::from_static(
+            br#"{"text":"hello","read_only":"true"}"#
+        ))
+        .is_err());
     }
 }

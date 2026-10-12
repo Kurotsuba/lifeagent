@@ -19,6 +19,87 @@ pub struct Macros {
     pub fiber_g: f64,
 }
 
+/// Values explicitly supplied on a per-100 g label. Missing values remain unknown, rather
+/// than becoming zero or being estimated from the other nutrients.
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LabelNutrition {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kcal: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub protein_g: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub carbs_g: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fat_g: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fiber_g: Option<f64>,
+}
+
+impl LabelNutrition {
+    /// Calculate a portion using the same scaling as logged nutrition, without persisting
+    /// anything or filling in missing label values. All quantities are grams, energy is kcal.
+    pub fn for_grams(&self, grams: f64) -> Result<Self, String> {
+        if !grams.is_finite() || grams <= 0.0 {
+            return Err("portion_grams must be a finite number greater than zero".into());
+        }
+        let values = [
+            self.kcal,
+            self.protein_g,
+            self.carbs_g,
+            self.fat_g,
+            self.fiber_g,
+        ];
+        if values.iter().all(Option::is_none) {
+            return Err("provide at least one nutrition value from the per-100 g label".into());
+        }
+        if values.iter().flatten().any(|v| !v.is_finite() || *v < 0.0) {
+            return Err("label values must be finite numbers greater than or equal to zero".into());
+        }
+        if self.kcal.is_some_and(|v| v > 900.0)
+            || self.fiber_g.is_some_and(|v| v > 100.0)
+            || self.protein_g.unwrap_or(0.0)
+                + self.carbs_g.unwrap_or(0.0)
+                + self.fat_g.unwrap_or(0.0)
+                > 100.0 + 1e-9
+        {
+            return Err("check the label units: per 100 g, energy cannot exceed 900 kcal and nutrients cannot exceed 100 g".into());
+        }
+        if let (Some(fiber), Some(carbs)) = (self.fiber_g, self.carbs_g) {
+            if fiber > carbs {
+                return Err("fiber_g cannot exceed carbs_g (total carbohydrate)".into());
+            }
+        }
+        let scaled = Macros {
+            kcal: self.kcal.unwrap_or(0.0),
+            protein_g: self.protein_g.unwrap_or(0.0),
+            carbs_g: self.carbs_g.unwrap_or(0.0),
+            fat_g: self.fat_g.unwrap_or(0.0),
+            fiber_g: self.fiber_g.unwrap_or(0.0),
+        }
+        .for_grams(grams);
+        if [
+            scaled.kcal,
+            scaled.protein_g,
+            scaled.carbs_g,
+            scaled.fat_g,
+            scaled.fiber_g,
+        ]
+        .iter()
+        .any(|v| !v.is_finite())
+        {
+            return Err("portion calculation is too large; check the quantity and units".into());
+        }
+        Ok(Self {
+            kcal: self.kcal.map(|_| scaled.kcal),
+            protein_g: self.protein_g.map(|_| scaled.protein_g),
+            carbs_g: self.carbs_g.map(|_| scaled.carbs_g),
+            fat_g: self.fat_g.map(|_| scaled.fat_g),
+            fiber_g: self.fiber_g.map(|_| scaled.fiber_g),
+        })
+    }
+}
+
 impl Macros {
     /// Scales per-100 g values to a portion of `grams`.
     pub fn for_grams(&self, grams: f64) -> Macros {
