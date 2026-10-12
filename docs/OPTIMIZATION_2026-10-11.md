@@ -1,8 +1,8 @@
 # 修改说明：LifeAgent 日常问答、只读模式与计划校验
 
-日期：2026-10-13（代码实现与完整回归为 2026-10-11）  
+日期：2026-10-13（代码实现为 2026-10-11；本次完整复核为 2026-10-13）  
 整理：REI  
-关联提交：本文件与下列代码改动位于同一次提交；可用 `git log -1 --format=%H -- docs/OPTIMIZATION_2026-10-11.md` 查询。  
+代码修改提交：[`a31c239`](https://github.com/Kurotsuba/lifeagent/commit/a31c2397a5438743fda8928312d8c55c7d98db90)，同时包含下列代码改动与本说明；后续文档提交补充当日复核结果。  
 基线：本次提供的 `lifeagent-g-hackathon (2).zip`。
 
 原包 SHA-256：`407a95c27a82a9054a899cd535229bdc8c9be9179d3df721f3a49735c83cbfd8`。
@@ -2761,9 +2761,12 @@ diff --git a/docs/DECISIONS.md b/docs/DECISIONS.md
 
 ```sh
 cargo fmt --all --check
-cargo clippy --workspace --all-targets --locked -- -D warnings
-cargo test --workspace --locked
+cargo clippy --workspace --all-targets --locked --target-dir target/verification -- -D warnings
+cargo test --workspace --locked --target-dir target/verification
+cargo build --workspace --locked --target-dir target/verification
 ```
+
+验证当前版本时使用独立的构建目录，原版与优化版不要共用同一个 target。上述 `target/verification` 位于已忽略的 `target/` 下；如果它已有其他版本产物，应另选未使用的子目录。本次 2026-10-13 复核使用全新的独立目录，依赖已缓存，因此还启用了 `--offline`。
 
 若先定位本次相关回归，可分别运行：
 
@@ -2793,10 +2796,16 @@ npm run build
 | 2026-10-11 | 两个新增回归在原版上运行 | 按预期失败；优化版通过 |
 | 2026-10-13 | 最新原包、代码文件哈希与补丁重放 | 原包与前次一致；优化源码除说明外与已测试版本一致；补丁重放校验通过 |
 | 2026-10-13 | 后续定向 `planning` 检查 | 编译失败，未进入测试；不能作为新的通过结果 |
+| 2026-10-13 | 对已推送 `a31c239` 使用全新 target 重新编译并完整测试 | 685 通过、0 失败、1 项真实 Google ADC 测试按默认设置跳过；退出码 0 |
+| 2026-10-13 | 对同一提交运行格式检查、Clippy 全 targets `-D warnings`、workspace 构建 | 全部退出码 0；生成可执行服务与 CLI |
+| 2026-10-13 | 前端 TypeScript/Vite 生产构建 | 退出码 0；使用原锁定的已有依赖，没有升级 |
+| 2026-10-13 | 启动新编译的服务，连接隔离 PostgreSQL，加载生产前端资源 | 19 次 HTTP 检查符合预期：健康检查、页面/JS/CSS、注册登录退出、普通/只读聊天、历史记录及删除合成账号 |
 
 两个原版失败用例是 `repeated_allergen_violation_never_publishes_a_plan` 和 `unsafe_revision_preserves_the_previous_plan`，分别覆盖过敏违规残留与非法份量修订。测试使用真实隔离数据库和模拟模型，检查工具调用、数据与计划事件。
 
-10 月 13 日的额外定向检查返回 E0407/E0599，报告 `Plugin` 缺少 `is_read_only_tool`、`PlanNote` 缺少 `blocking`。当时临时调整过测试文件位置，之后已恢复到已验证源码；恢复后尚未重跑。该编译问题的原因未确定，须复核构建输入与依赖产物，不能仅以 10 月 11 日的通过记录认定当前检查全绿。
+10 月 13 日较早的额外定向检查返回 E0407/E0599，报告 `Plugin` 缺少 `is_read_only_tool`、`PlanNote` 缺少 `blocking`。当时临时调整过测试文件位置，随后已恢复。后续核对确认 `a31c239` 的源码包含这两个方法，Cargo 也正确解析到当前 workspace；旧 target 中存在指向原版基线的 core 产物，且历史记录明确基线与优化版曾共用该目录。失败当次没有完整 rustc `--extern` 命令，不能据此证明唯一根因。当前提交使用全新 target 后无需修改功能代码即可通过上述编译、测试与启动检查，两个错误未复现。
+
+本次复核环境为 Windows、Rust/cargo 1.94.0、PostgreSQL 17.11、Node 22.18.0、npm 10.9.3。服务绑定 `127.0.0.1:18081`，数据库仅使用本地隔离实例 `127.0.0.1:55432`；模型为 `LIFEAGENT_MOCK_LLM=1` 的 EchoModel。HTTP 检查确认两次聊天各自保存一组 user/assistant 历史，档案在只读回合前后不变，退出与删除账号后均返回 401。合成账号已删除，服务与测试数据库均停止。HTTP 页面和资源可取不等同于浏览器视觉验收；本次也未构建 Linux 容器或调用真实模型。
 
 ### 真实模型与页面验收步骤（待执行）
 
@@ -2817,9 +2826,9 @@ npm run build
 
 ## 未完成 / 待确认
 
-- **最新定向编译失败尚未定位。** 合并前复核依赖构建与源码是否一致，并在恢复后的源码上重新完成相关检查。
+- **旧定向编译错误未在独立构建中复现。** 当前 `a31c239` 已通过全新构建、完整测试和本地启动检查；旧共享 target 的失败原因仍不能唯一归因，后续跨版本对比应使用独立 target。
 - **普通模式历史记录更正仍可能半执行。** 删除旧记录等待批准时，模型可能先追加替代记录；之后拒绝删除会留下重复数据。本次只补等待提示词，尚未实现后端原子更正。
 - 普通模式的“不记录”仍依赖模型理解；需要程序保证时使用显式只读开关。
 - 过敏识别仍基于食物名称，不能保证发现隐藏成分、全部同义词或交叉污染；标签工具不推断缺失数值。
 - 真实模型效果与三语言页面尚待按上述步骤验收。没有将 4/7 的有限原版样本当作总体拒答率。
-- 本提交通过审阅分支 `rei/optimization-20261013` 交付。当前 CI 只响应 `g-hackathon` 的 push，审阅分支的 push 不会触发该工作流的检查或部署；合并前需完成上述复核。合入 `g-hackathon` 后通过校验即会自动部署。
+- 本提交通过审阅分支 `rei/optimization-20261013` 交付。当前 CI 只响应 `g-hackathon` 的 push，审阅分支的 push 不会触发该工作流的检查或部署；本轮本地复核已完成，真实模型和目标部署环境仍待验证。合入 `g-hackathon` 后通过校验即会自动部署。
