@@ -153,6 +153,7 @@ mod tests {
             model: "model-x".into(),
             temperature: None,
             effort: None,
+            fallback_model: None,
         };
         let config = ModelsConfig {
             providers: vec![ProviderConfig {

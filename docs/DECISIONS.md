@@ -3012,3 +3012,20 @@ boundary. A time like 01:00 belongs to the next calendar morning, but the checks
 on the logical day itself, so it would have counted as due right after 04:00 the same day (a
 missed-meal check-in at dawn). `FollowUpTimes::validate` rejects it with
 `ValidationRule::CheckTimeBeforeDayBoundary`, which the UI words in all three languages.
+
+## 2026-10-13 — Planner fallback model
+
+The planner runs on `google/gemini-3.1-pro-preview`, a Public Preview that Google can change or
+retire at short notice, and the router had no second model: if the preview went away, nightly
+plans, "generate plan" and the "adjust tomorrow's plan" follow-up would all fail. Gemini 3.5 Pro
+was considered as a GA replacement, but this project gets 404 for it on every endpoint (it has a
+registry entry, but Google's model and location docs don't list it as served; it appears to be
+allowlist-only), so the preview stays.
+
+`RoleBinding` gained an optional `fallback_model` on the same provider. The router retries a
+call on it once when the bound model answers 404 (retired or not available to the project), 429
+or 5xx after the provider's own retries. Auth, config, budget, timeouts and malformed responses
+are not retried: they would fail the same way on the fallback, or add a second long wait. Both
+calls are recorded in `llm_usage` and logged, with a WARN line naming the fallback. The deploy
+binds `google/gemini-2.5-pro` (GA, checked callable from the project on 2026-10-13) for the
+planner; parser and conversation are GA models and have none.

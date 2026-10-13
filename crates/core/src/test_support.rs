@@ -43,6 +43,7 @@ pub async fn env() -> TestEnv {
         model: "mock".into(),
         temperature: None,
         effort: None,
+        fallback_model: None,
     };
     let config = ModelsConfig {
         providers: vec![ProviderConfig {

@@ -297,6 +297,7 @@ impl CoreAppBuilder {
                 model: "mock".into(),
                 temperature: None,
                 effort: None,
+                fallback_model: None,
             };
             let config = ModelsConfig {
                 providers: vec![ProviderConfig {
@@ -369,6 +370,7 @@ fn unconfigured_router(usage_sink: Arc<DbUsageSink>) -> LlmRouter {
         model: String::new(),
         temperature: None,
         effort: None,
+        fallback_model: None,
     };
     let config = ModelsConfig {
         providers: Vec::new(),
@@ -1832,6 +1834,7 @@ mod tests {
             model: "claude-sonnet-5".into(),
             temperature: None,
             effort: None,
+            fallback_model: None,
         };
         ModelsConfig {
             providers: vec![ProviderConfig {

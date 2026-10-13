@@ -462,6 +462,7 @@ mod tests {
             model: "gpt-test".into(),
             temperature: None,
             effort: None,
+            fallback_model: None,
         };
         let config = ModelsConfig {
             providers: vec![ProviderConfig {

@@ -60,6 +60,23 @@ pub struct RoleBinding {
     pub temperature: Option<f32>,
     /// Anthropic only; `None` falls back to the per-role default (§6.3 table).
     pub effort: Option<Effort>,
+    /// A second model on the same provider, tried once when `model` itself is unavailable
+    /// (`is_model_unavailable`): e.g. a preview model that is retired, overloaded or out of
+    /// quota. Omitted (and not written) when unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fallback_model: Option<String>,
+}
+
+/// Errors that say the bound model can't serve right now, so another model on the same
+/// provider may: 404 (retired or not available to the project), 429 and 5xx after the
+/// provider's own retries. Not auth, config, budget, timeouts or bad responses: those would
+/// fail the same way, or cost a second long wait, on the fallback.
+fn is_model_unavailable(err: &LlmError) -> bool {
+    match err {
+        LlmError::RateLimited => true,
+        LlmError::Status { code, .. } => *code == 404 || *code >= 500,
+        _ => false,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -243,11 +260,8 @@ impl LlmRouter {
             ),
         };
 
-        let provider_id = binding.provider_id.clone();
-        let model = binding.model.clone();
-
         let full_req = ChatRequest {
-            model: model.clone(),
+            model: binding.model.clone(),
             messages: req.messages,
             tools: req.tools,
             temperature,
@@ -255,6 +269,37 @@ impl LlmRouter {
             response_format: req.response_format,
             effort,
         };
+
+        let fallback = binding.fallback_model.as_ref().map(|model| ChatRequest {
+            model: model.clone(),
+            ..full_req.clone()
+        });
+        let result = self.call(role, provider.as_ref(), binding, full_req).await;
+        match (result, fallback) {
+            (Err(err), Some(fallback)) if is_model_unavailable(&err) => {
+                tracing::warn!(
+                    ?role,
+                    model = %binding.model,
+                    fallback = %fallback.model,
+                    error = err.code(),
+                    "model unavailable; trying the fallback"
+                );
+                self.call(role, provider.as_ref(), binding, fallback).await
+            }
+            (result, _) => result,
+        }
+    }
+
+    /// One provider call with its budget check, INFO line and usage record.
+    async fn call(
+        &self,
+        role: Role,
+        provider: &dyn ChatModel,
+        binding: &RoleBinding,
+        full_req: ChatRequest,
+    ) -> Result<ChatResponse, LlmError> {
+        let provider_id = binding.provider_id.clone();
+        let model = full_req.model.clone();
 
         self.usage_sink.check_budget(role).await?;
         let start = Instant::now();
@@ -318,6 +363,7 @@ mod tests {
             model: "model-x".into(),
             temperature,
             effort,
+            fallback_model: None,
         };
         ModelsConfig {
             providers: vec![ProviderConfig {
@@ -509,6 +555,102 @@ mod tests {
         assert!(!events[0].ok);
         assert_eq!(events[0].prompt_tokens, 0);
         assert_eq!(events[0].completion_tokens, 0);
+    }
+
+    fn router_with_fallback(mock: Arc<MockChatModel>, sink: Arc<RecordingUsageSink>) -> LlmRouter {
+        let mut providers: HashMap<String, Arc<dyn ChatModel>> = HashMap::new();
+        providers.insert("p1".into(), mock);
+        let mut cfg = config(ProviderKind::OpenAiCompatible);
+        cfg.planner.fallback_model = Some("model-y".into());
+        LlmRouter::with_providers(cfg, providers, sink)
+    }
+
+    #[tokio::test]
+    async fn an_unavailable_model_falls_back_once_and_both_calls_are_recorded() {
+        for err in [
+            LlmError::Status {
+                code: 404,
+                body_excerpt: "not found".into(),
+            },
+            LlmError::Status {
+                code: 503,
+                body_excerpt: String::new(),
+            },
+            LlmError::RateLimited,
+        ] {
+            let mock = Arc::new(MockChatModel::new());
+            mock.push_error(err);
+            mock.push_response(ok_response());
+            let sink = Arc::new(RecordingUsageSink::default());
+            let router = router_with_fallback(mock.clone(), sink.clone());
+
+            router
+                .complete(Role::Planner, RoleRequest::default())
+                .await
+                .unwrap();
+
+            let models: Vec<_> = mock
+                .received_requests()
+                .into_iter()
+                .map(|r| r.model)
+                .collect();
+            assert_eq!(models, ["model-x", "model-y"]);
+            let events = sink.events.lock().unwrap();
+            assert_eq!(
+                events
+                    .iter()
+                    .map(|e| (e.model.as_str(), e.ok))
+                    .collect::<Vec<_>>(),
+                [("model-x", false), ("model-y", true)]
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn other_errors_and_roles_without_a_fallback_do_not_retry() {
+        for err in [
+            LlmError::Auth,
+            LlmError::Timeout,
+            LlmError::InvalidResponse("bad".into()),
+            LlmError::Status {
+                code: 400,
+                body_excerpt: String::new(),
+            },
+        ] {
+            let mock = Arc::new(MockChatModel::new());
+            mock.push_error(err);
+            let router =
+                router_with_fallback(mock.clone(), Arc::new(RecordingUsageSink::default()));
+            assert!(router
+                .complete(Role::Planner, RoleRequest::default())
+                .await
+                .is_err());
+            assert_eq!(mock.received_requests().len(), 1);
+        }
+
+        // The parser has no fallback bound.
+        let mock = Arc::new(MockChatModel::new());
+        mock.push_error(LlmError::RateLimited);
+        let router = router_with_fallback(mock.clone(), Arc::new(RecordingUsageSink::default()));
+        assert!(matches!(
+            router.complete(Role::Parser, RoleRequest::default()).await,
+            Err(LlmError::RateLimited)
+        ));
+        assert_eq!(mock.received_requests().len(), 1);
+    }
+
+    #[test]
+    fn fallback_model_is_optional_in_the_config() {
+        let b: RoleBinding = serde_json::from_str(r#"{"provider_id":"p","model":"m"}"#).unwrap();
+        assert_eq!(b.fallback_model, None);
+        assert!(serde_json::to_value(&b)
+            .unwrap()
+            .get("fallback_model")
+            .is_none());
+        let b: RoleBinding =
+            serde_json::from_str(r#"{"provider_id":"p","model":"m","fallback_model":"f"}"#)
+                .unwrap();
+        assert_eq!(b.fallback_model.as_deref(), Some("f"));
     }
 
     struct KeysFor(&'static [&'static str]);
