@@ -326,7 +326,8 @@ async fn log_planned(
         .and_then(Value::as_str)
         .unwrap_or(meal.as_str())
         .to_string();
-    let items: Vec<(String, f64)> = plan_meal
+    // (matched row, wording shown, grams): the row is looked up again; the wording is kept.
+    let items: Vec<(String, Option<String>, f64)> = plan_meal
         .get("items")
         .and_then(Value::as_array)
         .map(|items| {
@@ -335,6 +336,9 @@ async fn log_planned(
                 .filter_map(|i| {
                     Some((
                         i.get("name")?.as_str()?.to_string(),
+                        i.get("display_name")
+                            .and_then(Value::as_str)
+                            .map(str::to_string),
                         i.get("grams")?.as_f64()?,
                     ))
                 })
@@ -348,13 +352,17 @@ async fn log_planned(
         )));
     }
 
-    let queries: Vec<FoodQuery> = items.iter().map(|(name, _)| FoodQuery::new(name)).collect();
+    let queries: Vec<FoodQuery> = items
+        .iter()
+        .map(|(name, _, _)| FoodQuery::new(name))
+        .collect();
     let foods = resolve_many(ctx, &queries).await?;
     let items: Vec<MealItem> = foods
         .into_iter()
         .zip(items)
-        .map(|(food, (_, grams))| MealItem {
+        .map(|(food, (_, shown, grams))| MealItem {
             macros: food.per_100g.for_grams(grams),
+            display_name: shown.and_then(|s| MealItem::display_name_for(&s, &food.name)),
             name: food.name,
             kind: ItemKind::Food,
             brand: None,
@@ -403,7 +411,7 @@ mod tests {
         let meal = |meal_type: &str, title: &str| {
             json!({
                 "meal_type": meal_type, "title": title,
-                "items": [{"name": "熟米饭", "grams": 200.0}],
+                "items": [{"name": "熟米饭", "display_name": "米饭", "grams": 200.0}],
                 "total": {"kcal": 232.0},
             })
         };
@@ -511,6 +519,9 @@ mod tests {
         assert_eq!(meals[0].meal.meal_type, MealType::Lunch);
         assert_eq!(meals[0].meal.raw_text, "米饭午餐");
         assert_eq!(meals[0].meal.items[0].grams, Some(200.0));
+        // Looked up by the plan's row, shown with the plan's wording.
+        assert_eq!(meals[0].meal.items[0].name, "熟米饭");
+        assert_eq!(meals[0].meal.items[0].display_name.as_deref(), Some("米饭"));
         // The model was never called.
         assert!(env.mock.received_requests().is_empty());
     }

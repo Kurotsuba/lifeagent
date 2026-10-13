@@ -330,6 +330,11 @@ pub struct Dish {
 pub struct MealItem {
     /// Canonical food name, or dish name including size, from the food/dish table.
     pub name: String,
+    /// The wording the item was asked for (the parser's or planner's "納豆" for the row
+    /// "だいず　［納豆類］　糸引き納豆"), shown instead of `name`. `None` when it is `name`
+    /// itself, for dishes, and on events logged before this field existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
     /// `#[serde(default)]`: absent in every event logged before dishes existed, which are all
     /// `Food`.
     #[serde(default)]
@@ -367,11 +372,20 @@ pub struct MealItem {
 }
 
 impl MealItem {
-    /// Display JSON: `{name, kind, brand, grams, servings, kcal, protein_g, estimated,
-    /// source_kind, source_name}`. `grams` is `null` for a dish item whose `serving_g` is unknown.
+    /// `display_name` for a food matched as `name` from the query `asked`: the query, unless
+    /// it is empty or already the name.
+    pub fn display_name_for(asked: &str, name: &str) -> Option<String> {
+        let asked = asked.trim();
+        (!asked.is_empty() && asked != name).then(|| asked.to_string())
+    }
+
+    /// Display JSON: `{name, display_name, kind, brand, grams, servings, kcal, protein_g,
+    /// estimated, source_kind, source_name}`. `grams` is `null` for a dish item whose
+    /// `serving_g` is unknown.
     pub fn to_json(&self) -> Value {
         json!({
             "name": self.name,
+            "display_name": self.display_name,
             "kind": self.kind,
             "brand": self.brand,
             "grams": self.grams.map(round1),
@@ -553,6 +567,7 @@ mod tests {
     fn label_formats_a_food_item_with_grams() {
         let item = MealItem {
             name: "熟米饭".into(),
+            display_name: None,
             kind: ItemKind::Food,
             brand: None,
             grams: Some(150.0),
@@ -572,6 +587,7 @@ mod tests {
     fn label_formats_a_dish_item_with_brand_and_servings() {
         let item = MealItem {
             name: "牛めし（並盛）".into(),
+            display_name: None,
             kind: ItemKind::Dish,
             brand: Some("松屋".into()),
             grams: Some(350.0),
@@ -591,6 +607,7 @@ mod tests {
     fn label_formats_a_brandless_dish_item() {
         let item = MealItem {
             name: "A定食（大）".into(),
+            display_name: None,
             kind: ItemKind::Dish,
             brand: None,
             grams: None,

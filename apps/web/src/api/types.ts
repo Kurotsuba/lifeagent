@@ -453,6 +453,15 @@ export interface DietMealItem {
   /** Planned items of a shared meal only: grams to cook for the whole table (computed in Rust).
    * `grams`, `kcal` and `protein_g` stay the user's own portion. */
   table_grams?: number;
+  /** The wording the item was asked for (e.g. 納豆), shown instead of `name`, the matched
+   * food-table row the nutrition comes from. Absent when it is `name` itself, for dishes, and on
+   * meals and plans saved before it existed. */
+  display_name?: string | null;
+}
+
+/** Item text: the asked-for wording, falling back to the matched row's name. */
+export function mealItemName(item: DietMealItem): string {
+  return item.display_name ?? item.name;
 }
 
 /** One logged meal, as `cards.diet.meals` lists it (§8.8). */

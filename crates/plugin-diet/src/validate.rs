@@ -245,6 +245,8 @@ pub async fn finalize(
 
             let entry = MealItem {
                 macros: food.per_100g.for_grams(item.grams),
+                // `name` stays the matched row: "ate as planned" looks items up again by it.
+                display_name: MealItem::display_name_for(planned_name, &food.name),
                 name: food.name,
                 kind: ItemKind::Food,
                 brand: None,
@@ -817,7 +819,13 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(section.data["meals"][0]["items"][1]["estimated"], false);
+        let item = &section.data["meals"][0]["items"][1];
+        assert_eq!(item["estimated"], false);
+        // Shown as the planner wrote it; `name` stays the matched row, for the tooltip and
+        // for logging the meal as planned.
+        assert_eq!(item["display_name"], "鸡蛋");
+        assert_eq!(item["name"], "鸡蛋(煮)");
+        assert_eq!(item["source_name"], "表");
         // One match call and no estimate.
         assert_eq!(env.mock.received_requests().len(), 1);
     }

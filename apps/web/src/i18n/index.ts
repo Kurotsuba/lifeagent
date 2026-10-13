@@ -1,6 +1,7 @@
 import type {
   ActionPreview,
   CommandError,
+  DietMealItem,
   ErrorDetail,
   FollowUpData,
   ImportMessage,
@@ -138,6 +139,14 @@ export function sourceDisplayName(kind: SourceKind, name: string): string {
   if (kind === "user") return strings.settings.foodData.kindManual;
   if (kind === "llm_estimate") return strings.settings.foodData.kindEstimate;
   return name;
+}
+
+/** A meal or plan item's tooltip: where its nutrition comes from, as `source:row`, or just the
+ * row for meals logged before the source was recorded. */
+export function mealItemSource(item: DietMealItem): string {
+  return item.source_name === null
+    ? item.name
+    : `${sourceDisplayName(item.source_kind, item.source_name)}:${item.name}`;
 }
 
 /** What a tool call did, in the current language. A kind this build doesn't know (a newer

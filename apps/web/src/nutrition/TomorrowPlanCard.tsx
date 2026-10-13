@@ -8,12 +8,13 @@ import {
 import {
   commandErrorMessage,
   dietPlanSection,
+  mealItemName,
   trainingPlanSection,
   type StoredPlan,
 } from "../api/types";
 import { primaryButtonClass, secondaryButtonClass } from "../components/buttonStyles";
 import { inputClass } from "../components/Field";
-import { describePlanNote, strings } from "../i18n";
+import { describePlanNote, mealItemSource, strings } from "../i18n";
 import { SharedMeal } from "./SharedMeal";
 
 const t = strings.today.tomorrowPlan;
@@ -157,9 +158,9 @@ export function TomorrowPlanCard({ plan, planTime, onAdjust, onChanged }: Tomorr
               </p>
               <p className="mt-1 text-neutral-600 dark:text-neutral-400">
                 {meal.items.map((item, j) => (
-                  <span key={j}>
+                  <span key={j} title={mealItemSource(item)}>
                     {j > 0 ? strings.common.listSeparator : ""}
-                    {item.name} {strings.today.diet.gramsShort(Math.round(item.table_grams ?? item.grams ?? 0))}
+                    {mealItemName(item)} {strings.today.diet.gramsShort(Math.round(item.table_grams ?? item.grams ?? 0))}
                   </span>
                 ))}
               </p>

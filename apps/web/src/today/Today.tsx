@@ -5,12 +5,13 @@ import {
   commandErrorMessage,
   dietCard,
   dietPlanSection,
+  mealItemName,
   trainingPlanSection,
   type MealType,
   type StockView,
   type TodayView,
 } from "../api/types";
-import { strings } from "../i18n";
+import { mealItemSource, strings } from "../i18n";
 import { IntakeSummary } from "../nutrition/IntakeSummary";
 import { SharedMeal } from "../nutrition/SharedMeal";
 import { ShoppingList } from "../stock/ShoppingList";
@@ -178,9 +179,9 @@ function DietPlanCard({ view }: { view: TodayView }) {
                 </p>
                 <p className="mt-1 text-neutral-600 dark:text-neutral-400">
                   {meal.items.map((item, j) => (
-                    <span key={j}>
+                    <span key={j} title={mealItemSource(item)}>
                       {j > 0 ? strings.common.listSeparator : ""}
-                      {item.name} {strings.today.diet.gramsShort(Math.round(item.table_grams ?? item.grams ?? 0))}
+                      {mealItemName(item)} {strings.today.diet.gramsShort(Math.round(item.table_grams ?? item.grams ?? 0))}
                     </span>
                   ))}
                 </p>

@@ -439,6 +439,7 @@ async fn log_meal(ctx: &PluginContext, args: Value) -> Result<ToolOutput, Plugin
                 items.push(MealItem {
                     macros,
                     name: dish.name,
+                    display_name: None,
                     kind: ItemKind::Dish,
                     brand: (!dish.brand.is_empty()).then_some(dish.brand),
                     grams: m.grams,
@@ -458,6 +459,7 @@ async fn log_meal(ctx: &PluginContext, args: Value) -> Result<ToolOutput, Plugin
                     })?;
                     items.push(MealItem {
                         macros: food.per_100g.for_grams(component.grams),
+                        display_name: MealItem::display_name_for(&component.name, &food.name),
                         name: food.name,
                         kind: ItemKind::Food,
                         brand: None,
@@ -757,6 +759,8 @@ mod tests {
 
         // 土豆 shares no character with 马铃薯; only the alternate name finds it.
         assert_eq!(out.content["items"][0]["name"], "马铃薯");
+        // Shown as the user put it; the nutrition is still the matched row's.
+        assert_eq!(out.content["items"][0]["display_name"], "土豆");
         assert_eq!(out.content["items"][0]["estimated"], false);
         assert_eq!(out.content["total"]["kcal"], 154.0);
         // The parser and the one match call: no estimate.
