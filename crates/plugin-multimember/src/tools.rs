@@ -1,7 +1,7 @@
 //! Multimember tools (`docs/MULTIMEMBER_SPEC.md` §7). The chat always speaks as the owner; these
 //! let the owner tell the assistant about the other people they share meals with.
 
-use chrono::NaiveDate;
+use chrono::{Datelike, NaiveDate};
 use lifeagent_core::plugin::{PluginContext, PluginError, ToolOutput, ToolSummary};
 use lifeagent_core::profile::{ActivityLevel, DietaryPattern, Sex};
 use lifeagent_llm::types::ToolSpec;
@@ -19,7 +19,11 @@ pub fn specs() -> Vec<ToolSpec> {
     let profile_props = json!({
         "display_name": {"type": "string"},
         "sex": {"type": "string", "enum": ["male", "female"]},
-        "birth_date": {"type": "string", "description": "YYYY-MM-DD"},
+        "birth_date": {
+            "type": "string",
+            "description": "Birth year and month, YYYY-MM. Ask only for the year and month, \
+                never the day."
+        },
         "height_cm": {"type": "number"},
         "weight_kg": {"type": "number"},
         "activity_level": {
@@ -232,8 +236,22 @@ pub async fn call(ctx: &PluginContext, name: &str, args: Value) -> Result<ToolOu
     }
 }
 
-fn parse_args<T: for<'de> Deserialize<'de>>(args: Value) -> Result<T, PluginError> {
+fn parse_args<T: for<'de> Deserialize<'de>>(mut args: Value) -> Result<T, PluginError> {
+    birth_month_to_date(&mut args);
     serde_json::from_value(args).map_err(|e| PluginError::InvalidArgs(e.to_string()))
+}
+
+/// The assistant asks for a member's birth year and month only, like the web form; a `YYYY-MM`
+/// `birth_date` is stored as the 1st of that month. A full `YYYY-MM-DD` is still accepted.
+fn birth_month_to_date(args: &mut Value) {
+    if let Some(v) = args.get_mut("birth_date") {
+        if let Some(s) = v.as_str() {
+            let s = s.trim();
+            if NaiveDate::parse_from_str(&format!("{s}-01"), "%Y-%m-%d").is_ok() {
+                *v = json!(format!("{s}-01"));
+            }
+        }
+    }
 }
 
 fn parse_date(s: &str) -> Result<NaiveDate, PluginError> {
@@ -296,7 +314,11 @@ async fn update_member(ctx: &PluginContext, args: Value) -> Result<ToolOutput, P
     let profile = MemberProfile {
         display_name: a.display_name.unwrap_or(p.display_name),
         sex: a.sex.unwrap_or(p.sex),
-        birth_date: a.birth_date.unwrap_or(p.birth_date),
+        // Like the web form, a year and month that don't change keep the stored day.
+        birth_date: a
+            .birth_date
+            .filter(|d| (d.year(), d.month()) != (p.birth_date.year(), p.birth_date.month()))
+            .unwrap_or(p.birth_date),
         height_cm: a.height_cm.unwrap_or(p.height_cm),
         weight_kg: a.weight_kg.unwrap_or(p.weight_kg),
         activity_level: a.activity_level.unwrap_or(p.activity_level),
@@ -457,7 +479,6 @@ async fn remove_dislike(ctx: &PluginContext, args: Value) -> Result<ToolOutput, 
 mod tests {
     use super::*;
     use crate::testutil::{env, today};
-    use chrono::Datelike;
 
     fn aki_args() -> Value {
         json!({
@@ -553,6 +574,40 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(list.content["members"], json!([]));
+    }
+
+    #[tokio::test]
+    async fn birth_date_is_taken_as_year_and_month() {
+        let env = env().await;
+        let ctx = &env.ctx;
+        let mut aki = aki_args();
+        aki["birth_date"] = json!("1992-05");
+        let out = call(ctx, "multimember_add_member", aki).await.unwrap();
+        let birth = |m: &Value| m["birth_date"].as_str().map(str::to_string);
+        assert_eq!(birth(&out.content["member"]).as_deref(), Some("1992-05-01"));
+
+        // Same year and month keeps the stored day; a new month moves to its 1st.
+        let id = out.content["member"]["id"].as_str().unwrap().to_string();
+        let m = store::resolve(ctx, &id).await.unwrap();
+        let mut p = m.profile.clone();
+        p.birth_date = NaiveDate::from_ymd_opt(1992, 5, 10).unwrap();
+        store::update_member(ctx, &id, &p).await.unwrap();
+        let updated = |args: Value| async move {
+            let out = call(ctx, "multimember_update_member", args).await.unwrap();
+            birth(&out.content["member"])
+        };
+        assert_eq!(
+            updated(json!({"member": "Aki", "birth_date": "1992-05"}))
+                .await
+                .as_deref(),
+            Some("1992-05-10")
+        );
+        assert_eq!(
+            updated(json!({"member": "Aki", "birth_date": "1992-06"}))
+                .await
+                .as_deref(),
+            Some("1992-06-01")
+        );
     }
 
     #[tokio::test]

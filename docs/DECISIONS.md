@@ -3031,3 +3031,6 @@ binds `google/gemini-3.5-flash` (GA, checked callable from the project on 2026-1
 planner; parser and conversation are GA models and have none. 2.5 Pro was the first choice and
 also works, but 3.5 Flash is a Gemini 3 model like the rest of the deploy and much faster, at
 the cost of a weaker plan on the rare day the preview is down.
+- The chat follows the same rule: the multimember tools describe `birth_date` as `YYYY-MM` and
+  tell the assistant to ask only for the year and month. A `YYYY-MM` value is stored as the 1st
+  (a full date is still accepted), and an update with the stored year and month keeps the day.
