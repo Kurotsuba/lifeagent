@@ -52,6 +52,10 @@ impl Plugin for DietPlugin {
         tools::specs()
     }
 
+    fn is_read_only_tool(&self, name: &str) -> bool {
+        matches!(name, "diet_get_intake" | "diet_calculate_label")
+    }
+
     async fn approval_preview(
         &self,
         ctx: &PluginContext,

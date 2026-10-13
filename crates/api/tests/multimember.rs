@@ -399,6 +399,32 @@ async fn a_shared_dinner_is_planned_with_guest_constraints_and_portions() {
 }
 
 #[tokio::test]
+async fn repeated_guest_allergen_violation_does_not_publish_meals_or_shopping() {
+    let env = app_at(local(2026, 10, 4, 10)).await;
+    let (app, mock) = (&env.app, &env.mock);
+    let tomorrow = app.logical_today().await.unwrap().succ_opt().unwrap();
+    seed_owner(&env, tomorrow).await;
+    app.set_plugin_enabled("multimember", true).await.unwrap();
+    store::add_member(&app.plugin_context(), &aki(), None)
+        .await
+        .unwrap();
+    for _ in 0..2 {
+        let mut output = planned("えびフライ");
+        output["sections"]["stock"]["shopping_list"] = json!([
+            {"name": "えびフライ", "amount": 20.0, "unit": "g"}
+        ]);
+        mock.push_response(json_response(output));
+    }
+
+    assert!(app
+        .generate_plan(tomorrow, PlanTrigger::Manual, None)
+        .await
+        .is_err());
+    assert!(app.get_plan(tomorrow).await.unwrap().is_none());
+    assert_eq!(planner_prompts(mock).len(), 2);
+}
+
+#[tokio::test]
 async fn without_guests_the_diet_section_is_unchanged() {
     let env = app_at(local(2026, 10, 4, 10)).await;
     let (app, mock) = (&env.app, &env.mock);

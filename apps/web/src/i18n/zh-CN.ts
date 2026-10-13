@@ -332,6 +332,8 @@ export const zhCN = {
   },
   chat: {
     inputPlaceholder: "输入消息，Enter 发送，Shift+Enter 换行",
+    readOnly: "只问不记录",
+    readOnlyHint: "适合翻译、解释和试算；不会改动健康资料、饮食记录或计划。对话仍会保存。",
     send: "发送",
     sending: "发送中…",
     empty: "还没有对话，说点什么吧",
@@ -457,6 +459,7 @@ export const zhCN = {
       internal: "内部错误",
       budget_exceeded: "已达到每日 token 上限",
       busy: "已有计划在生成中",
+      plan_blocked: "计划未通过安全检查，未保存",
       not_configured: "尚未配置模型",
       action_not_pending: "该操作已处理或已过期",
       rate_limited: "模型繁忙",
@@ -472,6 +475,7 @@ export const zhCN = {
     toolOutcomes: {
       ran: "已执行",
       invalid_args: "被拒绝",
+      read_only_mode: "只问不记录：未执行",
       not_found: "未找到",
       failed: "出错",
     },
@@ -494,12 +498,15 @@ export const zhCN = {
     },
     guardrails: {
       invalid_args: "已拦截：参数或规则不允许",
+      read_only_mode: "已拦截：本次提问不允许修改记录",
       unknown_tool: "已拦截：不存在或未开启的工具",
       token_budget: "已拦截：超出每日 token 上限",
       iteration_cap: "已停止：步骤过多",
     },
-    planValidation: (d: { violations: readonly unknown[]; retried: boolean; violations_left: number }) =>
-      d.violations.length === 0
+    planValidation: (d: { violations: readonly unknown[]; retried: boolean; violations_left: number; blocking_violations_left?: number }) =>
+      (d.blocking_violations_left ?? 0) > 0
+        ? `计划检查：${d.blocking_violations_left} 个安全问题未解决，已阻止保存`
+        : d.violations.length === 0
         ? "计划检查：通过"
         : d.violations_left === 0
           ? `计划检查：发现 ${d.violations.length} 个问题，重新生成后全部解决`
@@ -618,6 +625,7 @@ export const zhCN = {
     diet_meal_logged: (d: { meal_type: "breakfast" | "lunch" | "dinner" | "snack"; kcal: number }) =>
       `已记录${{ breakfast: "早餐", lunch: "午餐", dinner: "晚餐", snack: "加餐" }[d.meal_type]} · ${d.kcal} kcal`,
     diet_intake_viewed: (d: { date: string }) => `查看了 ${d.date} 的饮食记录`,
+    diet_label_calculated: (d: { portion_grams: number }) => `按标签换算了 ${d.portion_grams} g 的营养，未记录摄入`,
     diet_food_updated: (d: { name: string }) => `已更新食物：${d.name}`,
     diet_dish_updated: (d: { name: string }) => `已更新菜品：${d.name}`,
     diet_alias_added: (d: { alias: string; food: string }) => `已添加别名：${d.alias} → ${d.food}`,
@@ -664,6 +672,7 @@ export const zhCN = {
     core_remove_preference: "删除偏好",
     core_delete_entry: "删除记录",
     diet_log_meal: "记录饮食",
+    diet_calculate_label: "换算标签营养",
     diet_get_intake: "查看饮食记录",
     diet_update_food: "更新食物",
     diet_update_dish: "更新菜品",
@@ -845,6 +854,7 @@ export const zhCN = {
     not_found: "未找到对应的数据。",
     nothing_to_plan: "请先完善个人档案并记录一次体重，再生成计划。",
     plan_busy: "计划正在生成中，请等待完成。",
+    plan_blocked: "生成的计划未通过安全检查，未保存本次结果，已有计划保持不变。请调整要求后重试。",
     internal: "发生内部错误，请重试。",
     llm_auth: "模型鉴权失败，请检查 API Key 是否正确。",
     llm_rate_limited: "请求过于频繁，请稍后再试。",

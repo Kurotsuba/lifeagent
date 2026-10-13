@@ -59,6 +59,10 @@ impl Plugin for MultimemberPlugin {
         tools::specs()
     }
 
+    fn is_read_only_tool(&self, name: &str) -> bool {
+        name == "multimember_list_members"
+    }
+
     async fn approval_preview(
         &self,
         ctx: &PluginContext,

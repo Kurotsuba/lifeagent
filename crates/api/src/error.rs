@@ -47,6 +47,7 @@ pub enum ErrorDetail {
     NotFound,
     NothingToPlan,
     PlanBusy,
+    PlanBlocked,
     Internal,
     // ---- Model provider (`LlmError`) ----
     LlmAuth,
@@ -130,6 +131,10 @@ impl std::fmt::Display for ErrorDetail {
             NotFound => write!(f, "未找到对应的数据。"),
             NothingToPlan => write!(f, "请先完善个人档案并记录一次体重，再生成计划。"),
             PlanBusy => write!(f, "计划正在生成中，请等待完成。"),
+            PlanBlocked => write!(
+                f,
+                "生成的计划未通过安全检查，未保存本次结果，已有计划保持不变。请调整要求后重试。"
+            ),
             Internal => write!(f, "发生内部错误，请重试。"),
             LlmAuth => write!(f, "模型鉴权失败，请检查 API Key 是否正确。"),
             LlmRateLimited => write!(f, "请求过于频繁，请稍后再试。"),
@@ -223,6 +228,7 @@ impl From<CoreError> for CommandError {
             }
             CoreError::NothingToPlan => CommandError::new(code, ErrorDetail::NothingToPlan),
             CoreError::PlanBusy => CommandError::new(code, ErrorDetail::PlanBusy),
+            CoreError::PlanBlocked { .. } => CommandError::new(code, ErrorDetail::PlanBlocked),
             CoreError::ActionNotPending => CommandError::new(code, ErrorDetail::ActionNotPending),
             CoreError::Llm(e) => e.into(),
             other => {
@@ -503,6 +509,20 @@ mod tests {
         let err: CommandError = CoreError::PlanBusy.into();
         assert_eq!(err.code, "busy");
         assert_eq!(err.detail, ErrorDetail::PlanBusy);
+    }
+
+    #[test]
+    fn blocked_plan_has_an_actionable_message_without_internal_details() {
+        let err: CommandError = CoreError::PlanBlocked {
+            section: "diet".into(),
+            rule: "diet_allergen".into(),
+        }
+        .into();
+        assert_eq!(err.code, "plan_blocked");
+        assert_eq!(err.detail, ErrorDetail::PlanBlocked);
+        assert!(err.message.contains("未保存"));
+        let json = serde_json::to_string(&err).unwrap();
+        assert!(!json.contains("diet_allergen"));
     }
 
     #[test]

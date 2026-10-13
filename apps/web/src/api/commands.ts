@@ -91,8 +91,8 @@ export function getSettings(): Promise<SettingsDto> {
 
 // ---- Chat --------------------------------------------------------------------------------
 
-export function sendMessage(text: string): Promise<ChatTurn> {
-  return call("send_message", { text });
+export function sendMessage(text: string, readOnly = false): Promise<ChatTurn> {
+  return call("send_message", { text, read_only: readOnly });
 }
 
 export function getHistory(limit: number): Promise<HistoryMessage[]> {

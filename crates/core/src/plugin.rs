@@ -159,6 +159,16 @@ impl PlanNote {
         Self(serde_json::json!({ "kind": kind, "text": text.into() }))
     }
 
+    /// A hard constraint: after the planner's retry this note must prevent the section
+    /// entering the draft or becoming a saved plan. Ordinary target deviations stay soft.
+    pub fn blocking(self) -> Self {
+        self.with("blocking", true)
+    }
+
+    pub fn blocks_plan(&self) -> bool {
+        self.0.get("blocking").and_then(Value::as_bool) == Some(true)
+    }
+
     /// Adds one param, like [`ToolSummary::with`].
     pub fn with(mut self, key: &str, value: impl Serialize) -> Self {
         if let Value::Object(map) = &mut self.0 {
@@ -226,6 +236,13 @@ impl From<CoreError> for PluginError {
 pub trait Plugin: Send + Sync {
     fn manifest(&self) -> PluginManifest;
     fn tools(&self) -> Vec<ToolSpec>;
+
+    /// Explicitly reviewed read-only tools: no business data changes, queued approvals,
+    /// or other external effects. New/unknown tools default to denied in read-only chat.
+    fn is_read_only_tool(&self, _name: &str) -> bool {
+        false
+    }
+
     async fn call_tool(
         &self,
         ctx: &PluginContext,
@@ -305,7 +322,8 @@ pub trait Plugin: Send + Sync {
 
     /// The section for `date`, for a plugin whose [`Plugin::computes_plan_section`] is true.
     /// `None`: no section that day. Called in the plugin's planning stage before any LLM call.
-    /// There is nothing to retry, so any `violations` are kept as warnings.
+    /// There is nothing to retry: blocking violations abort planning; other violations are
+    /// kept as warnings.
     async fn computed_plan_section(
         &self,
         _ctx: &PluginContext,
@@ -421,11 +439,17 @@ mod tests {
         assert_eq!(note.kind(), "diet_x");
         assert_eq!(note.to_string(), "English text");
         assert_eq!(note.0["grams"], 12.5);
+        assert!(!note.blocks_plan());
+        let blocking = note.blocking();
+        let restored: PlanNote =
+            serde_json::from_str(&serde_json::to_string(&blocking).unwrap()).unwrap();
+        assert!(restored.blocks_plan());
 
         // A warning stored before notes were data.
         let legacy: Vec<PlanNote> = serde_json::from_str(r#"["脂肪偏高"]"#).unwrap();
         assert_eq!(legacy[0].kind(), "");
         assert_eq!(legacy[0].text(), "脂肪偏高");
+        assert!(!legacy[0].blocks_plan());
     }
 
     fn manifest(migrations: Vec<PluginMigration>) -> PluginManifest {

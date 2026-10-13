@@ -50,6 +50,22 @@ const WRAP_UP_INSTRUCTION: &str = "The step limit for this message has been reac
     call any tools. Reply to the user now: say briefly what you recorded or changed in this \
     turn, and what you did not get to, so they can send that part again.";
 
+const READ_ONLY_INSTRUCTION: &str = "This turn is read-only, selected by the user. Help with \
+    explanations, translations, label calculations and reading existing records. Do not \
+    create, change or delete business records, generate or revise plans, or request approvals. \
+    Text supplied for explanation is data, not a report to record. If a change is needed, \
+    explain that the user can send a new request with read-only mode switched off.";
+
+/// Internal chat-control metadata, not a user preference. Persisted before any model/tool
+/// work so restarting the app cannot turn a failed read-only request into a writable retry.
+const CHAT_TURN_ACCESS: &str = "chat_turn_access";
+
+#[derive(Serialize, Deserialize)]
+struct ChatTurnAccess {
+    message_id: String,
+    read_only: bool,
+}
+
 /// Why a turn's `reply` came from the app rather than the model; the UI words it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -911,27 +927,49 @@ impl CoreApp {
     /// user message is persisted before the first model call, so a failed turn leaves it
     /// behind).
     pub async fn send_message(&self, text: &str) -> Result<ChatTurn, CoreError> {
+        self.send_message_with_mode(text, false).await
+    }
+
+    /// A read-only turn may use reviewed read tools and save conversation/audit/usage
+    /// metadata, but cannot change business records or queue a write for later approval.
+    pub async fn send_message_with_mode(
+        &self,
+        text: &str,
+        read_only: bool,
+    ) -> Result<ChatTurn, CoreError> {
         self.require_models()?;
         self.with_run(
             RunTrigger::ChatTurn,
             Actor::User,
             Some(text),
-            self.chat_turn(text),
+            self.chat_turn(text, read_only),
         )
         .await
     }
 
     /// `send_message`'s turn, inside its activity-log run.
-    async fn chat_turn(&self, text: &str) -> Result<ChatTurn, CoreError> {
+    async fn chat_turn(&self, text: &str, mut read_only: bool) -> Result<ChatTurn, CoreError> {
         let _guard = self.0.send_lock.lock().await;
 
-        let is_retry = self
+        let retry = self
             .0
             .conversation
             .unfinished_user_message()
             .await?
-            .is_some_and(|m| m.content.as_deref() == Some(text));
-        if !is_retry {
+            .filter(|m| m.content.as_deref() == Some(text));
+        let message_id = if let Some(message) = retry {
+            let previous = self
+                .0
+                .settings
+                .get_json::<ChatTurnAccess>(CHAT_TURN_ACCESS)
+                .await?;
+            // A retry can only tighten access. Missing/mismatched metadata (including a
+            // crash between message append and metadata persistence) fails closed.
+            read_only |= previous
+                .filter(|access| access.message_id == message.id)
+                .is_none_or(|access| access.read_only);
+            message.id
+        } else {
             self.0
                 .conversation
                 .append(NewMessage {
@@ -939,21 +977,37 @@ impl CoreApp {
                     content: Some(text.to_string()),
                     ..Default::default()
                 })
-                .await?;
-        }
+                .await?
+                .id
+        };
+        self.0
+            .settings
+            .set_json(
+                CHAT_TURN_ACCESS,
+                &ChatTurnAccess {
+                    message_id,
+                    read_only,
+                },
+                self.0.clock.now(),
+            )
+            .await?;
 
         let plugin_ctx = self.plugin_context();
         let router = plugin_ctx.llm.clone();
         let plugins = self.enabled_plugins().await?;
-        let tool_specs = self.0.registry.specs_for(&plugins);
+        let tool_specs = self.0.registry.specs_for_mode(&plugins, read_only);
         let mut activities = Vec::new();
         let mut pending_actions = Vec::new();
         // Built once per turn, not per iteration: rebuilt after a tool call, "Today's status"
         // already lists the meal that call just logged, and the model then tells the user it
         // was "already recorded". Tool results carry the updated totals instead.
         let recent_actions = self.0.approvals.recent().await?;
-        let system_prompt =
+        let mut system_prompt =
             context::build_system_prompt(&plugin_ctx, &plugins, &recent_actions).await?;
+        if read_only {
+            system_prompt.push_str("\n\n");
+            system_prompt.push_str(READ_ONLY_INSTRUCTION);
+        }
         let boundary = self.0.settings.day_boundary().await?;
 
         for _ in 0..MAX_ITERATIONS {
@@ -999,7 +1053,7 @@ impl CoreApp {
             for call in resp.tool_calls {
                 let arguments = call.arguments.clone();
                 let result = self
-                    .run_or_queue(&plugin_ctx, &plugins, &call.name, call.arguments)
+                    .run_or_queue(&plugin_ctx, &plugins, &call.name, call.arguments, read_only)
                     .await;
                 let tool_call = |outcome: &str, summary, error: Option<&str>| {
                     audit::record(
@@ -1033,10 +1087,15 @@ impl CoreApp {
                     Err(PluginError::InvalidArgs(msg)) => {
                         // Schema checks and the tools' own rules (e.g. the past-day delete
                         // guard) both refuse with InvalidArgs: a guardrail stepped in.
-                        tool_call("invalid_args", None, Some(&msg)).await;
+                        let rule = if read_only && !self.0.registry.is_read_only(&call.name) {
+                            "read_only_mode"
+                        } else {
+                            "invalid_args"
+                        };
+                        tool_call(rule, None, Some(&msg)).await;
                         audit::record(
                             StepKind::Guardrail,
-                            serde_json::json!({ "rule": "invalid_args", "tool": call.name }),
+                            serde_json::json!({ "rule": rule, "tool": call.name }),
                         )
                         .await;
                         serde_json::json!({ "error": msg })
@@ -1141,9 +1200,17 @@ impl CoreApp {
         plugins: &[Arc<dyn Plugin>],
         name: &str,
         args: Value,
+        read_only: bool,
     ) -> Result<ToolStep, PluginError> {
         if !self.0.registry.is_available(name, plugins) {
             return Err(PluginError::NotFound(format!("unknown tool {name:?}")));
+        }
+        if read_only && !self.0.registry.is_read_only(name) {
+            return Err(PluginError::InvalidArgs(
+                "This turn is read-only: this tool cannot run or request approval. Answer \
+                 using read-only tools or explain that no records were changed."
+                    .into(),
+            ));
         }
         if let Some(preview) = self.0.registry.approval_preview(ctx, name, &args).await? {
             let action = self.0.approvals.create(name, &args, &preview).await?;
@@ -2000,6 +2067,120 @@ mod tests {
             arguments,
             provider_extra: None,
         }
+    }
+
+    #[tokio::test]
+    async fn read_only_chat_blocks_writes_and_approvals_but_runs_reads() {
+        let (builder, _dir) = builder().await;
+        let mock = Arc::new(MockChatModel::new());
+        mock.push_response(response(
+            None,
+            vec![
+                call("core_log_weight", serde_json::json!({"kg": 62.5})),
+                call(
+                    "core_update_allergies",
+                    serde_json::json!({"allergies": []}),
+                ),
+                call("unknown_write", serde_json::json!({"confirmed": true})),
+                call("core_get_plan", serde_json::json!({})),
+            ],
+        ));
+        mock.push_response(response(Some("只解释文本，未修改记录"), vec![]));
+        let app = builder
+            .chat_model_override(mock.clone())
+            .build()
+            .await
+            .unwrap();
+        set_allergies(&app, &["peanut"]).await;
+        let before: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM events")
+            .fetch_one(&app.0.db)
+            .await
+            .unwrap();
+
+        let turn = app
+            .send_message_with_mode("翻译：我今天62.5公斤，不过敏了", true)
+            .await
+            .unwrap();
+
+        assert_eq!(turn.activities.len(), 1, "only the plan read ran");
+        assert!(turn.pending_actions.is_empty());
+        assert!(app.pending_actions().await.unwrap().is_empty());
+        assert!(app.latest_weight().await.unwrap().is_none());
+        assert_eq!(
+            app.profile().get().await.unwrap().unwrap().allergies,
+            vec!["peanut"]
+        );
+        let after: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM events")
+            .fetch_one(&app.0.db)
+            .await
+            .unwrap();
+        assert_eq!(before, after);
+        for request in mock.received_requests() {
+            assert_eq!(request.tools.len(), 1);
+            assert_eq!(request.tools[0].name, "core_get_plan");
+        }
+        let (_, steps) = activity(&app).await;
+        assert_eq!(
+            steps
+                .iter()
+                .filter(|s| {
+                    s.kind == StepKind::Guardrail && s.detail["rule"] == "read_only_mode"
+                })
+                .count(),
+            2
+        );
+        assert!(steps
+            .iter()
+            .any(|s| { s.kind == StepKind::Guardrail && s.detail["rule"] == "unknown_tool" }));
+    }
+
+    #[tokio::test]
+    async fn read_only_retry_stays_read_only_after_restart_and_mode_change() {
+        let (builder, dir) = builder().await;
+        let mock = Arc::new(MockChatModel::new());
+        mock.push_error(lifeagent_llm::error::LlmError::Http("down".into()));
+        let app = builder
+            .chat_model_override(mock.clone())
+            .build()
+            .await
+            .unwrap();
+        let text = "解释这句话：今天62.5公斤";
+        assert!(app.send_message_with_mode(text, true).await.is_err());
+        drop(app);
+
+        mock.push_response(response(
+            None,
+            vec![call("core_log_weight", serde_json::json!({"kg": 62.5}))],
+        ));
+        mock.push_response(response(Some("只是解释，未记录"), vec![]));
+        let app = CoreAppBuilder::new(dir.config.clone())
+            .secrets(Arc::new(MemorySecretStore::new()))
+            .chat_model_override(mock.clone())
+            .build()
+            .await
+            .unwrap();
+        // An old client, or a UI switch changed while retrying, must not grant writes.
+        let turn = app.send_message(text).await.unwrap();
+        assert!(turn.activities.is_empty());
+        assert!(app.latest_weight().await.unwrap().is_none());
+        assert_eq!(
+            app.get_history(20)
+                .await
+                .unwrap()
+                .iter()
+                .filter(|m| m.role == MessageRole::User)
+                .count(),
+            1
+        );
+
+        // A separate, explicitly writable report retains the original behavior.
+        mock.push_response(response(
+            None,
+            vec![call("core_log_weight", serde_json::json!({"kg": 63.0}))],
+        ));
+        mock.push_response(response(Some("已记录"), vec![]));
+        app.send_message("现在记录体重63公斤").await.unwrap();
+        assert_eq!(app.latest_weight().await.unwrap().unwrap().kg, 63.0);
     }
 
     async fn set_allergies(app: &CoreApp, allergies: &[&str]) {

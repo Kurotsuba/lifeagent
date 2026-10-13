@@ -11,7 +11,7 @@ use serde_json::{json, Value};
 use crate::dish_resolver::{self, DishOutcome};
 use crate::foods::{kcal_disagrees_with_macros, normalize, validate_per_100g};
 use crate::intake::{self, MEAL_EVENT};
-use crate::model::{ItemKind, Macros, MealItem, MealLogged, MealType};
+use crate::model::{ItemKind, LabelNutrition, Macros, MealItem, MealLogged, MealType};
 use crate::parser::parse_meal;
 use crate::resolver::{resolve_many, FoodQuery};
 use crate::sources::{self, SourceChain};
@@ -19,8 +19,44 @@ use crate::sources::{self, SourceChain};
 pub fn specs() -> Vec<ToolSpec> {
     vec![
         ToolSpec {
+            name: "diet_calculate_label".into(),
+            description: "Read-only nutrition calculation for a portion from values the user \
+                explicitly supplies on a per-100 g label. Use for questions such as '10 g \
+                protein per 100 g, how much in 150 g?', even if the food has not been eaten. \
+                Supply only known label nutrients; do not invent missing values or use this \
+                to estimate food nutrition. Energy is kcal, nutrient and portion quantities \
+                are grams. If the label is per serving or per 100 ml, ask for the matching \
+                weight basis instead of assuming ml equals g. This never records a meal, \
+                updates food data, or calls a model. Quote the returned values and their \
+                user-label source; do not call a write tool just to answer a label question."
+                .into(),
+            parameters: json!({
+                "type": "object",
+                "required": ["basis", "portion_grams", "per_100g"],
+                "additionalProperties": false,
+                "properties": {
+                    "basis": {"type": "string", "enum": ["per_100g"]},
+                    "portion_grams": {"type": "number"},
+                    "per_100g": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                            "kcal": {"type": "number"},
+                            "protein_g": {"type": "number"},
+                            "carbs_g": {"type": "number"},
+                            "fat_g": {"type": "number"},
+                            "fiber_g": {"type": "number"}
+                        }
+                    }
+                }
+            }),
+        },
+        ToolSpec {
             name: "diet_log_meal".into(),
             description: "Log a meal, snack or caloric drink the user reports having eaten. \
+                Only log the user's own actual consumption: a label question, quotation, \
+                translation, hypothetical example or plan to eat is not a meal report. Do \
+                not log when the user asks only for information or says not to record. \
                 Always pass the user's original wording in `description`, unchanged — the app \
                 works out dishes, foods, portions and nutrition itself. The app has its own \
                 menu and food data (chain restaurants, canteen set meals, imported tables) \
@@ -293,6 +329,7 @@ fn is_large_change(before: &Macros, after: &Macros, floor: &ChangeFloor) -> bool
 
 pub async fn call(ctx: &PluginContext, name: &str, args: Value) -> Result<ToolOutput, PluginError> {
     match name {
+        "diet_calculate_label" => calculate_label(args),
         "diet_log_meal" => log_meal(ctx, args).await,
         "diet_get_intake" => get_intake(ctx, args).await,
         "diet_update_food" => update_food(ctx, args).await,
@@ -307,6 +344,44 @@ pub async fn call(ctx: &PluginContext, name: &str, args: Value) -> Result<ToolOu
 
 fn parse_args<T: for<'de> Deserialize<'de>>(args: Value) -> Result<T, PluginError> {
     serde_json::from_value(args).map_err(|e| PluginError::InvalidArgs(e.to_string()))
+}
+
+#[derive(Deserialize)]
+enum LabelBasis {
+    #[serde(rename = "per_100g")]
+    Per100g,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LabelCalculationArgs {
+    basis: LabelBasis,
+    portion_grams: f64,
+    per_100g: LabelNutrition,
+}
+
+/// Deliberately has no PluginContext: calculating a supplied label cannot reach the database
+/// or a model. Unknown units/fields are rejected by deserialization rather than ignored.
+fn calculate_label(args: Value) -> Result<ToolOutput, PluginError> {
+    let args: LabelCalculationArgs = parse_args(args)?;
+    let LabelBasis::Per100g = args.basis;
+    let portion = args
+        .per_100g
+        .for_grams(args.portion_grams)
+        .map_err(PluginError::InvalidArgs)?;
+    Ok(ToolOutput {
+        content: json!({
+            "source": "user_label",
+            "basis": "per_100g",
+            "per_100g": args.per_100g,
+            "portion_grams": args.portion_grams,
+            "portion": portion,
+            "recorded": false,
+            "note": "Calculated only from the supplied label. Missing values remain unknown; no meal or food-table data was saved."
+        }),
+        summary: ToolSummary::new("diet_label_calculated")
+            .with("portion_grams", args.portion_grams),
+    })
 }
 
 #[derive(Deserialize)]

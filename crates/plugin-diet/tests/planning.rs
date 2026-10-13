@@ -224,6 +224,80 @@ async fn kcal_violation_is_retried_with_the_violation_then_stored_as_version_1()
 }
 
 #[tokio::test]
+async fn repeated_allergen_violation_never_publishes_a_plan() {
+    let env = env_at(local(2026, 9, 24, 10, 0)).await;
+    let tomorrow = env.app.logical_today().await.unwrap().succ_opt().unwrap();
+    let mut p = profile();
+    p.allergies = vec!["均衡餐".into()];
+    env.app.profile().set(&p).await.unwrap();
+    let mut rx = env.app.subscribe();
+    env.mock.push_response(planner_reply("unsafe", 300.0));
+    env.mock.push_closure(estimate_for(tomorrow));
+    env.mock.push_response(planner_reply("still unsafe", 300.0));
+
+    let result = env
+        .app
+        .generate_plan(tomorrow, PlanTrigger::Manual, None)
+        .await;
+
+    assert!(
+        result.is_err(),
+        "an allergen remaining after retry must block publication"
+    );
+    assert!(env.app.get_plan(tomorrow).await.unwrap().is_none());
+    assert!(plan_ready_events(&mut rx).is_empty());
+    assert_eq!(planner_requests(&env.mock).len(), 2);
+}
+
+#[tokio::test]
+async fn unsafe_revision_preserves_the_previous_plan() {
+    let env = env_at(local(2026, 9, 24, 10, 0)).await;
+    let tomorrow = env.app.logical_today().await.unwrap().succ_opt().unwrap();
+    env.mock.push_response(planner_reply("original", 300.0));
+    env.mock.push_closure(estimate_for(tomorrow));
+    let original = env
+        .app
+        .generate_plan(tomorrow, PlanTrigger::Manual, None)
+        .await
+        .unwrap();
+    let mut rx = env.app.subscribe();
+    // Negative portions are invalid regardless of target tolerances.
+    env.mock.push_response(planner_reply("invalid", -30.0));
+    env.mock
+        .push_response(planner_reply("still invalid", -30.0));
+
+    assert!(env
+        .app
+        .revise_plan(tomorrow, "change dinner")
+        .await
+        .is_err());
+    assert_eq!(env.app.get_plan(tomorrow).await.unwrap(), Some(original));
+    assert!(plan_ready_events(&mut rx).is_empty());
+}
+
+#[tokio::test]
+async fn remaining_nutrition_target_deviation_is_still_a_warning() {
+    let env = env_at(local(2026, 9, 24, 10, 0)).await;
+    let tomorrow = env.app.logical_today().await.unwrap().succ_opt().unwrap();
+    env.mock.push_response(planner_reply("under target", 200.0));
+    env.mock.push_closure(estimate_for(tomorrow));
+    env.mock
+        .push_response(planner_reply("still under target", 200.0));
+
+    let plan = env
+        .app
+        .generate_plan(tomorrow, PlanTrigger::Manual, None)
+        .await
+        .unwrap();
+
+    assert!(plan
+        .warnings
+        .iter()
+        .any(|n| n.kind() == "diet_kcal_off_target" && n.0["unmet"] == true));
+    assert_eq!(env.app.get_plan(tomorrow).await.unwrap(), Some(plan));
+}
+
+#[tokio::test]
 async fn revision_creates_version_2_with_trigger_revision_and_the_instruction() {
     let env = env_at(local(2026, 9, 24, 10, 0)).await;
     let tomorrow = env.app.logical_today().await.unwrap().succ_opt().unwrap();

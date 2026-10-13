@@ -32,6 +32,7 @@ impl ApiError {
     fn status(&self) -> StatusCode {
         match self.0.code.as_str() {
             "invalid_input" => StatusCode::BAD_REQUEST,
+            "plan_blocked" => StatusCode::UNPROCESSABLE_ENTITY,
             "unauthorized" | "invalid_credentials" => StatusCode::UNAUTHORIZED,
             "forbidden" => StatusCode::FORBIDDEN,
             "not_found" => StatusCode::NOT_FOUND,
@@ -87,6 +88,7 @@ mod tests {
             ("rate_limited", 429),
             ("budget_exceeded", 429),
             ("action_not_pending", 409),
+            ("plan_blocked", 422),
             ("not_configured", 503),
             ("llm", 502),
             ("auth", 502),

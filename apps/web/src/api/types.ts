@@ -97,6 +97,7 @@ export type ToolSummary =
   | { kind: "core_entry_deleted"; event_type: string }
   | { kind: "diet_meal_logged"; meal_type: MealType; kcal: number }
   | { kind: "diet_intake_viewed"; date: string }
+  | { kind: "diet_label_calculated"; portion_grams: number }
   | { kind: "diet_food_updated"; name: string }
   | { kind: "diet_dish_updated"; name: string }
   | { kind: "diet_alias_added"; alias: string; food: string }
@@ -209,8 +210,8 @@ export type RunTrigger =
   | "action_rejected";
 export type RunStatus = "running" | "succeeded" | "needs_approval" | "failed" | "interrupted";
 export type ModelRole = "conversation" | "parser" | "planner";
-export type ToolCallOutcome = "ran" | "invalid_args" | "not_found" | "failed";
-export type GuardrailRule = "invalid_args" | "unknown_tool" | "token_budget" | "iteration_cap";
+export type ToolCallOutcome = "ran" | "invalid_args" | "not_found" | "failed" | "read_only_mode";
+export type GuardrailRule = "invalid_args" | "unknown_tool" | "token_budget" | "iteration_cap" | "read_only_mode";
 
 export interface RunOutcome {
   model_calls: number;
@@ -298,6 +299,7 @@ export type ActivityStepDetail =
         violations: StoredPlanNote[];
         retried: boolean;
         violations_left: number;
+        blocking_violations_left?: number;
       };
     }
   | { kind: "plan_saved"; detail: { date: string; version: number; trigger: string } };
@@ -946,6 +948,7 @@ export type CommandErrorCode =
   | "forbidden"
   | "rate_limited"
   | "budget_exceeded"
+  | "plan_blocked"
   | "action_not_pending";
 
 /** What went wrong (`ErrorDetail`, `crates/api/src/error.rs`), worded by `describeError`. */
@@ -955,6 +958,7 @@ export type ErrorDetail =
   | { kind: "not_found" }
   | { kind: "nothing_to_plan" }
   | { kind: "plan_busy" }
+  | { kind: "plan_blocked" }
   | { kind: "internal" }
   | { kind: "llm_auth" }
   | { kind: "llm_rate_limited" }

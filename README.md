@@ -8,6 +8,11 @@ This README covers setup and day-to-day development commands. For what the app a
 see `docs/ARCHITECTURE.md` (whole-project overview) and `docs/PHASE1_SPEC.md` (the detailed
 Phase 1 spec this codebase implements). `CLAUDE.md` has the repository conventions.
 
+The 2026-10-11 local optimization adds in-scope label help, read-only chat, deterministic label
+nutrition calculations, and blocking validation for unsafe plans. See
+[`docs/OPTIMIZATION_2026-10-11.md`](docs/OPTIMIZATION_2026-10-11.md) for behavior, verification,
+compatibility and remaining limits. This source snapshot has not been deployed by REI.
+
 ## Prerequisites
 
 - **Rust**, stable, 2021 edition (`rustup default stable`).

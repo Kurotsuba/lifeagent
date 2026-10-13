@@ -403,7 +403,8 @@ pub fn check_item(
                     .with("meal_title", meal_title)
                     .with("name", item_name)
                     .with("guest", guest)
-                    .with("allergen", allergy),
+                    .with("allergen", allergy)
+                    .blocking(),
                 );
             }
         }
@@ -594,6 +595,7 @@ mod tests {
         let (v, w) = check("鶏むね肉");
         assert_eq!(v.len(), 1);
         assert_eq!(v[0].kind(), "diet_shared_pattern");
+        assert!(!v[0].blocks_plan());
         assert_eq!(v[0].0["meal_type"], "dinner");
         assert_eq!(v[0].0["pattern"], "vegetarian");
         assert_eq!(v[0].0["term"], "肉");
@@ -601,6 +603,7 @@ mod tests {
         let (v, _) = check("くるみパン");
         assert_eq!(v.len(), 1);
         assert_eq!(v[0].kind(), "diet_guest_allergen");
+        assert!(v[0].blocks_plan());
         assert_eq!(v[0].0["guest"], "v");
         assert_eq!(v[0].0["allergen"], "くるみ");
         let (v, w) = check("セロリ炒め");

@@ -90,6 +90,23 @@ impl ToolRegistry {
             .collect()
     }
 
+    /// The enabled tools permitted by this request's access mode. The dispatcher checks
+    /// again, since a model can return undeclared calls or replay them from history.
+    pub fn specs_for_mode(&self, plugins: &[Arc<dyn Plugin>], read_only: bool) -> Vec<ToolSpec> {
+        self.specs_for(plugins)
+            .into_iter()
+            .filter(|spec| !read_only || self.is_read_only(&spec.name))
+            .collect()
+    }
+
+    pub fn is_read_only(&self, name: &str) -> bool {
+        match self.owners.get(name) {
+            Some(ToolOwner::Core) => name == "core_get_plan",
+            Some(ToolOwner::Plugin(owner)) => owner.is_read_only_tool(name),
+            None => false,
+        }
+    }
+
     /// Whether `name` is a core tool or belongs to one of `plugins`. A tool of a disabled
     /// plugin isn't offered to the model; this also refuses a call to one from stale history.
     pub fn is_available(&self, name: &str, plugins: &[Arc<dyn Plugin>]) -> bool {
@@ -354,6 +371,26 @@ mod tests {
         let names: Vec<&str> = specs.iter().map(|s| s.name.as_str()).collect();
         assert!(names.contains(&"core_add_preference"));
         assert!(names.contains(&"good_do_thing"));
+    }
+
+    #[test]
+    fn read_only_tools_are_explicit_and_unknown_tools_fail_closed() {
+        let plugins: Vec<Arc<dyn Plugin>> = vec![Arc::new(GoodPlugin)];
+        let registry = ToolRegistry::build(&plugins, planner()).unwrap();
+        let names: Vec<_> = registry
+            .specs_for_mode(&plugins, true)
+            .into_iter()
+            .map(|s| s.name)
+            .collect();
+        assert_eq!(names, vec!["core_get_plan"]);
+        assert!(!registry.is_read_only("good_do_thing"));
+        assert!(!registry.is_read_only("good_unknown"));
+        assert!(!registry.is_read_only("core_unknown"));
+        assert!(!registry.is_read_only("core_log_weight"));
+        assert!(registry
+            .specs_for_mode(&plugins, false)
+            .iter()
+            .any(|s| s.name == "core_log_weight"));
     }
 
     #[test]

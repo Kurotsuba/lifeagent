@@ -223,7 +223,15 @@ pub async fn complete_onboarding(app: &CoreApp) -> Result<(), CommandError> {
 // ---- Chat --------------------------------------------------------------------------------
 
 pub async fn send_message(app: &CoreApp, text: &str) -> Result<ChatTurn, CommandError> {
-    Ok(app.send_message(text).await?)
+    send_message_with_mode(app, text, false).await
+}
+
+pub async fn send_message_with_mode(
+    app: &CoreApp,
+    text: &str,
+    read_only: bool,
+) -> Result<ChatTurn, CommandError> {
+    Ok(app.send_message_with_mode(text, read_only).await?)
 }
 
 pub async fn get_history(app: &CoreApp, limit: u32) -> Result<Vec<HistoryMessage>, CommandError> {
