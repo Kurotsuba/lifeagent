@@ -10,7 +10,7 @@ export const ja: Strings = {
     next: "次へ",
     back: "戻る",
     finish: "完了",
-    finishing: "完了しています…",
+    finishing: "処理中…",
     save: "保存",
     saving: "保存中…",
     cancel: "キャンセル",
@@ -18,8 +18,8 @@ export const ja: Strings = {
     optional: "任意",
     delete: "削除",
     confirmDelete: "削除する",
-    retry: "再試行",
-    networkError: "サーバーに接続できません。ネットワークを確認してから再試行してください。",
+    retry: "もう一度試す",
+    networkError: "サーバーに接続できませんでした。通信環境をご確認のうえ、もう一度お試しください。",
     logout: "ログアウト",
     listSeparator: "、",
     withOptional: (label: string) => `${label}（任意）`,
@@ -30,23 +30,23 @@ export const ja: Strings = {
     loginTitle: "ログイン",
     registerTitle: "新規登録",
     username: "ユーザー名",
-    usernameHint: "半角英数字と _ - . で 3〜32 文字、大文字と小文字は区別しません",
+    usernameHint: "3〜32文字の半角英数字・記号（_ - .）。大文字と小文字は区別しません",
     password: "パスワード",
-    passwordHint: "8 文字以上",
+    passwordHint: "8文字以上",
     confirmPassword: "パスワード（確認）",
     passwordMismatch: "パスワードが一致しません。",
     login: "ログイン",
-    register: "登録",
-    submitting: "お待ちください…",
-    toRegister: "アカウントをお持ちでない方は新規登録",
+    register: "登録する",
+    submitting: "処理中…",
+    toRegister: "はじめての方は新規登録",
     toLogin: "アカウントをお持ちの方はログイン",
-    sessionExpired: "ログインの有効期限が切れました。もう一度ログインしてください。",
+    sessionExpired: "一定時間が経過したため、ログアウトしました。もう一度ログインしてください。",
   },
   nav: {
     today: "今日",
     chat: "チャット",
-    activity: "アシスタント履歴",
-    nutrition: "栄養",
+    activity: "AIの操作履歴",
+    nutrition: "食事",
     stock: "在庫",
     settings: "設定",
     training: "トレーニング",
@@ -56,56 +56,56 @@ export const ja: Strings = {
     open: "使い方ガイド",
     skip: "スキップ",
     done: "はじめる",
-    gotIt: "わかった",
+    gotIt: "OK",
     pageHelp: "この画面の説明",
     stepCounter: (n: number, total: number) => `${n} / ${total}`,
     steps: [
       {
         title: "HumanHealthHandler へようこそ",
-        body: "HHH は食事とトレーニングを記録し、あなたの目標に合わせて毎日翌日のプランを作ります。基本的な使い方を簡単にご紹介します。",
+        body: "HHH は食事とトレーニングを記録し、目標に合わせて翌日のプランを毎日自動で作ります。基本的な使い方をご紹介します。",
       },
       {
-        title: "今日：今日をひと目で",
+        title: "「今日」画面：1日の予定をひと目で",
         body: "今日の食事プラン（記録済みの食事には ✓）、今日のトレーニングプラン、買い物リストをまとめて表示します。ここは確認用で、変更は各機能の画面かチャットで行います。",
       },
       {
         title: "チャット：ひとことで記録",
-        body: "食べたものや運動したことを話しかけるように伝えてください。例：「お昼にラーメンとビールを1杯」。カロリーと栄養素はプログラムが計算します。\n間違えたときもチャットで修正・削除できます。「質問のみ（記録を変更しない）」をオンにすると、記録は一切変更されません。",
+        body: "食べたものや運動したことを話しかけるように伝えてください。例：「お昼にラーメンとビールを1杯」。カロリーと栄養素はアプリが自動で計算します。\n間違えたときもチャットで修正・削除できます。「相談のみ（記録しない）」をオンにすると、記録は一切変更されません。",
       },
       {
-        title: "機能画面：栄養・トレーニング・メンバー・在庫",
-        body: "機能ごとに専用の画面があります。栄養は常に表示され、トレーニング・メンバー・在庫は設定でオン・オフできます。\n各画面のタイトル横の ? ボタンで、その画面の詳しい説明が見られます。",
+        title: "各機能の画面：食事・トレーニング・メンバー・在庫",
+        body: "機能ごとに専用の画面があります。食事は常に表示され、トレーニング・メンバー・在庫は設定でオン・オフできます。\n各画面のタイトル横の ? ボタンで、その画面の詳しい説明が見られます。",
       },
       {
-        title: "アシスタント履歴と確認",
-        body: "アシスタントの操作はすべて「アシスタント履歴」に記録されます。アレルギーの変更や過去の記録の削除など大事な操作は、あなたが「承認」するまで実行されません。",
+        title: "AIの操作履歴と確認",
+        body: "アシスタントの操作はすべて「AIの操作履歴」に記録されます。アレルギーの変更や過去の記録の削除など大事な操作は、「許可する」を押すまで実行されません。",
       },
       {
         title: "設定",
-        body: "プロフィールと目標、機能のオン・オフ、プランを作る時刻、苦手な食べ物などの好み、表示言語を変更できます。アシスタントは選んだ言語で返事をします。\nこのガイドはサイドバーの ? ボタンからいつでも見られます。",
+        body: "プロフィールと目標、機能のオン・オフ、プランを作る時刻、苦手な食べ物などの好み、表示言語を変更できます。アシスタントも選んだ言語で返信します。\nこのガイドはサイドバーの ? ボタンからいつでも見られます。",
       },
     ],
     pages: {
       nutrition: [
         {
           title: "今日の食事",
-          body: "上部に今日の摂取カロリーとたんぱく質・炭水化物・脂質、目標との比較を表示します。目標はプロフィール・体重・目標からプログラムが計算します。\n食事はチャットで記録します。「推定」の印はアシスタントが推定した栄養値です。不要な記録は一覧から削除できます。",
+          body: "上部に今日の摂取カロリーとたんぱく質・炭水化物・脂質、目標との比較を表示します。目標値は、プロフィール・体重・目標をもとにアプリが自動で計算します。\n食事はチャットで記録します。「推定」マークが付いた値はアシスタントが推定した栄養値です。不要な記録は一覧から削除できます。",
         },
         {
           title: "体重を記録",
-          body: "右上の「体重を記録」から今日の体重を入力します。カロリー目標は最新の体重で更新されるので、定期的な記録がおすすめです。",
+          body: "右上の「体重を記録」から今日の体重を入力します。目標カロリーは最新の体重をもとに更新されるため、定期的に記録しましょう。",
         },
         {
           title: "今日のプラン",
-          body: "今日の食事プランを表示し、記録済みの食事には「食べた」と表示されます。",
+          body: "今日の食事プランを表示し、記録済みの食事には「記録済み」と表示されます。",
         },
         {
           title: "明日のプラン",
-          body: "明日のプランは設定した時刻に自動で作られます。「今すぐ作成」でもすぐに作れます。\n入力欄に要望（例：「明日は残業でコンビニのものしか買えない」）を書くと、「作り直す」は要望に沿った新しいプランを、「調整」は今のプランの修正を行います。納得したら「プランを採用」を押します。",
+          body: "明日のプランは設定した時刻に自動で作られます。「今すぐ作成」でもすぐに作れます。\n入力欄に要望（例：「明日は残業でコンビニのものしか買えない」）を書くと、「作り直す」は要望に沿った新しいプランを、「調整する」は今のプランの修正を行います。内容がよければ「このプランにする」を押します。",
         },
         {
-          title: "注意点と一緒に食べる食事",
-          body: "プランの下の「注意」には、満たしきれなかった条件などが表示されます。\nメンバー機能がオンなら、一緒に食べる食事には同席者と合計人数分が表示されます。食材のグラム数は全員分の合計、カロリーはあなた自身の分です。",
+          title: "注意事項と、みんなで食べる食事",
+          body: "プランの下の「注意事項」には、満たしきれなかった条件などが表示されます。\nメンバー機能がオンなら、一緒に食べる食事には、一緒に食べる人と合計の人数が表示されます。食材のグラム数は全員分の合計、カロリーはあなた自身の分です。",
         },
       ],
       training: [
@@ -119,11 +119,11 @@ export const ja: Strings = {
         },
         {
           title: "明日のトレーニングプラン",
-          body: "明日どう動きたいか（例：「脚の日、45分」「休みたい」）を書いて保存し、「明日のプランを作成」または「この希望で作り直す」を押します。\nトレーニングプランは食事プランと一緒に作られ、明日の食事は運動量に合わせてカロリーが調整されます。",
+          body: "明日どんなトレーニングをしたいか（例：「脚の日、45分」「休みたい」）を入力して保存し、「明日のプランを作成」または「この希望で作り直す」を押します。\nトレーニングプランは食事プランと一緒に作られ、明日の食事は運動量に合わせてカロリーが調整されます。",
         },
         {
-          title: "トレーニングの好み",
-          body: "目標、週あたりの日数、1 回の時間、使える器具や場所、ケガなどのメモを設定します。アシスタントはプランを作るときにこれらを守ります。",
+          title: "トレーニング設定",
+          body: "目標、週あたりの日数、1 回の時間、使える器具や場所、けがなどのメモを設定します。アシスタントはこれらをもとにプランを作ります。",
         },
       ],
       members: [
@@ -133,11 +133,11 @@ export const ja: Strings = {
         },
         {
           title: "追加と編集",
-          body: "「メンバーを追加」から名前・生年月・身長・体重・アレルギーを入力します。体重は取り分け量の推定に使うので、変わったら手で更新してください。一緒に食べなくなったメンバーは削除できます。",
+          body: "「メンバーを追加」から名前・生まれた年月・身長・体重・アレルギーを入力します。体重は取り分け量の推定に使うので、変わったら手動で更新してください。一緒に食べなくなったメンバーは削除できます。",
         },
         {
           title: "いつも一緒に食べる食事",
-          body: "週の表で、その人がふだん一緒に食べる食事（月〜日の朝・昼・夕）にチェックを入れます。",
+          body: "週の表で、その人がふだん一緒に食べる食事（月〜日の朝・昼・夜）にチェックを入れます。",
         },
         {
           title: "これから 7 日間",
@@ -147,19 +147,19 @@ export const ja: Strings = {
       activity: [
         {
           title: "この画面について",
-          body: "アシスタントがあなたの代わりにしたことをすべて記録しています：チャット、プランの定時作成、プランの調整、操作の承認・却下。何をしたのかをいつでも確かめられます。",
+          body: "アシスタントが行った操作をすべて記録しています（チャット、プランの自動作成・調整、操作の許可など）。いつでも内容を確認できます。",
         },
         {
           title: "概要",
-          body: "上部に、直近数日間のあなたの操作と自動実行の回数、確認リクエストの承認・却下数、安全ブロックの回数、モデルのトークン使用量を表示します。",
+          body: "上部に、直近数日間の手動の操作と自動実行の回数、確認の許可・不許可の数、安全のために止めた操作の数、AIの利用量（トークン）を表示します。",
         },
         {
           title: "絞り込みとステップ表示",
-          body: "実行者（あなた／自動）と状態（完了・確認待ち・失敗など）で絞り込めます。「ステップを表示」で、呼び出したモデルやツールとその結果が見られます。",
+          body: "実行者（自分／自動）と状態（完了・確認待ち・失敗など）で絞り込めます。「詳細を表示」で、AIが行った処理とその結果を確認できます。",
         },
         {
           title: "確認とブロック",
-          body: "確認が必要な操作は「確認待ち」と表示され、ここで承認・却下できます。\nルールに反する操作（「質問のみ」中の変更や安全でないプランなど）はブロックされ、理由が記録されます。",
+          body: "確認が必要な操作は「確認待ち」と表示され、ここで許可・不許可を選べます。\nルールに反する操作（「相談のみ」中の変更や安全でないプランなど）はブロックされ、理由が記録されます。",
         },
       ],
       stock: [
@@ -168,19 +168,19 @@ export const ja: Strings = {
           body: "家にある食材を記録します。プランを作るときに在庫を優先して使い、足りないものを買い物リストにします。",
         },
         {
-          title: "2 つのスイッチ",
+          title: "2つの設定",
           body: "「食事を記録したら在庫から自動で減らす」：チャットで食事を記録すると、使った食材が在庫から自動で引かれます。\n「在庫をもとにプランと買い物リストを作る」：明日のプランが在庫を参考にし、買い物リストを作ります。",
         },
         {
           title: "在庫の管理",
-          body: "下のフォームに名前・数量・単位（g、ml、個）・期限を入れて「追加」を押します。数量はその場で直せ、不要な項目は削除できます。期限切れは赤で表示されます。\nチャットで「卵1パックと牛乳1Lを買った」と伝えても登録できます。",
+          body: "下のフォームに名前・数量・単位（g、ml、個）・期限を入れて「追加」を押します。数量はその場で変更でき、不要な項目は削除できます。期限切れは赤で表示されます。\nチャットで「卵1パックと牛乳1Lを買った」と伝えても登録できます。",
         },
         {
           title: "買い物リスト",
-          body: "明日のプランに必要な食材を一覧にし、在庫にある分も表示します。買ったら「完了」でプランの量が在庫に入ります。買わないものは「キャンセル」、「元に戻す」で取り消せます。",
+          body: "明日のプランに必要な食材を一覧にし、在庫にある分も表示します。購入したら「買った」を押すと、プランの分量が在庫に追加されます。買わないものは「買わない」を押します。押し間違えたら「元に戻す」で取り消せます。",
         },
         {
-          title: "最近使った分",
+          title: "最近使った食材",
           body: "食事の記録で在庫から引かれたものが並びます。間違いは「元に戻す」で在庫に戻せます（食事の記録はそのまま残ります）。",
         },
       ],
@@ -199,35 +199,35 @@ export const ja: Strings = {
       title: "基本情報",
       sex: "性別",
       sexOptions: { male: "男性", female: "女性" },
-      birthDate: "生年月",
+      birthDate: "生まれた年月",
       heightCm: "身長（cm）",
       weightKg: "現在の体重（kg）",
       activityLevel: "活動レベル",
       activityLevelHints: {
-        sedentary: "座りがち — ほとんど運動せず、主にデスクワーク",
-        light: "軽い活動 — 週 1〜3 日の軽い運動",
-        moderate: "中程度の活動 — 週 3〜5 日の中強度の運動",
-        active: "活発 — 週 6〜7 日の運動",
-        very_active: "非常に活発 — 高強度のトレーニングや肉体労働",
+        sedentary: "ほとんど運動しない（デスクワーク中心）",
+        light: "軽い運動をする（週1〜3日）",
+        moderate: "適度に運動する（週3〜5日）",
+        active: "よく運動する（週6〜7日）",
+        very_active: "非常によく運動する（激しいトレーニング・肉体労働）",
       },
       dietaryPattern: "食事スタイル",
       dietaryPatternOptions: {
         omnivore: "制限なし",
         vegetarian: "ベジタリアン",
-        vegan: "ヴィーガン",
-        pescatarian: "ペスカタリアン",
+        vegan: "ヴィーガン（動物性食品をとらない）",
+        pescatarian: "ペスカタリアン（魚介は食べる）",
       },
       allergies: "アレルギー食品",
-      allergiesPlaceholder: "読点で区切って入力（例：えび、ピーナッツ）",
+      allergiesPlaceholder: "「、」で区切って入力（例：えび、落花生）",
       dislikes: "苦手な食べ物",
-      dislikesPlaceholder: "読点で区切って入力（例：パクチー）",
+      dislikesPlaceholder: "「、」で区切って入力（例：パクチー）",
       mealsPerDay: "1 日の食事回数",
-      medicalNotes: "健康状態のメモ",
-      medicalNotesPlaceholder: "関係する健康状態があればご記入ください（任意）",
+      medicalNotes: "持病・健康上の注意",
+      medicalNotesPlaceholder: "例：高血圧で塩分を控えている、糖尿病で通院中",
     },
     goal: {
       title: "目標",
-      direction: "目標の方向",
+      direction: "目的",
       directionOptions: {
         lose: "減量",
         maintain: "維持",
@@ -235,21 +235,21 @@ export const ja: Strings = {
       },
       targetWeightKg: "目標体重（kg）",
       targetWeightPlaceholder: "空欄の場合は自動で設定",
-      ratePerWeek: "1 週間あたりの変化量",
+      ratePerWeek: "1週間あたりのペース",
       rateOptions: {
         "0.25": "0.25 kg/週",
         "0.5": "0.5 kg/週",
         "0.75": "0.75 kg/週",
       },
-      previewTitle: "1 日の目標カロリー（見込み）",
+      previewTitle: "1日の目標カロリー（目安）",
       previewKcal: (kcal: number) => `${kcal} kcal/日`,
       previewMacros: (protein: number, carbs: number, fat: number) =>
         `たんぱく質 ${protein}g · 炭水化物 ${carbs}g · 脂質 ${fat}g`,
-      previewFloorApplied: "安全な下限値に合わせて調整しました。",
-      previewError: "現在プレビューを計算できません。上の入力内容を確認してください。",
+      previewFloorApplied: "健康を損なわないよう、下限値まで引き上げています。",
+      previewError: "目標カロリーを計算できません。入力内容をご確認ください。",
     },
     issues: {
-      title: "次に進むには：",
+      title: "次に進むには、以下を入力してください",
       sexMissing: "性別を選択してください",
       birthDateMissing: "生まれた年と月を選択してください",
       heightMissing: "身長を入力してください",
@@ -274,7 +274,7 @@ export const ja: Strings = {
       kcalEatenOfTarget: (eaten: number, target: number) => `${eaten} / ${target} kcal`,
       kcalEaten: (eaten: number) => `${eaten} kcal`,
       ofTargetKcal: (target: number) => `/ ${target} kcal`,
-      noTarget: "目標が未設定です。プロフィールと体重を登録してください",
+      noTarget: "目標が未設定です。プロフィールと体重を登録してください。",
       protein: "たんぱく質",
       carbs: "炭水化物",
       fat: "脂質",
@@ -285,26 +285,26 @@ export const ja: Strings = {
     },
     todayPlan: {
       title: "今日のプラン",
-      eaten: "食べた",
-      notYetEaten: "まだ",
+      eaten: "記録済み",
+      notYetEaten: "未記録",
     },
     tomorrowPlan: {
       title: "明日のプラン",
       noPlanYet: (time: string) => `${time} に自動で作成されます`,
       generateNow: "今すぐ作成",
       generating: "作成中…",
-      accept: "プランを採用",
+      accept: "このプランにする",
       regenerate: "作り直す",
-      adjust: "調整",
+      adjust: "調整する",
       adjusting: "調整中…",
       adjustPrefill: "明日のプランを調整してください：",
-      warningsTitle: "注意",
+      warningsTitle: "注意事項",
       medicalDisclaimer:
-        "プロフィールに健康状態が記録されています。このプランは生活習慣の提案にすぎません。医師や管理栄養士の指示を優先してください。",
+        "プロフィールに健康状態が記録されています。このプランは一般的な食生活のアドバイスです。治療中の方は、医師や管理栄養士の指示を優先してください。",
       dayTotal: (kcal: number, target: number) => `1 日の合計 ${kcal} / ${target} kcal`,
       trainingLine: (title: string, minutes: number) => `トレーニング：${title} · ${minutes} 分`,
       trainingRest: "トレーニング：休養日",
-      trainingKcalAdded: (kcal: number) => `トレーニング分として ${kcal} kcal を追加`,
+      trainingKcalAdded: (kcal: number) => `トレーニング分 +${kcal} kcal`,
       generateFailed: "プランの作成に失敗しました。もう一度お試しください。",
       requestLabel: "今回のプランへの要望",
       requestPlaceholder: "今回のプランへの要望（任意）例：明日は残業なのでコンビニで買えるものに",
@@ -315,7 +315,7 @@ export const ja: Strings = {
   },
   overview: {
     dietTitle: "今日の食事プラン",
-    noDietPlan: "今日の食事プランはありません。「栄養」画面で明日のプランを作れます。",
+    noDietPlan: "今日の食事プランはありません。「食事」画面で明日のプランを作成できます。",
     noTrainingPlan: "今日のトレーニングプランはありません。",
   },
   stock: {
@@ -323,7 +323,7 @@ export const ja: Strings = {
     autoConsume: "食事を記録したら在庫から自動で減らす",
     planFromStock: "在庫をもとにプランと買い物リストを作る",
     itemsTitle: "いまの在庫",
-    empty: "在庫はありません",
+    empty: "登録された食材はありません",
     units: { g: "g", ml: "ml", piece: "個" },
     amount: (n: number, unit: string) => `${n} ${unit}`,
     bestBefore: (d: string) => `${d} まで`,
@@ -337,17 +337,17 @@ export const ja: Strings = {
     unit: "単位",
     expiresOn: "賞味期限",
     shoppingTitle: "買い物リスト",
-    shoppingFor: (d: string) => `${d} のプランより`,
+    shoppingFor: (d: string) => `${d} のプラン用`,
     noShopping: "まだプランがありません。明日のプランを作ると、買う食材がここに並びます。",
-    nothingToBuy: "在庫で足りるので、買う物はありません。",
+    nothingToBuy: "在庫で足りるため、買い足すものはありません。",
     inStock: (amount: string) => `在庫あり ${amount}`,
-    complete: "完了",
-    completeHint: "買えた：プランの量を在庫に追加します",
-    cancel: "キャンセル",
+    complete: "買った",
+    completeHint: "購入済みにして、プランの分量を在庫に追加します",
+    cancel: "買わない",
     reopen: "元に戻す",
     statusDone: "購入済み",
-    statusCancelled: "キャンセル済み",
-    recentTitle: "最近使った分",
+    statusCancelled: "買わない",
+    recentTitle: "最近使った食材",
     recentEmpty: "食事を記録すると、使った在庫がここに表示されます。",
     usedToast: "記録した食事の分を在庫から差し引きました：",
     undo: "元に戻す",
@@ -359,8 +359,8 @@ export const ja: Strings = {
     title: "トレーニング",
     week: {
       title: "直近 7 日間",
-      summary: (sessions: number, minutes: number) => `${sessions} 回 · ${minutes} 分`,
-      kcal: (kcal: number) => `運動消費 約 ${kcal} kcal`,
+      summary: (sessions: number, minutes: number) => `${sessions}回・計${minutes}分`,
+      kcal: (kcal: number) => `消費カロリー 約${kcal} kcal`,
       kcalHint: "基礎代謝を除いた値で、種目・時間・体重からアプリが推定しています",
       empty: "直近 7 日間のトレーニング記録はまだありません。チャットで「今日は 5 km を 30 分で走った」のように教えてください。",
       today: "今日",
@@ -374,7 +374,7 @@ export const ja: Strings = {
       title: (date: string) => `明日のトレーニングプラン（${date}）`,
       noPlan: "明日のプランはまだありません。",
       noTrainingSection: "明日のプランはトレーニング機能をオンにする前に作成されました。作り直すとトレーニングが加わります。",
-      preferenceLabel: "明日はどんなトレーニングにしたいですか？（任意）",
+      preferenceLabel: "明日やりたいトレーニング（任意）",
       preferencePlaceholder: "例：脚の日、45 分／朝にランニング／休養日にしたい",
       savePreference: "保存",
       preferenceSaved: "保存しました",
@@ -409,16 +409,16 @@ export const ja: Strings = {
       distance: (km: number) => `${km} km`,
     },
     preferences: {
-      title: "トレーニングの好み",
+      title: "トレーニング設定",
       goal: "目標",
       goalOptions: {
-        general_fitness: "総合的な体力",
-        strength: "筋力",
-        muscle: "筋肥大",
-        endurance: "持久力",
-        fat_loss: "減量",
+        general_fitness: "体力づくり",
+        strength: "筋力アップ",
+        muscle: "筋肉をつける",
+        endurance: "持久力アップ",
+        fat_loss: "脂肪を落とす",
       },
-      daysPerWeek: "週のトレーニング日数",
+      daysPerWeek: "週あたりの日数",
       sessionMinutes: "1 回の時間（分）",
       equipment: "器具・場所",
       equipmentPlaceholder: "例：ジム／自宅、ダンベルあり",
@@ -429,28 +429,28 @@ export const ja: Strings = {
   },
   chat: {
     inputPlaceholder: "メッセージを入力（Enter で送信、Shift+Enter で改行）",
-    readOnly: "質問のみ（記録を変更しない）",
-    readOnlyHint: "翻訳・説明・計算向け。健康情報、食事記録、プランは変更しません。会話は保存されます。",
+    readOnly: "相談のみ（記録しない）",
+    readOnlyHint: "質問や相談だけしたいときに使います。食事記録・プラン・健康情報は変更されません（会話は保存されます）。",
     send: "送信",
     sending: "送信中…",
-    empty: "まだ会話がありません。何か話しかけてみましょう",
+    empty: "食べたものや運動したことを話しかけてみましょう（例：「お昼にラーメンを食べた」）",
     thinking: "考え中",
     deepThinking: "じっくり考え中",
-    sendFailed: "送信に失敗しました",
+    sendFailed: "送信できませんでした",
     notices: {
-      empty_reply: "モデルから返答がありませんでした。もう一度お試しください。",
-      too_many_steps: "処理の手順が多すぎたため停止しました。完了した操作は下のとおりです。残りはもう一度送ってください。",
+      empty_reply: "アシスタントから返答がありませんでした。もう一度お試しください。",
+      too_many_steps: "処理が多すぎたため途中で止めました。完了した内容は下に表示しています。残りはもう一度送信してください。",
     },
   },
   approvals: {
     title: "確認が必要です",
-    hint: "アシスタントが次の変更を求めています。承認するまで実行されません。",
-    approve: "承認",
-    reject: "却下",
-    approved: "承認して実行しました",
-    rejected: "却下しました（変更なし）",
-    expired: "期限切れです（変更なし）",
-    failed: (reason: string) => `承認しましたが、実行に失敗しました：${reason}`,
+    hint: "アシスタントが次の変更を行おうとしています。「許可する」を押すまで実行されません。",
+    approve: "許可する",
+    reject: "許可しない",
+    approved: "実行しました",
+    rejected: "取りやめました（変更はありません）",
+    expired: "期限切れです（変更はありません）",
+    failed: (reason: string) => `実行できませんでした：${reason}`,
     failedToResolve: "操作に失敗しました",
     previews: {
       update_allergies: (d: { add: string[]; remove: string[] }) =>
@@ -467,23 +467,23 @@ export const ja: Strings = {
         valid_until: string | null;
         permanent: boolean;
       }) =>
-        `${d.preference_kind === "dislike" ? "苦手な食べ物" : "好み"}を保存：${d.text}` +
+        `${d.preference_kind === "dislike" ? "苦手な食べ物" : "好み"}を登録：${d.text}` +
         (d.permanent
-          ? "（ずっと）"
+          ? "（期限なし）"
           : d.valid_from || d.valid_until
             ? `（${d.valid_from ?? ""}〜${d.valid_until ?? ""}）`
-            : "（1か月）"),
+            : "（1か月間）"),
       remove_preference: (d: { preference_kind: "dislike" | "general"; text: string }) =>
         `${d.preference_kind === "dislike" ? "苦手な食べ物" : "好み"}を削除：${d.text}`,
       delete_past_entry: (d: { logical_date: string; description: string | null }) =>
         `${d.logical_date} の記録を削除${d.description ? `：${d.description}` : ""}`,
       archive_member: (d: { name: string }) => `メンバーを削除：${d.name}`,
       update_member_allergies: (d: { name: string; allergies: string[] }) =>
-        `${d.name} さんのアレルギーを変更：${d.allergies.length > 0 ? d.allergies.join("、") : "なし"}`,
+        `${d.name}さんのアレルギーを変更：${d.allergies.length > 0 ? d.allergies.join("、") : "なし"}`,
       add_member: (d: { name: string; allergies: string[] }) =>
         `メンバーを追加：${d.name}（アレルギー：${d.allergies.length > 0 ? d.allergies.join("、") : "なし"}）`,
       update_training_notes: (d: { notes: string; previous_notes: string; other_changes: boolean }) =>
-        `トレーニングのメモ（けが等）を変更：${d.notes || "なし"}` +
+        `トレーニングのメモ（けがなど）を変更：${d.notes || "なし"}` +
         (d.previous_notes ? `（変更前：${d.previous_notes}）` : "") +
         (d.other_changes ? "、ほかのトレーニング設定も変更" : ""),
       update_nutrition: (d) =>
@@ -493,35 +493,35 @@ export const ja: Strings = {
         d.reasons
           .map((r) => (r === "large_change" ? "（大きな変更）" : "（カロリーが三大栄養素と合いません）"))
           .join(""),
-      add_food_alias: (d: { alias: string; food: string }) => `「${d.alias}」を「${d.food}」として記録`,
+      add_food_alias: (d: { alias: string; food: string }) => `「${d.alias}」を「${d.food}」と同じ食品として扱う`,
       remove_food_alias: (d: { alias: string; target: string }) =>
         `「${d.alias}」を「${d.target}」として扱うのをやめる`,
     },
     unknown: (tool: string) => `操作を実行：${tool}`,
   },
   activity: {
-    hint: "アシスタントがあなたの代わりに行ったことをすべて記録しています。誰が始めたか、何を呼び出したか、何が止められ、何があなたの確認待ちかが分かります。",
+    hint: "アシスタントが行った操作をすべて記録しています。きっかけ、実行した処理、止められた操作、確認待ちの操作を確認できます。",
     period: (days: number) => `直近 ${days} 日`,
     stats: {
-      byUser: "あなたが開始",
+      byUser: "手動",
       byScheduler: "自動実行",
-      approvals: "確認リクエスト",
-      approvalsDetail: (approved: number, rejected: number) => `承認 ${approved} · 却下 ${rejected}`,
-      guardrails: "安全ブロック",
-      tokens: "モデルのトークン",
+      approvals: "確認",
+      approvalsDetail: (approved: number, rejected: number) => `許可 ${approved}／不許可 ${rejected}`,
+      guardrails: "ブロックした操作",
+      tokens: "AI利用量（トークン）",
       last24h: (used: number, budget: number | null) =>
         budget === null ? `直近 24 時間 ${used}` : `直近 24 時間 ${used} / 上限 ${budget}`,
     },
     filterAll: "すべて",
-    actors: { user: "あなた", scheduler: "自動" },
+    actors: { user: "自分", scheduler: "自動" },
     triggers: {
       chat_turn: "チャット",
-      plan_scheduled: "定時のプラン作成",
+      plan_scheduled: "プランの自動作成",
       plan_manual: "プラン作成",
       plan_revision: "プランの調整",
-      action_approved: "操作の承認",
-      action_rejected: "操作の却下",
-      follow_up: "自動の確認",
+      action_approved: "操作を許可",
+      action_rejected: "操作を不許可",
+      follow_up: "アシスタントからの確認",
       follow_up_answered: "確認への回答",
     },
     statuses: {
@@ -533,17 +533,17 @@ export const ja: Strings = {
     },
     counts: (o: { model_calls: number; tool_calls: number; tokens: number; guardrails: number }) =>
       [
-        `モデル ${o.model_calls} 回`,
-        `ツール ${o.tool_calls} 回`,
-        `${o.tokens} トークン`,
-        o.guardrails > 0 ? `ブロック ${o.guardrails} 回` : "",
+        `AI呼び出し${o.model_calls}回`,
+        `操作${o.tool_calls}回`,
+        `${o.tokens}トークン`,
+        o.guardrails > 0 ? `ブロック${o.guardrails}回` : "",
       ]
         .filter((s) => s !== "")
-        .join(" · "),
-    planSaved: (date: string, version: number) => `${date} のプラン 第 ${version} 版`,
+        .join("・"),
+    planSaved: (date: string, version: number) => `${date} のプラン ver.${version}`,
     errorCodes: {
-      invalid_input: "入力が無効か、計画する項目がありません",
-      internal: "内部エラー",
+      invalid_input: "入力内容に誤りがあるか、プランを作成できる項目がありません",
+      internal: "システムエラー",
       budget_exceeded: "1 日のトークン上限に達しました",
       busy: "別のプランを作成中です",
       plan_blocked: "プランが安全性の確認を通過せず、保存されませんでした",
@@ -554,40 +554,40 @@ export const ja: Strings = {
     errorCode: (code: string) => `エラー：${code}`,
     empty: "まだ記録がありません。",
     loadMore: "さらに読み込む",
-    showSteps: "ステップを表示",
-    hideSteps: "閉じる",
+    showSteps: "詳細を表示",
+    hideSteps: "詳細を隠す",
     roles: { conversation: "会話", parser: "解析", planner: "プラン" },
     modelCall: (role: string, model: string, tokens: number, seconds: string, ok: boolean) =>
-      `モデル呼び出し（${role}）${model} · ${tokens} トークン · ${seconds} 秒${ok ? "" : " · 失敗"}`,
+      `AI呼び出し（${role}）${model} · ${tokens} トークン · ${seconds} 秒${ok ? "" : " · 失敗"}`,
     toolOutcomes: {
       ran: "実行",
-      invalid_args: "拒否",
-      read_only_mode: "質問のみのため未実行",
-      not_found: "見つからない",
+      invalid_args: "無効な指定",
+      read_only_mode: "相談のみのため未実行",
+      not_found: "対象なし",
       failed: "エラー",
     },
-    arguments: "引数",
-    approvalRequested: "確認をリクエスト",
+    arguments: "詳細データ",
+    approvalRequested: "確認を依頼",
     approvalResolved: {
-      approved: "あなたが承認",
-      rejected: "あなたが却下",
-      failed: "承認したが実行に失敗",
-      pending: "待機中",
+      approved: "許可済み",
+      rejected: "不許可",
+      failed: "許可後に実行失敗",
+      pending: "確認待ち",
       expired: "期限切れ",
     },
     fromEarlierRun: "（以前の会話から）",
     actionStatus: {
       pending: "まだ確認待ちです",
-      approved: "承認済み",
-      rejected: "却下済み",
-      failed: "承認後に実行失敗",
+      approved: "許可済み",
+      rejected: "不許可",
+      failed: "許可後に実行失敗",
       expired: "期限切れ（未実行）",
     },
     guardrails: {
-      invalid_args: "ブロック：引数またはルールで許可されていません",
-      read_only_mode: "ブロック：今回の質問では記録を変更できません",
-      unknown_tool: "ブロック：存在しない、またはオフのツールです",
-      token_budget: "ブロック：1 日のトークン上限を超えています",
+      invalid_args: "ブロック：許可されていない内容です",
+      read_only_mode: "ブロック：相談のみのため記録を変更できません",
+      unknown_tool: "ブロック：利用できない操作です（機能がオフなど）",
+      token_budget: "ブロック：1日のAI利用上限を超えています",
       iteration_cap: "停止：ステップが多すぎます",
     },
     planValidation: (d: { violations: readonly unknown[]; retried: boolean; violations_left: number; blocking_violations_left?: number }) =>
@@ -598,8 +598,8 @@ export const ja: Strings = {
         : d.violations_left === 0
           ? `プランのチェック：${d.violations.length} 件の問題を検出し、作り直してすべて解消`
           : `プランのチェック：${d.violations.length} 件の問題を検出、${d.violations_left} 件は未解消（注意として表示）`,
-    planSavedStep: (date: string, version: number) => `${date} のプランを保存しました（第 ${version} 版）`,
-    followUpRaised: "確認を表示",
+    planSavedStep: (date: string, version: number) => `${date} のプランを保存しました（ver.${version}）`,
+    followUpRaised: "アシスタントから確認",
     followUpAnswered: (label: string) => `あなたの回答：${label}`,
   },
   planNotes: {
@@ -619,11 +619,11 @@ export const ja: Strings = {
     diet_disliked: (d: { name: string; term: string }) =>
       `「${d.name}」に苦手な「${d.term}」が含まれています`,
     diet_main_meal_count: (d: { count: number }) =>
-      `主食事（朝食・昼食・夕食）は 3 食必要ですが、${d.count} 食です`,
+      `朝食・昼食・夕食の3食が必要ですが、${d.count}食しかありません`,
     diet_meal_count: (d: { count: number; max: number }) =>
       `食事の回数は 3〜${d.max} 回にしてください（現在 ${d.count} 回）`,
     diet_kcal_off_target: (d: { actual: number; target: number; low: number; high: number }) =>
-      `1 日のエネルギー ${d.actual} kcal が目標 ${d.target} kcal の ±8%（${d.low}〜${d.high}）を外れています`,
+      `1日の合計カロリー ${d.actual} kcal が目標 ${d.target} kcal の ±8%（${d.low}〜${d.high}）を外れています`,
     diet_protein_low: (d: { actual: number; target: number }) =>
       `たんぱく質 ${d.actual} g が目標 ${d.target} g の 90% を下回っています`,
     diet_fat_off_target: (d: { actual: number; target: number }) =>
@@ -651,7 +651,7 @@ export const ja: Strings = {
     }) =>
       `${{ breakfast: "朝食", lunch: "昼食", dinner: "夕食", snack: "間食" }[d.meal_type]}「${d.meal_title}」は一緒に食べる食事のため${{ omnivore: "制限なし", vegetarian: "ベジタリアン", vegan: "ヴィーガン", pescatarian: "ペスカタリアン" }[d.pattern]}に合わせる必要があります：「${d.name}」に「${d.term}」が含まれています`,
     diet_guest_scale_clamped: (d: { guest: string; scale: number; min: number; max: number }) =>
-      `${d.guest}さんの盛り付け倍率を ${d.min}〜${d.max} の範囲に制限しました（${d.scale}）`,
+      `${d.guest}さんの取り分け量の倍率を ${d.min}〜${d.max} の範囲に制限しました（${d.scale}）`,
     stock_invalid_structure: "在庫プランの形式が正しくありません",
     stock_not_in_stock: (d: { name: string }) => `「${d.name}」は在庫にないため使えません`,
     stock_wrong_unit: (d: { name: string; unit: "g" | "ml" | "piece"; planned_unit: "g" | "ml" | "piece" }) =>
@@ -659,7 +659,7 @@ export const ja: Strings = {
     stock_over_quantity: (d: { name: string; amount: number; quantity: number; unit: "g" | "ml" | "piece" }) =>
       `「${d.name}」の使用量 ${d.amount} ${{ g: "g", ml: "ml", piece: "個" }[d.unit]}が在庫 ${d.quantity} ${{ g: "g", ml: "ml", piece: "個" }[d.unit]}を超えています`,
     stock_expiring_unused: (d: { name: string; expires_on: string }) =>
-      `在庫の「${d.name}」は ${d.expires_on} に期限切れになりますが、プランで使われていません`,
+      `在庫の「${d.name}」は ${d.expires_on} に期限が切れますが、プランで使われていません`,
     training_invalid_structure: "トレーニングプランの形式が正しくありません",
     training_invalid_exercise: (d: {
       name: string;
@@ -676,7 +676,7 @@ export const ja: Strings = {
           distance: "距離は 0〜300 km にしてください",
         }[d.problem]
       }`,
-    training_rest_day_too_hard: "休養日は低強度のストレッチや可動域トレーニングのみにしてください",
+    training_rest_day_too_hard: "休養日はストレッチなどの軽い運動だけにしてください",
     training_no_exercises: "トレーニング日には種目を 1 つ以上入れてください",
     training_too_long: (d: { minutes: number; max: number }) =>
       `トレーニング時間 ${d.minutes} 分が上限の ${d.max} 分を超えています`,
@@ -687,12 +687,12 @@ export const ja: Strings = {
       `直近 7 日間で最長のトレーニング（${d.longest} 分）より 1.5 倍以上長くなっています。少しずつ増やしましょう`,
     training_third_hard_day: "前の 2 日間が高強度でした。強度を下げるか休養しましょう",
     multimember_out_of_age_range: (d: { name: string; age: number; min: number; max: number }) =>
-      `「${d.name}」さんは ${d.min}〜${d.max} 歳の範囲外（${d.age} 歳）のため、一緒に食べる食事に含めていません`,
+      `${d.name}さんは ${d.min}〜${d.max} 歳の範囲外（${d.age} 歳）のため、一緒に食べる食事に含めていません`,
   },
   // Proactive check-ins (`FollowUp`, `crates/core/src/follow_ups.rs`), raised by the scheduler.
   followUps: {
     title: "アシスタントからの確認",
-    hint: "プランと記録から自動で見つけました。タップで答えられます。",
+    hint: "プランと記録をもとにお知らせしています。タップして回答できます。",
     minimize: "閉じる",
     show: (n: number) => `確認 ${n} 件`,
     mealMissed: (d: { meal: string; title: string; kcal: number | null }) =>
@@ -712,7 +712,7 @@ export const ja: Strings = {
       diet_log_planned: "プラン通り食べた",
       core_reply: "別のものを食べた",
       diet_skipped: "食べなかった",
-      core_dismiss: "今はいい",
+      core_dismiss: "あとで",
       core_adjust_tomorrow: "明日のプランを調整",
       generate_tomorrow: "明日のプランを作成",
     } as Record<string, string>,
@@ -724,11 +724,11 @@ export const ja: Strings = {
   toolSummaries: {
     core_plan_viewed: (d: { date: string }) => `${d.date} のプランを確認しました`,
     core_plan_generated: (d: { date: string; version: number }) =>
-      `${d.date} のプランを作成しました（第 ${d.version} 版）`,
+      `${d.date} のプランを作成しました（ver.${d.version}）`,
     core_plan_revised: (d: { date: string; version: number }) =>
-      `${d.date} のプランを調整しました（第 ${d.version} 版）`,
+      `${d.date} のプランを調整しました（ver.${d.version}）`,
     core_plan_adjusted: (d: { date: string; version: number }) =>
-      `確認を受けて ${d.date} のプランを調整しました（第 ${d.version} 版）`,
+      `確認を受けて ${d.date} のプランを調整しました（ver.${d.version}）`,
     core_weight_logged: (d: { kg: number }) => `体重 ${d.kg} kg を記録しました`,
     core_allergies_updated: (d: { allergies: string[] }) =>
       `アレルギー食品を更新しました：${d.allergies.length > 0 ? d.allergies.join("、") : "なし"}`,
@@ -738,7 +738,7 @@ export const ja: Strings = {
       valid_from: string | null;
       valid_until: string | null;
     }) =>
-      `${d.preference_kind === "dislike" ? "苦手な食べ物" : "好み"}を記憶しました：${d.text}` +
+      `${d.preference_kind === "dislike" ? "苦手な食べ物" : "好み"}を登録しました：${d.text}` +
       (d.valid_until ? `（${d.valid_until} まで）` : ""),
     core_preference_removed: "好みを削除しました",
     core_entry_deleted: "記録を削除しました",
@@ -747,7 +747,7 @@ export const ja: Strings = {
     diet_meal_skipped: (d: { meal_type: "breakfast" | "lunch" | "dinner" | "snack" }) =>
       `${{ breakfast: "朝食", lunch: "昼食", dinner: "夕食", snack: "間食" }[d.meal_type]}は食べなかったと記録しました`,
     diet_intake_viewed: (d: { date: string }) => `${d.date} の食事記録を確認しました`,
-    diet_label_calculated: (d: { portion_grams: number }) => `表示値から ${d.portion_grams} g 分を換算しました（摂取記録なし）`,
+    diet_label_calculated: (d: { portion_grams: number }) => `栄養成分表示から ${d.portion_grams}g 分を計算しました（食事記録には追加していません）`,
     diet_food_updated: (d: { name: string }) => `食品を更新しました：${d.name}`,
     diet_dish_updated: (d: { name: string }) => `料理を更新しました：${d.name}`,
     diet_alias_added: (d: { alias: string; food: string }) =>
@@ -768,7 +768,7 @@ export const ja: Strings = {
     multimember_members_viewed: (d: { count: number }) => `メンバーを確認しました（${d.count} 人）`,
     multimember_member_added: (d: { name: string }) => `メンバーを追加しました：${d.name}`,
     multimember_member_updated: (d: { name: string }) => `メンバーを更新しました：${d.name}`,
-    multimember_member_archived: (d: { name: string }) => `メンバーを外しました：${d.name}`,
+    multimember_member_archived: (d: { name: string }) => `メンバーを削除しました：${d.name}`,
     multimember_attendance_set: (d: {
       name: string;
       meal_type: "breakfast" | "lunch" | "dinner";
@@ -783,7 +783,7 @@ export const ja: Strings = {
     }) =>
       `${d.name}・${d.date} の${{ breakfast: "朝食", lunch: "昼食", dinner: "夕食" }[d.meal_type]}：いつもの予定に戻しました`,
     multimember_dislike_added: (d: { name: string; text: string }) =>
-      `${d.name} さんの苦手な食べ物を記憶しました：${d.text}`,
+      `${d.name} さんの苦手な食べ物を登録しました：${d.text}`,
     multimember_dislike_removed: "苦手な食べ物を 1 件削除しました",
   },
   tools: {
@@ -792,11 +792,11 @@ export const ja: Strings = {
     core_revise_plan: "プランの調整",
     core_log_weight: "体重の記録",
     core_update_allergies: "アレルギー食品の更新",
-    core_add_preference: "好みの記憶",
+    core_add_preference: "好みの登録",
     core_remove_preference: "好みの削除",
     core_delete_entry: "記録の削除",
     diet_log_meal: "食事の記録",
-    diet_calculate_label: "栄養表示の換算",
+    diet_calculate_label: "栄養成分表示の計算",
     diet_get_intake: "食事記録の確認",
     diet_update_food: "食品の更新",
     diet_update_dish: "料理の更新",
@@ -812,10 +812,10 @@ export const ja: Strings = {
     multimember_list_members: "メンバーの確認",
     multimember_add_member: "メンバーの追加",
     multimember_update_member: "メンバーの更新",
-    multimember_archive_member: "メンバーを外す",
+    multimember_archive_member: "メンバーの削除",
     multimember_set_attendance: "食事の参加予定の設定",
     multimember_clear_attendance_override: "参加予定をいつも通りに戻す",
-    multimember_add_dislike: "メンバーの苦手な食べ物の記憶",
+    multimember_add_dislike: "メンバーの苦手な食べ物の登録",
     multimember_remove_dislike: "メンバーの苦手な食べ物の削除",
   } as Record<string, string>,
   settings: {
@@ -825,18 +825,18 @@ export const ja: Strings = {
       profileGoal: "プロフィールと目標",
       foodData: "食品データ",
       plan: "プラン",
-      preferences: "好み",
+      preferences: "好み・要望",
       account: "アカウント",
       language: "言語",
       features: "機能",
     },
     features: {
       hint: "オプション機能をオンにすると、サイドバーに表示され、毎日のプランに加わります。",
-      activityTab: "「アシスタント履歴」ページを表示",
+      activityTab: "「AIの操作履歴」ページを表示",
       activityTabHint: "アシスタントの操作は常に記録されます。ここではページをサイドバーに表示するかだけを選びます。",
-      followUps: "自動の確認",
-      followUpsHint: "プランの食事がチェック時刻までに記録されていないときや、1日の摂取が目標から大きく外れたときに、アシスタントから確認します。1日最大4件です。",
-      followUpTimes: "チェック時刻",
+      followUps: "アシスタントからの確認",
+      followUpsHint: "プランの食事が確認する時刻までに記録されていないときや、1日の摂取が目標から大きく外れたときに、アシスタントから確認します。1日最大4件です。",
+      followUpTimes: "確認する時刻",
       followUpTimeLabels: {
         breakfast: "朝食",
         lunch: "昼食",
@@ -854,7 +854,7 @@ export const ja: Strings = {
         stock:
           "家にある食材を記録します。記録した食事は在庫から自動で差し引かれ、プランは在庫を優先して使い、買い物リストも作ります。",
         multimember:
-          "一緒に食べる人（16〜70歳）を登録します。一緒に食べる食事は全員分を同じ献立で作り、それぞれのアレルギーと苦手な食べ物を避け、体重を保つのに必要な量で一人ずつ盛り付け量を決めます。",
+          "一緒に食べる人（16〜70歳）を登録します。一緒に食べる食事は全員分を同じ献立で作り、それぞれのアレルギーと苦手な食べ物を避け、体重を保つのに必要な量で一人ずつ取り分け量を決めます。",
       } as Record<string, string>,
     },
     language: {
@@ -873,7 +873,7 @@ export const ja: Strings = {
       planTime: "プランの作成時刻",
     },
     preferences: {
-      hint: "苦手な食べ物や、プランに反映してほしいことです。チャットで伝えた内容もここに保存されます。設定した期間だけ反映されます。",
+      hint: "苦手な食べ物や、プランに反映してほしい要望を登録できます。チャットで伝えた内容もここに保存され、設定した期間だけプランに反映されます。",
       empty: "まだ登録されていません",
       kinds: { dislike: "苦手", general: "要望" },
       kind: "種類",
@@ -892,7 +892,7 @@ export const ja: Strings = {
       expired: "期限切れ",
     },
     foodData: {
-      hint: "データソースは優先度の高い順に使われ、最初に一致したソースが採用されます。",
+      hint: "食品データは上にあるものから優先して使われます。",
       importButton: "データをインポート…",
       formatHelp:
         "CSV または JSON 形式の食品成分表をインポートできます。ファイルに別名の列を含めることもできます。エネルギーの列は既定で kcal として読み込みます。kJ の場合は見出しを kj または energy_kj にしてください。チェーン店のメニューなど 1 食単位の料理もインポートできます：basis 列で「100g」の食品行と「serving」の料理行を区別し、料理行では brand 列でチェーン名を指定できます。料理行の basis_g 列は 1 食分の重さ（g）を表します。",
@@ -902,7 +902,7 @@ export const ja: Strings = {
       kindEstimate: "AI 推定",
       kindDataset: (date: string) => `データセット · ${date} にインポート`,
       kindDatasetPlain: "データセット",
-      locked: "順序固定、無効化や削除はできません",
+      locked: "並び順は固定です。無効化・削除はできません",
       foodCount: (n: number) => `${n} 品目`,
       foodAndDishCount: (food: number, dish: number) => `食品 ${food} 品目 · 料理 ${dish} 品`,
       rename: "名前を変更",
@@ -922,7 +922,7 @@ export const ja: Strings = {
       hideIssues: "エラーと警告を隠す",
       colLine: "行",
       colName: "名前",
-      colProblem: "問題",
+      colProblem: "内容",
       colProtein: "たんぱく質",
       colCarbs: "炭水化物",
       colFat: "脂質",
@@ -930,7 +930,7 @@ export const ja: Strings = {
       colBasis: "基準",
       basisFood: "100g あたり",
       basisDish: "1 食あたり",
-      sampleTitle: "例",
+      sampleTitle: "プレビュー",
       importAction: "インポート",
       deleteConfirm: "削除しても記録済みの食事には影響しません",
     },
@@ -939,7 +939,7 @@ export const ja: Strings = {
   members: {
     title: "メンバー",
     intro:
-      "一緒に食べる人（16〜70歳）。一緒に食べる食事は全員分を同じ献立で作り、それぞれのアレルギーと苦手な食べ物を避け、体重を保つのに必要な量で一人ずつ盛り付け量を決めます。",
+      "一緒に食べる人（16〜70歳）。一緒に食べる食事は全員分を同じ献立で作り、それぞれのアレルギーと苦手な食べ物を避け、体重を保つのに必要な量で一人ずつ取り分け量を決めます。",
     noMembers: "まだメンバーがいません。追加すると、プランが食卓の全員に合わせて作られます。",
     add: "メンバーを追加",
     edit: "編集",
@@ -949,12 +949,12 @@ export const ja: Strings = {
     allergiesLine: (list: string) => `アレルギー：${list}`,
     form: {
       addTitle: "メンバーを追加",
-      editTitle: (name: string) => `${name} を編集`,
+      editTitle: (name: string) => `${name}さんの情報を編集`,
       name: "名前",
       weightKg: "体重（kg）",
       weightHint: "体重を保つのに必要な量の目安に使います。変わったら手動で更新してください。",
       ageHint: "16〜70歳",
-      invalid: "名前、生年月、身長、体重を入力してください。",
+      invalid: "名前、生まれた年月、身長、体重を入力してください。",
     },
     attendance: {
       title: "いつも一緒に食べる食事",
@@ -975,10 +975,10 @@ export const ja: Strings = {
       none: "なし",
     },
     shared: {
-      with: (names: string, portions: number) => `一緒に：${names} · 計 ${portions} 人前`,
+      with: (names: string, portions: number) => `一緒に食べる人：${names}（計${portions}人分）`,
       gramsNote: "食材のグラムは全員分の合計、カロリーはあなた自身の分です",
-      guest: (name: string, kcal: number) => `${name} 約 ${kcal} kcal`,
-      estimateNote: "それぞれ体重を保つのに必要な量で見積もった盛り付け量（目安）",
+      guest: (name: string, kcal: number) => `${name}さん 約${kcal} kcal`,
+      estimateNote: "各自の体重維持に必要な量から計算した取り分け量の目安です",
     },
   },
   errors: {
@@ -987,8 +987,8 @@ export const ja: Strings = {
     not_found: "該当するデータが見つかりません。",
     nothing_to_plan: "プロフィールを入力し、体重を一度記録してからプランを作成してください。",
     plan_busy: "プランを作成中です。完了までお待ちください。",
-    plan_blocked: "生成したプランが安全性の確認を通過しなかったため、保存していません。既存のプランは変更されていません。条件を調整して再試行してください。",
-    internal: "内部エラーが発生しました。もう一度お試しください。",
+    plan_blocked: "作成したプランが安全チェックを通らなかったため、保存しませんでした（今のプランはそのままです）。要望を変えて、もう一度お試しください。",
+    internal: "エラーが発生しました。しばらく時間をおいて、もう一度お試しください。",
     llm_auth: "モデルの認証に失敗しました。API Key が正しいか確認してください。",
     llm_rate_limited: "リクエストが多すぎます。しばらくしてから再試行してください。",
     llm_timeout: "リクエストがタイムアウトしました。もう一度お試しください。",
@@ -998,11 +998,11 @@ export const ja: Strings = {
     height_out_of_range: (d: { got: number }) =>
       `身長は 120〜230 cm の範囲で入力してください（入力値：${d.got.toFixed(1)} cm）。`,
     age_out_of_range: (d: { got: number }) =>
-      `年齢は 16〜100 歳の範囲である必要があります（生年月日から計算した年齢：${d.got} 歳）。`,
+      `ご利用いただけるのは16〜100歳の方です（生まれた年月から計算した年齢：${d.got}歳）。`,
     meals_per_day_out_of_range: (d: { got: number }) =>
       `1 日の食事回数は 3〜5 回の範囲で入力してください（入力値：${d.got}）。`,
     goal_rate_out_of_range: (d: { got: number }) =>
-      `変化量は 0〜1.0 kg/週の範囲で入力してください（入力値：${d.got.toFixed(2)} kg/週）。`,
+      `1週間あたりのペースは 0〜1.0 kg の範囲で入力してください（入力値：${d.got.toFixed(2)} kg）。`,
     goal_target_out_of_range: (d: { got: number }) =>
       `目標体重は 30〜300 kg の範囲で入力してください（入力値：${d.got.toFixed(1)} kg）。`,
     weight_out_of_range: (d: { got: number }) =>
@@ -1011,46 +1011,46 @@ export const ja: Strings = {
     note_too_long: (d: { got: number; max: number }) =>
       `内容は ${d.max} 文字以内で入力してください（現在 ${d.got} 文字）。`,
     plan_time_before_day_boundary: (d: { plan_time: string; day_boundary: string }) =>
-      `プランの作成時刻（${d.plan_time}）は ${d.day_boundary} より前にできません。もっと遅い時刻にしてください。`,
+      `プランの作成時刻は ${d.day_boundary} 以降に設定してください（入力：${d.plan_time}）。`,
     check_time_before_day_boundary: (d: { time: string; day_boundary: string }) =>
-      `チェック時刻（${d.time}）は ${d.day_boundary} より前にできません。もっと遅い時刻にしてください。`,
-    instruction_empty: "調整内容を入力してください。どのように調整するかを書いてください。",
+      `確認する時刻は ${d.day_boundary} 以降に設定してください（入力：${d.time}）。`,
+    instruction_empty: "どのように調整したいかを入力してください。",
     preference_dates_reversed: (d: { valid_from: string; valid_until: string }) =>
-      `開始日（${d.valid_from}）は終了日（${d.valid_until}）より後にできません。`,
+      `開始日は終了日より前の日付にしてください（開始：${d.valid_from}／終了：${d.valid_until}）。`,
     member_name_invalid: "名前は1〜40文字で入力してください。",
     member_name_taken: "同じ名前のメンバーがすでにいます。",
     member_age_out_of_range: (d: { got: number }) =>
-      `メンバーの年齢は16〜70歳です。この生年月日では${d.got}歳になります。`,
-    member_allergies_invalid: "アレルギーは20件まで、各1〜40文字です。",
+      `登録できるメンバーは16〜70歳です（生まれた年月から計算した年齢：${d.got}歳）。`,
+    member_allergies_invalid: "アレルギーは20件まで、1件あたり40文字以内で入力してください。",
     too_many_members: (d: { max: number }) => `メンバーはご本人以外に${d.max}人までです。`,
     attendance_invalid: "食事の予定が正しくありません。過去の日付は指定できず、メモは100文字までです。",
     unauthorized: "ログインしてください。",
     invalid_username: "ユーザー名は半角英数字と _ - . で 3〜32 文字にしてください。",
     invalid_password: "パスワードは 8〜128 文字にしてください。",
-    too_many_attempts: "試行回数が多すぎます。しばらくしてから再試行してください。",
-    too_many_requests: "リクエストが多すぎます。少し待ってから再試行してください。",
+    too_many_attempts: "ログインの試行回数が上限に達しました。しばらく時間をおいて、もう一度お試しください。",
+    too_many_requests: "アクセスが集中しています。しばらく時間をおいて、もう一度お試しください。",
     invalid_credentials: "ユーザー名またはパスワードが正しくありません。",
     username_taken: "このユーザー名はすでに使われています。",
-    bad_request: "リクエストの内容に誤りがあります。",
-    unknown_endpoint: "該当する API が見つかりません。",
+    bad_request: "送信内容に誤りがあります。",
+    unknown_endpoint: "お探しの機能が見つかりません。ページを再読み込みしてください。",
   },
   importMessages: {
     file_too_large: (d: { max_mb: number }) => `ファイルが上限の ${d.max_mb} MB を超えています`,
-    not_utf8: "ファイルが UTF-8 ではありません。UTF-8 で保存し直してから再試行してください",
+    not_utf8: "ファイルが UTF-8 ではありません。UTF-8 で保存し直してから、もう一度お試しください",
     csv_header: (d: { error: string }) => `CSV の見出し行を読み取れませんでした：${d.error}`,
     csv_row: (d: { line: number; error: string }) =>
-      `CSV の ${d.line} 行目を読み取れませんでした：${d.error}`,
+      `CSV の ${d.line}行目を読み取れませんでした：${d.error}`,
     json_parse: (d: { error: string }) => `JSON を読み取れませんでした：${d.error}`,
-    json_item_not_object: (d: { line: number }) => `${d.line} 番目の項目がオブジェクトではありません`,
+    json_item_not_object: (d: { line: number }) => `${d.line}番目の項目がオブジェクトではありません`,
     json_missing_rows: "JSON オブジェクトに foods または dishes がありません",
     json_foods_not_array: "foods は配列である必要があります",
     json_dishes_not_array: "dishes は配列である必要があります",
     json_wrong_shape: "JSON は配列か、foods/dishes を含むオブジェクトである必要があります",
-    too_many_rows: (d: { max: number }) => `ファイルの行数が上限の ${d.max} 行を超えています`,
+    too_many_rows: (d: { max: number }) => `ファイルの行数が上限の ${d.max}行を超えています`,
     no_valid_rows: "インポートできる有効な行がファイルにありません",
     missing_file_content: "リクエストにファイルの内容がありません。",
     import_expired: "インポートの有効期限が切れました。もう一度ファイルを選んでください",
-    source_name_length: "データソース名は 1〜60 文字にしてください",
+    source_name_length: "データソース名は 1〜60文字にしてください",
     not_a_dataset: "置き換えられるのはデータセットのソースだけです",
     source_not_found: "データソースが見つかりません",
     unknown_basis: (d: { value: string }) =>
@@ -1065,14 +1065,14 @@ export const ja: Strings = {
     energy_mismatch: (d: { kcal: number; estimated: number }) =>
       `kcal（${d.kcal.toFixed(0)}）が栄養素から推定したエネルギー（${d.estimated.toFixed(0)}）と大きく違います。値はそのままインポートします`,
     too_many_aliases: (d: { max: number }) =>
-      `別名が ${d.max} 個を超えています。超えた分は無視しました`,
+      `別名が ${d.max}個を超えています。超えた分は無視しました`,
     brand_on_food_row:
       "brand 列は料理行（basis=serving）でのみ有効です。この行（100g 基準）では無視しました",
     food_name_empty: "食品名を入力してください",
-    food_name_too_long: (d: { max: number }) => `食品名が ${d.max} 文字を超えています`,
+    food_name_too_long: (d: { max: number }) => `食品名が ${d.max}文字を超えています`,
     dish_name_empty: "料理名を入力してください",
-    dish_name_too_long: (d: { max: number }) => `料理名が ${d.max} 文字を超えています`,
-    brand_too_long: (d: { max: number }) => `ブランド名が ${d.max} 文字を超えています`,
+    dish_name_too_long: (d: { max: number }) => `料理名が ${d.max}文字を超えています`,
+    brand_too_long: (d: { max: number }) => `ブランド名が ${d.max}文字を超えています`,
     duplicate_food: "ファイル内の前の行と食品名が重複しています",
     duplicate_dish: "ファイル内の前の行と料理（同じブランド・同じ名前）が重複しています",
     duplicate_food_alias: (d: { alias: string }) =>
@@ -1080,7 +1080,7 @@ export const ja: Strings = {
     duplicate_dish_alias: (d: { alias: string }) =>
       `別名「${d.alias}」が同じブランドのほかの料理名または別名と重複しているため、無視しました`,
     trace_values: (d: { rows: number }) =>
-      `${d.rows} 行で「Tr/微量」の表記があり、0 として扱いました`,
+      `${d.rows}行で「Tr/微量」の表記があり、0 として扱いました`,
     unknown_columns: (d: { columns: string[] }) => `不明な列を無視しました：${d.columns.join("、")}`,
   },
   macroViolations: {
