@@ -538,6 +538,8 @@ export const zhCN = {
       plan_revision: "调整计划",
       action_approved: "批准操作",
       action_rejected: "拒绝操作",
+      follow_up: "主动提醒",
+      follow_up_answered: "回答提醒",
     },
     statuses: {
       running: "进行中",
@@ -614,6 +616,8 @@ export const zhCN = {
           ? `计划检查：发现 ${d.violations.length} 个问题，重新生成后全部解决`
           : `计划检查：发现 ${d.violations.length} 个问题，${d.violations_left} 个未解决（已作为提醒保留）`,
     planSavedStep: (date: string, version: number) => `已保存 ${date} 的计划（第 ${version} 版）`,
+    followUpRaised: "发出提醒",
+    followUpAnswered: (label: string) => `你选择了：${label}`,
   },
   // Plan warnings and violations (`PlanNote`, `crates/core/src/plugin.rs`), keyed by kind. The
   // plan card and the Assistant log show these.
@@ -705,12 +709,46 @@ export const zhCN = {
   },
   // What a tool call did (`ToolSummary`, `crates/core/src/plugin.rs`), keyed by its kind. The
   // chat's activity chips and the Activity page show these.
+  // Proactive check-ins (`FollowUp`, `crates/core/src/follow_ups.rs`), raised by the scheduler.
+  followUps: {
+    title: "助手提醒",
+    hint: "根据你的计划和记录自动发现，点一下即可回答。",
+    minimize: "收起",
+    show: (n: number) => `提醒 ${n}`,
+    mealMissed: (d: { meal: string; title: string; kcal: number | null }) =>
+      `${d.meal}还没有记录。按计划吃了「${d.title}」${d.kcal !== null ? `（${d.kcal} kcal）` : ""}吗？`,
+    dayOffTarget: {
+      intro: "今天的摄入离目标比较远：",
+      kcal: (d: { kcal: number; target: number; diff: number }) =>
+        `热量 ${d.kcal} kcal（目标 ${d.target}，${d.diff > 0 ? "多" : "少"} ${Math.abs(d.diff)}）`,
+      protein: (d: { protein: number; target: number; diff: number }) =>
+        `蛋白质 ${d.protein} g（目标 ${d.target} g，少 ${Math.abs(d.diff)} g）`,
+      askAdjust: "要据此调整明天的计划吗？",
+      askGenerate: "要据此生成明天的计划吗？",
+    },
+    // Keyed by answer kind; `generate_tomorrow` labels `core_adjust_tomorrow` when there is no
+    // plan for tomorrow yet.
+    answers: {
+      diet_log_planned: "按计划吃了",
+      core_reply: "吃了别的",
+      diet_skipped: "没吃",
+      core_dismiss: "暂时不用",
+      core_adjust_tomorrow: "调整明天的计划",
+      generate_tomorrow: "生成明天的计划",
+    } as Record<string, string>,
+    replyDraft: (meal: string) => `${meal}吃了`,
+    working: "处理中…",
+    adjusting: "正在调整明天的计划…",
+    failed: "操作失败",
+  },
   toolSummaries: {
     core_plan_viewed: (d: { date: string }) => `查看了 ${d.date} 的计划`,
     core_plan_generated: (d: { date: string; version: number }) =>
       `已生成 ${d.date} 的计划（第 ${d.version} 版）`,
     core_plan_revised: (d: { date: string; version: number }) =>
       `已调整 ${d.date} 的计划（第 ${d.version} 版）`,
+    core_plan_adjusted: (d: { date: string; version: number }) =>
+      `已按提醒调整 ${d.date} 的计划（第 ${d.version} 版）`,
     core_weight_logged: (d: { kg: number }) => `已记录体重 ${d.kg} kg`,
     core_allergies_updated: (d: { allergies: string[] }) =>
       `已更新过敏食物：${d.allergies.length > 0 ? d.allergies.join("、") : "无"}`,
@@ -726,6 +764,8 @@ export const zhCN = {
     core_entry_deleted: "已删除记录",
     diet_meal_logged: (d: { meal_type: "breakfast" | "lunch" | "dinner" | "snack"; kcal: number }) =>
       `已记录${{ breakfast: "早餐", lunch: "午餐", dinner: "晚餐", snack: "加餐" }[d.meal_type]} · ${d.kcal} kcal`,
+    diet_meal_skipped: (d: { meal_type: "breakfast" | "lunch" | "dinner" | "snack" }) =>
+      `已记下没吃${{ breakfast: "早餐", lunch: "午餐", dinner: "晚餐", snack: "加餐" }[d.meal_type]}`,
     diet_intake_viewed: (d: { date: string }) => `查看了 ${d.date} 的饮食记录`,
     diet_label_calculated: (d: { portion_grams: number }) => `按标签换算了 ${d.portion_grams} g 的营养，未记录摄入`,
     diet_food_updated: (d: { name: string }) => `已更新食物：${d.name}`,
@@ -812,6 +852,15 @@ export const zhCN = {
       hint: "可选功能开启后会出现在侧边栏，并加入每日计划。",
       activityTab: "显示「助手记录」页",
       activityTabHint: "助手的每次操作都会被记录；这里只决定是否在侧边栏显示该页。",
+      followUps: "主动提醒",
+      followUpsHint: "到了检查时间，计划里的一餐还没记录，或一天的摄入离目标太远时，助手会主动问你。每天最多 4 条。",
+      followUpTimes: "检查时间",
+      followUpTimeLabels: {
+        breakfast: "早餐",
+        lunch: "午餐",
+        dinner: "晚餐",
+        evening: "当天回顾",
+      },
       names: {
         training: "训练记录与计划",
         stock: "库存管理",

@@ -178,6 +178,22 @@ impl Settings {
         self.set_json("activity_tab_visible", &visible, now).await
     }
 
+    /// Whether the scheduler raises proactive follow-ups (`crate::follow_ups`). On by default.
+    pub async fn follow_ups_enabled(&self) -> Result<bool, CoreError> {
+        Ok(self
+            .get_json::<bool>("follow_ups_enabled")
+            .await?
+            .unwrap_or(true))
+    }
+
+    pub async fn set_follow_ups_enabled(
+        &self,
+        enabled: bool,
+        now: DateTime<Utc>,
+    ) -> Result<(), CoreError> {
+        self.set_json("follow_ups_enabled", &enabled, now).await
+    }
+
     /// The language the assistant talks to the user in: the web UI's locale, synced on every
     /// page load. [`Language::default`] until the first sync.
     pub async fn language(&self) -> Result<Language, CoreError> {

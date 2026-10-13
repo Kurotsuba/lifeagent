@@ -230,7 +230,8 @@ written; the approval itself is its own `action_approved` / `action_rejected` ru
 | `plan_revision` | `revise_plan` | user |
 | `action_approved` | `approve_action` | user |
 | `action_rejected` | `reject_action` | user |
-| *(gap A)* `follow_up` | proactive follow-ups | scheduler |
+| `follow_up` | `CoreApp::check_follow_ups`, from the scheduler tick (only when it raises one) | scheduler |
+| `follow_up_answered` | `answer_follow_up` | user |
 
 ### 4.2 Step kinds
 
@@ -246,6 +247,8 @@ the model directly, except the tool arguments, which are shown as data.
 | `guardrail` | `{rule, …}`. `rule`: `unknown_tool` \| `invalid_args` (with `tool`) \| `token_budget` (with `role`, `used`, `budget`) \| `iteration_cap` (with `limit`) |
 | `plan_validation` | `{date, sections, violations: [string], retried, violations_left}`, one per planning stage: the violations found first, whether they sent the planner back, and how many were left (they become warnings) |
 | `plan_saved` | `{date, version, trigger}` |
+| `follow_up_raised` | `{follow_up_id, key, kind, reason, params}`. `reason` is English text from the plugin's check; `params` are the numbers the UI words |
+| `follow_up_answered` | `{follow_up_id, key, kind, answer, result?}`. `result` is the `ToolSummary` of what the answer did |
 
 A `tool_call` that was blocked records both the `tool_call` step (with its outcome) and a
 `guardrail` step. That way the Activity page can count guardrail interventions without

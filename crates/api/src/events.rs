@@ -1,6 +1,7 @@
 //! The event names and JSON payloads every shell pushes to its UI, per `docs/PHASE1_SPEC.md`
 //! §10.1: `data-changed`, `plan-ready`, `plan-failed`, plus `plan-generating` and
-//! `activity-recorded` (`docs/AUDIT_LOG_SPEC.md` §6.1). The web server sends them as
+//! `activity-recorded` (`docs/AUDIT_LOG_SPEC.md` §6.1) and `follow-ups-changed`
+//! (`lifeagent_core::follow_ups`). The web server sends them as
 //! Server-Sent Events.
 
 use lifeagent_core::events::AppEvent;
@@ -32,6 +33,7 @@ pub fn payload_for(event: &AppEvent) -> (&'static str, serde_json::Value) {
             json!({ "date": date, "error": error, "code": code }),
         ),
         AppEvent::ActivityRecorded { run_id } => ("activity-recorded", json!({ "run_id": run_id })),
+        AppEvent::FollowUpsChanged => ("follow-ups-changed", json!({})),
     }
 }
 

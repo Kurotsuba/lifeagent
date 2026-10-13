@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use chrono::NaiveDate;
+use chrono::{NaiveDate, NaiveDateTime};
 use lifeagent_llm::error::LlmError;
 use lifeagent_llm::router::LlmRouter;
 use lifeagent_llm::types::ToolSpec;
@@ -17,6 +17,7 @@ use thiserror::Error;
 use crate::clock::Clock;
 use crate::error::CoreError;
 use crate::events::{Event, EventStore};
+use crate::follow_ups::{FollowUp, FollowUpCandidate};
 use crate::goals::GoalsService;
 use crate::plan::PlanStore;
 use crate::preferences::PreferenceService;
@@ -279,6 +280,32 @@ pub trait Plugin: Send + Sync {
         _date: NaiveDate,
     ) -> Result<Option<String>, PluginError> {
         Ok(None)
+    }
+
+    /// Proactive follow-ups (`crate::follow_ups`): what is worth asking the user about on
+    /// logical day `date` at local time `now_local`, decided in code, never by a model. Called
+    /// each scheduler tick and when the app lists follow-ups; `raised` is every follow-up
+    /// already raised that day, in any status. Return a candidate for as long as its reason
+    /// holds: core raises a key once a day and clears an open one whose candidate is gone.
+    async fn follow_ups(
+        &self,
+        _ctx: &PluginContext,
+        _date: NaiveDate,
+        _now_local: NaiveDateTime,
+        _raised: &[FollowUp],
+    ) -> Result<Vec<FollowUpCandidate>, PluginError> {
+        Ok(Vec::new())
+    }
+
+    /// Carries out one of this plugin's own answers (kind prefixed with its id) to one of its
+    /// follow-ups, returning what it did for the UI and the activity log.
+    async fn answer_follow_up(
+        &self,
+        _ctx: &PluginContext,
+        _follow_up: &FollowUp,
+        _answer: &str,
+    ) -> Result<ToolSummary, PluginError> {
+        Err(PluginError::Unsupported)
     }
 
     async fn today_card(

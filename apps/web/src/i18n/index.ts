@@ -2,6 +2,7 @@ import type {
   ActionPreview,
   CommandError,
   ErrorDetail,
+  FollowUpData,
   ImportMessage,
   MacroViolation,
   PlanNoteData,
@@ -171,4 +172,50 @@ export function describeError(e: CommandError): string {
 export function describeActionPreview(preview: ActionPreview, toolName: string): string {
   const entry = strings.approvals.previews[preview.kind] as Entry<ActionPreview>;
   return render(entry, preview) ?? strings.approvals.unknown(toolName);
+}
+
+/** What a follow-up asks, in the current language: one line, or several for a day review. */
+export function describeFollowUp(f: FollowUpData): string[] {
+  const t = strings.followUps;
+  switch (f.kind) {
+    case "diet_meal_missed":
+      return [
+        t.mealMissed({
+          meal: strings.mealType[f.params.meal_type],
+          title: f.params.title,
+          kcal: f.params.kcal,
+        }),
+      ];
+    case "diet_day_off_target": {
+      const p = f.params;
+      const lines: string[] = [t.dayOffTarget.intro];
+      if (p.issues.includes("kcal_over") || p.issues.includes("kcal_under")) {
+        lines.push(t.dayOffTarget.kcal({ kcal: p.kcal, target: p.target_kcal, diff: p.kcal_diff }));
+      }
+      if (p.issues.includes("protein_under")) {
+        lines.push(
+          t.dayOffTarget.protein({
+            protein: p.protein_g,
+            target: p.target_protein_g,
+            diff: p.protein_diff_g,
+          }),
+        );
+      }
+      lines.push(p.has_plan_tomorrow ? t.dayOffTarget.askAdjust : t.dayOffTarget.askGenerate);
+      return lines;
+    }
+  }
+}
+
+/** A follow-up answer's button label; an answer kind this build doesn't know shows raw. */
+export function followUpAnswerLabel(answer: string, f: FollowUpData): string {
+  const answers = strings.followUps.answers;
+  if (
+    answer === "core_adjust_tomorrow" &&
+    f.kind === "diet_day_off_target" &&
+    !f.params.has_plan_tomorrow
+  ) {
+    return answers.generate_tomorrow;
+  }
+  return answers[answer] ?? answer;
 }

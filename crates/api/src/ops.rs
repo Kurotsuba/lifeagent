@@ -15,6 +15,7 @@ use lifeagent_core::app::{
 use lifeagent_core::approvals::PendingAction;
 use lifeagent_core::audit::{Actor, RunFilter, RunPage, RunStatus};
 use lifeagent_core::error::CoreError;
+use lifeagent_core::follow_ups::FollowUp;
 use lifeagent_core::goals::WeightGoal;
 use lifeagent_core::i18n::Language;
 use lifeagent_core::plan::{PlanTrigger, StoredPlan};
@@ -22,6 +23,7 @@ use lifeagent_core::preferences::{NewPreference, Preference};
 use lifeagent_core::profile::Profile;
 use lifeagent_core::time::{age_years, format_hhmm, parse_hhmm};
 use lifeagent_core::usage::RoleUsage;
+use lifeagent_plugin_diet::follow_ups::{self as diet_follow_ups, FollowUpTimes};
 use lifeagent_plugin_diet::import::{
     self, FoodDataError, ImportMessage, ImportPreview, ImportReport, ImportTarget, ParsedImport,
 };
@@ -250,6 +252,45 @@ pub async fn approve_action(app: &CoreApp, id: &str) -> Result<PendingAction, Co
 
 pub async fn reject_action(app: &CoreApp, id: &str) -> Result<PendingAction, CommandError> {
     Ok(app.reject_action(id).await?)
+}
+
+// ---- Follow-ups (`lifeagent_core::follow_ups`) -----------------------------------------------
+
+pub async fn get_follow_ups(app: &CoreApp) -> Result<Vec<FollowUp>, CommandError> {
+    Ok(app.follow_ups().await?)
+}
+
+pub async fn answer_follow_up(
+    app: &CoreApp,
+    id: &str,
+    answer: &str,
+) -> Result<FollowUp, CommandError> {
+    Ok(app.answer_follow_up(id, answer).await?)
+}
+
+/// The follow-up switch and the diet plugin's check times, for Settings.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FollowUpSettings {
+    pub enabled: bool,
+    pub times: FollowUpTimes,
+}
+
+pub async fn get_follow_up_settings(app: &CoreApp) -> Result<FollowUpSettings, CommandError> {
+    Ok(FollowUpSettings {
+        enabled: app.settings().follow_ups_enabled().await?,
+        times: diet_follow_ups::times(&app.plugin_context()).await?,
+    })
+}
+
+pub async fn save_follow_up_settings(
+    app: &CoreApp,
+    settings: &FollowUpSettings,
+) -> Result<(), CommandError> {
+    diet_follow_ups::save_times(&app.plugin_context(), &settings.times).await?;
+    app.settings()
+        .set_follow_ups_enabled(settings.enabled, app.clock().now())
+        .await?;
+    Ok(())
 }
 
 // ---- Today / plan --------------------------------------------------------------------------

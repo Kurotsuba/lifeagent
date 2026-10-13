@@ -26,6 +26,7 @@ use crate::conversation::{ConversationStore, MessageRole, NewMessage, StoredMess
 use crate::db;
 use crate::error::{CoreError, ValidationRule};
 use crate::events::{AppEvent, EventChange, EventStore};
+use crate::follow_ups::FollowUpStore;
 use crate::goals::{self, GoalsService, WeightGoal};
 use crate::plan::{PlanService, PlanStore, PlanTrigger, StoredPlan};
 use crate::plugin::{Plugin, PluginContext, PluginError, ToolSummary};
@@ -37,6 +38,8 @@ use crate::settings::Settings;
 use crate::time::{logical_date, logical_date_from_local};
 use crate::tools::ToolRegistry;
 use crate::usage::DbUsageSink;
+
+mod follow_ups;
 
 /// Loop cap for `send_message` (§7.11): stop after this many tool-call rounds rather than
 /// let a confused model spin forever. A whole-day report ("ate the plan's three meals, plus
@@ -233,6 +236,7 @@ impl CoreAppBuilder {
         let plans = PlanStore::new(db.clone(), self.clock.clone());
         let approvals = ApprovalStore::new(db.clone(), self.clock.clone());
         let audit = AuditLog::new(db.clone(), self.clock.clone(), events.clone());
+        let follow_ups = FollowUpStore::new(db.clone(), self.clock.clone());
 
         for plugin in &self.plugins {
             crate::plugin::apply_migrations(&db, self.clock.as_ref(), &plugin.manifest()).await?;
@@ -261,6 +265,7 @@ impl CoreAppBuilder {
             plans,
             approvals,
             audit,
+            follow_ups,
             planner,
             plugins: self.plugins,
             registry,
@@ -401,6 +406,7 @@ struct CoreAppInner {
     plans: PlanStore,
     approvals: ApprovalStore,
     audit: AuditLog,
+    follow_ups: FollowUpStore,
     /// Shared with the tool registry, so chat, the scheduler and the shell all go through
     /// one generation lock.
     planner: Arc<PlanService>,

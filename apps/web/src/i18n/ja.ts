@@ -521,6 +521,8 @@ export const ja: Strings = {
       plan_revision: "プランの調整",
       action_approved: "操作の承認",
       action_rejected: "操作の却下",
+      follow_up: "自動の確認",
+      follow_up_answered: "確認への回答",
     },
     statuses: {
       running: "実行中",
@@ -597,6 +599,8 @@ export const ja: Strings = {
           ? `プランのチェック：${d.violations.length} 件の問題を検出し、作り直してすべて解消`
           : `プランのチェック：${d.violations.length} 件の問題を検出、${d.violations_left} 件は未解消（注意として表示）`,
     planSavedStep: (date: string, version: number) => `${date} のプランを保存しました（第 ${version} 版）`,
+    followUpRaised: "確認を表示",
+    followUpAnswered: (label: string) => `あなたの回答：${label}`,
   },
   planNotes: {
     unmet: (text: string) => `未解消：${text}`,
@@ -685,12 +689,46 @@ export const ja: Strings = {
     multimember_out_of_age_range: (d: { name: string; age: number; min: number; max: number }) =>
       `「${d.name}」さんは ${d.min}〜${d.max} 歳の範囲外（${d.age} 歳）のため、一緒に食べる食事に含めていません`,
   },
+  // Proactive check-ins (`FollowUp`, `crates/core/src/follow_ups.rs`), raised by the scheduler.
+  followUps: {
+    title: "アシスタントからの確認",
+    hint: "プランと記録から自動で見つけました。タップで答えられます。",
+    minimize: "閉じる",
+    show: (n: number) => `確認 ${n} 件`,
+    mealMissed: (d: { meal: string; title: string; kcal: number | null }) =>
+      `${d.meal}がまだ記録されていません。プランの「${d.title}」${d.kcal !== null ? `（${d.kcal} kcal）` : ""}を食べましたか？`,
+    dayOffTarget: {
+      intro: "今日の摂取が目標から大きく外れています：",
+      kcal: (d: { kcal: number; target: number; diff: number }) =>
+        `カロリー ${d.kcal} kcal（目標 ${d.target}、${d.diff > 0 ? "+" : "−"}${Math.abs(d.diff)}）`,
+      protein: (d: { protein: number; target: number; diff: number }) =>
+        `たんぱく質 ${d.protein} g（目標 ${d.target} g、−${Math.abs(d.diff)} g）`,
+      askAdjust: "明日のプランを調整しますか？",
+      askGenerate: "これを踏まえて明日のプランを作りますか？",
+    },
+    // Keyed by answer kind; `generate_tomorrow` labels `core_adjust_tomorrow` when there is no
+    // plan for tomorrow yet.
+    answers: {
+      diet_log_planned: "プラン通り食べた",
+      core_reply: "別のものを食べた",
+      diet_skipped: "食べなかった",
+      core_dismiss: "今はいい",
+      core_adjust_tomorrow: "明日のプランを調整",
+      generate_tomorrow: "明日のプランを作成",
+    } as Record<string, string>,
+    replyDraft: (meal: string) => `${meal}は`,
+    working: "処理中…",
+    adjusting: "明日のプランを調整しています…",
+    failed: "操作に失敗しました",
+  },
   toolSummaries: {
     core_plan_viewed: (d: { date: string }) => `${d.date} のプランを確認しました`,
     core_plan_generated: (d: { date: string; version: number }) =>
       `${d.date} のプランを作成しました（第 ${d.version} 版）`,
     core_plan_revised: (d: { date: string; version: number }) =>
       `${d.date} のプランを調整しました（第 ${d.version} 版）`,
+    core_plan_adjusted: (d: { date: string; version: number }) =>
+      `確認を受けて ${d.date} のプランを調整しました（第 ${d.version} 版）`,
     core_weight_logged: (d: { kg: number }) => `体重 ${d.kg} kg を記録しました`,
     core_allergies_updated: (d: { allergies: string[] }) =>
       `アレルギー食品を更新しました：${d.allergies.length > 0 ? d.allergies.join("、") : "なし"}`,
@@ -706,6 +744,8 @@ export const ja: Strings = {
     core_entry_deleted: "記録を削除しました",
     diet_meal_logged: (d: { meal_type: "breakfast" | "lunch" | "dinner" | "snack"; kcal: number }) =>
       `${{ breakfast: "朝食", lunch: "昼食", dinner: "夕食", snack: "間食" }[d.meal_type]}を記録しました · ${d.kcal} kcal`,
+    diet_meal_skipped: (d: { meal_type: "breakfast" | "lunch" | "dinner" | "snack" }) =>
+      `${{ breakfast: "朝食", lunch: "昼食", dinner: "夕食", snack: "間食" }[d.meal_type]}は食べなかったと記録しました`,
     diet_intake_viewed: (d: { date: string }) => `${d.date} の食事記録を確認しました`,
     diet_label_calculated: (d: { portion_grams: number }) => `表示値から ${d.portion_grams} g 分を換算しました（摂取記録なし）`,
     diet_food_updated: (d: { name: string }) => `食品を更新しました：${d.name}`,
@@ -794,6 +834,15 @@ export const ja: Strings = {
       hint: "オプション機能をオンにすると、サイドバーに表示され、毎日のプランに加わります。",
       activityTab: "「アシスタント履歴」ページを表示",
       activityTabHint: "アシスタントの操作は常に記録されます。ここではページをサイドバーに表示するかだけを選びます。",
+      followUps: "自動の確認",
+      followUpsHint: "プランの食事がチェック時刻までに記録されていないときや、1日の摂取が目標から大きく外れたときに、アシスタントから確認します。1日最大4件です。",
+      followUpTimes: "チェック時刻",
+      followUpTimeLabels: {
+        breakfast: "朝食",
+        lunch: "昼食",
+        dinner: "夕食",
+        evening: "1日の振り返り",
+      },
       names: {
         training: "トレーニング記録とプラン",
         stock: "在庫管理",

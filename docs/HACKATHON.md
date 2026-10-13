@@ -465,7 +465,10 @@ To make that visible:
   rolling 24 hours in `deploy/env.yaml` (2026-10-13).
 - **More autonomy:** the scheduler already generates the next-day plan. Proactive follow-ups
   (e.g. "you haven't logged lunch") would show the agent acting on its own. Show this in the
-  video.
+  video. Done 2026-10-13 (`docs/DECISIONS.md`, "Proactive follow-ups"): missed planned meals
+  with one-tap answers, and an evening review that offers to adjust tomorrow's plan. To film
+  it without waiting, set the check times a minute ahead in Settings → 機能, or call
+  `/api/internal/tick` by hand.
 
 ### 4. Submission materials
 

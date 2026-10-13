@@ -86,6 +86,8 @@ pub enum AppEvent {
     },
     /// An agent run ended (`crate::audit`), so an open Activity page can refresh.
     ActivityRecorded { run_id: String },
+    /// Follow-ups were raised, answered or cleared (`crate::follow_ups`).
+    FollowUpsChanged,
 }
 
 /// A committed change to the event store, published on the internal channel the dispatcher

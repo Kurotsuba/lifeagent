@@ -49,6 +49,10 @@ pub enum RunTrigger {
     PlanRevision,
     ActionApproved,
     ActionRejected,
+    /// The scheduler raised proactive follow-ups (`crate::follow_ups`).
+    FollowUp,
+    /// The user answered a follow-up.
+    FollowUpAnswered,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -73,6 +77,10 @@ pub enum StepKind {
     Guardrail,
     PlanValidation,
     PlanSaved,
+    /// A follow-up was raised: `{follow_up_id, key, kind, reason, params}`.
+    FollowUpRaised,
+    /// A follow-up was answered: `{follow_up_id, key, kind, answer, result?}`.
+    FollowUpAnswered,
 }
 
 /// Generates `as_str` and `parse` from the serde names, so the database strings can't drift
@@ -107,6 +115,8 @@ db_enum!(RunTrigger {
     PlanRevision => "plan_revision",
     ActionApproved => "action_approved",
     ActionRejected => "action_rejected",
+    FollowUp => "follow_up",
+    FollowUpAnswered => "follow_up_answered",
 });
 db_enum!(RunStatus {
     Running => "running",
@@ -123,6 +133,8 @@ db_enum!(StepKind {
     Guardrail => "guardrail",
     PlanValidation => "plan_validation",
     PlanSaved => "plan_saved",
+    FollowUpRaised => "follow_up_raised",
+    FollowUpAnswered => "follow_up_answered",
 });
 
 /// The plan a run saved, for the list view.
@@ -161,7 +173,10 @@ impl RunOutcome {
                     self.plan = Some(plan);
                 }
             }
-            StepKind::ApprovalResolved | StepKind::PlanValidation => {}
+            StepKind::ApprovalResolved
+            | StepKind::PlanValidation
+            | StepKind::FollowUpRaised
+            | StepKind::FollowUpAnswered => {}
         }
     }
 }
@@ -367,6 +382,13 @@ impl RunHandle {
             StepKind::ApprovalRequested | StepKind::ApprovalResolved => tracing::info!(
                 target: "lifeagent_core::audit",
                 run_id, trigger, actor, kind = kind.as_str(), tool = str_of("tool"),
+                "agent step"
+            ),
+            // Kinds and answer kinds only; params hold the user's meals and numbers.
+            StepKind::FollowUpRaised | StepKind::FollowUpAnswered => tracing::info!(
+                target: "lifeagent_core::audit",
+                run_id, trigger, actor, kind = kind.as_str(),
+                follow_up = str_of("kind"), answer = str_of("answer"),
                 "agent step"
             ),
             _ => tracing::info!(

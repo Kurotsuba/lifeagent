@@ -84,6 +84,7 @@ export type ToolSummary =
   | { kind: "core_plan_viewed"; date: string }
   | { kind: "core_plan_generated"; date: string; version: number }
   | { kind: "core_plan_revised"; date: string; version: number }
+  | { kind: "core_plan_adjusted"; date: string; version: number }
   | { kind: "core_weight_logged"; kg: number }
   | { kind: "core_allergies_updated"; allergies: string[] }
   | {
@@ -96,6 +97,7 @@ export type ToolSummary =
   | { kind: "core_preference_removed" }
   | { kind: "core_entry_deleted"; event_type: string }
   | { kind: "diet_meal_logged"; meal_type: MealType; kcal: number }
+  | { kind: "diet_meal_skipped"; meal_type: MealType }
   | { kind: "diet_intake_viewed"; date: string }
   | { kind: "diet_label_calculated"; portion_grams: number }
   | { kind: "diet_food_updated"; name: string }
@@ -207,7 +209,9 @@ export type RunTrigger =
   | "plan_manual"
   | "plan_revision"
   | "action_approved"
-  | "action_rejected";
+  | "action_rejected"
+  | "follow_up"
+  | "follow_up_answered";
 export type RunStatus = "running" | "succeeded" | "needs_approval" | "failed" | "interrupted";
 export type ModelRole = "conversation" | "parser" | "planner";
 export type ToolCallOutcome = "ran" | "invalid_args" | "not_found" | "failed" | "read_only_mode";
@@ -302,7 +306,76 @@ export type ActivityStepDetail =
         blocking_violations_left?: number;
       };
     }
-  | { kind: "plan_saved"; detail: { date: string; version: number; trigger: string } };
+  | { kind: "plan_saved"; detail: { date: string; version: number; trigger: string } }
+  | {
+      kind: "follow_up_raised";
+      detail: FollowUpData & { follow_up_id: string; key: string; reason: string };
+    }
+  | {
+      kind: "follow_up_answered";
+      detail: {
+        follow_up_id: string;
+        key: string;
+        kind: FollowUpKind;
+        answer: string;
+        result?: ToolSummary;
+      };
+    };
+
+// ---- Follow-ups (`crates/core/src/follow_ups.rs`) ----------------------------------------------
+
+/** What a follow-up asks about, by kind; `params` are the numbers Rust computed. */
+export type FollowUpData =
+  | {
+      kind: "diet_meal_missed";
+      params: { meal_type: MealType; title: string; kcal: number | null; check_time: string };
+    }
+  | {
+      kind: "diet_day_off_target";
+      params: {
+        issues: ("kcal_over" | "kcal_under" | "protein_under")[];
+        kcal: number;
+        target_kcal: number;
+        kcal_diff: number;
+        protein_g: number;
+        target_protein_g: number;
+        protein_diff_g: number;
+        has_plan_tomorrow: boolean;
+      };
+    };
+
+export type FollowUpKind = FollowUpData["kind"];
+
+export type FollowUpStatus = "open" | "answered" | "dismissed" | "cleared";
+
+/** A check-in the scheduler raised on its own. `answers` are kinds, in display order:
+ * `core_reply` only opens the chat; the rest are sent back with `answer_follow_up`. */
+export type FollowUp = FollowUpData & {
+  id: string;
+  logical_date: string;
+  key: string;
+  answers: string[];
+  reason: string;
+  status: FollowUpStatus;
+  answer: string | null;
+  result: ToolSummary | null;
+  run_id: string | null;
+  created_at: string;
+  resolved_at: string | null;
+};
+
+/** Local `HH:MM` times of the diet plugin's checks. */
+export interface FollowUpTimes {
+  breakfast: string;
+  lunch: string;
+  dinner: string;
+  evening: string;
+}
+
+export interface FollowUpSettings {
+  enabled: boolean;
+  times: FollowUpTimes;
+}
 
 export type ActivityStep = ActivityStepDetail & {
   id: string;

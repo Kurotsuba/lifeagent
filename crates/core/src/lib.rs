@@ -22,6 +22,7 @@ pub mod core_tools;
 pub mod db;
 pub mod error;
 pub mod events;
+pub mod follow_ups;
 pub mod goals;
 pub mod i18n;
 pub mod plan;

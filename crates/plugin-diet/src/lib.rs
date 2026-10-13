@@ -7,6 +7,7 @@
 //! `docs/PHASE1_SPEC.md` §8.
 
 pub mod dish_resolver;
+pub mod follow_ups;
 pub mod food_matcher;
 pub mod foods;
 pub mod import;
@@ -23,10 +24,11 @@ pub mod tools;
 pub mod validate;
 
 use async_trait::async_trait;
-use chrono::NaiveDate;
+use chrono::{NaiveDate, NaiveDateTime};
+use lifeagent_core::follow_ups::{FollowUp, FollowUpCandidate};
 use lifeagent_core::plugin::{
     PlanDraft, PlanInput, PlanSection, Plugin, PluginContext, PluginError, PluginManifest,
-    PluginMigration, ToolOutput,
+    PluginMigration, ToolOutput, ToolSummary,
 };
 use lifeagent_llm::types::ToolSpec;
 use serde_json::Value;
@@ -80,6 +82,25 @@ impl Plugin for DietPlugin {
         date: NaiveDate,
     ) -> Result<Option<String>, PluginError> {
         Ok(Some(intake::context_snippet(ctx, date).await?))
+    }
+
+    async fn follow_ups(
+        &self,
+        ctx: &PluginContext,
+        date: NaiveDate,
+        now_local: NaiveDateTime,
+        raised: &[FollowUp],
+    ) -> Result<Vec<FollowUpCandidate>, PluginError> {
+        follow_ups::check(ctx, date, now_local, raised).await
+    }
+
+    async fn answer_follow_up(
+        &self,
+        ctx: &PluginContext,
+        follow_up: &FollowUp,
+        answer: &str,
+    ) -> Result<ToolSummary, PluginError> {
+        follow_ups::answer(ctx, follow_up, answer).await
     }
 
     async fn today_card(

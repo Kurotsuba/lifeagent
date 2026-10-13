@@ -206,6 +206,15 @@ struct DayPreference {
     text: String,
 }
 #[derive(Deserialize)]
+struct AnswerFollowUp {
+    id: String,
+    answer: String,
+}
+#[derive(Deserialize)]
+struct FollowUpSettingsArg {
+    settings: ops::FollowUpSettings,
+}
+#[derive(Deserialize)]
 struct CommitImport {
     token: String,
     #[serde(default)]
@@ -217,7 +226,12 @@ struct CommitImport {
 /// Commands that call the model directly. Each user may send `LLM_REQUESTS_PER_WINDOW` of
 /// them per `LLM_REQUEST_WINDOW`; the daily token budget (`ServerConfig::daily_token_budget`)
 /// caps what they, the scheduler and event hooks spend together.
-pub const LLM_COMMANDS: &[&str] = &["send_message", "generate_plan", "revise_plan"];
+pub const LLM_COMMANDS: &[&str] = &[
+    "send_message",
+    "generate_plan",
+    "revise_plan",
+    "answer_follow_up",
+];
 pub const LLM_REQUESTS_PER_WINDOW: u32 = 30;
 pub const LLM_REQUEST_WINDOW: Duration = Duration::from_secs(10 * 60);
 
@@ -283,6 +297,16 @@ async fn run_command(
         "reject_action" => {
             let a: Id = args(&body)?;
             reply(ops::reject_action(app, &a.id).await)
+        }
+        "get_follow_ups" => reply(ops::get_follow_ups(app).await),
+        "answer_follow_up" => {
+            let a: AnswerFollowUp = args(&body)?;
+            reply(ops::answer_follow_up(app, &a.id, &a.answer).await)
+        }
+        "get_follow_up_settings" => reply(ops::get_follow_up_settings(app).await),
+        "save_follow_up_settings" => {
+            let a: FollowUpSettingsArg = args(&body)?;
+            reply(ops::save_follow_up_settings(app, &a.settings).await)
         }
         "get_today" => reply(ops::get_today(app).await),
         "get_plan" => {

@@ -51,7 +51,8 @@ impl Scheduler {
         }
     }
 
-    /// One tick: generate tomorrow's plan if due, and prune the activity log once a day. Errors
+    /// One tick: generate tomorrow's plan if due, raise proactive follow-ups
+    /// (`crate::follow_ups`), and prune the activity log once a day. Errors
     /// are logged, never propagated — the scheduler must keep ticking.
     pub async fn tick(&mut self) {
         let today = match self.app.logical_today().await {
@@ -63,6 +64,11 @@ impl Scheduler {
         };
         if let Err(e) = self.plan_if_due(today).await {
             tracing::warn!(error = %e, "scheduler: plan check failed");
+        }
+        // After the plan: an evening follow-up offers to adjust tomorrow's plan, which exists by
+        // then once `plan_time` has passed.
+        if let Err(e) = self.app.check_follow_ups().await {
+            tracing::warn!(error = %e, "scheduler: follow-up check failed");
         }
         if self.pruned_on != Some(today) {
             match self.app.audit().prune().await {

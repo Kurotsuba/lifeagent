@@ -9,6 +9,7 @@ import { Chat } from "./chat/Chat";
 import { Guide, guideSeen, markGuideSeen } from "./components/Guide";
 import { Members } from "./members/Members";
 import { Sidebar } from "./components/Sidebar";
+import { FollowUps } from "./followUps/FollowUps";
 import { locale, strings } from "./i18n";
 import { Nutrition } from "./nutrition/Nutrition";
 import { Onboarding } from "./onboarding/Onboarding";
@@ -201,6 +202,7 @@ function MainShell({ username }: { username: string | null }) {
           <Settings onPluginsChanged={() => void refreshPlugins()} />
         ) : null}
       </main>
+      <FollowUps onReply={openChatWithDraft} />
       {enabledPlugins?.includes("stock") ? <StockUseToast /> : null}
       {showGuide ? (
         <Guide

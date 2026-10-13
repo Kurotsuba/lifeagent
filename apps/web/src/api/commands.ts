@@ -19,6 +19,8 @@ import type {
   ChatTurn,
   Dish,
   Food,
+  FollowUp,
+  FollowUpSettings,
   HistoryMessage,
   PendingAction,
   AttendanceSlot,
@@ -109,6 +111,24 @@ export function approveAction(id: string): Promise<PendingAction> {
 
 export function rejectAction(id: string): Promise<PendingAction> {
   return call("reject_action", { id });
+}
+
+// ---- Follow-ups ------------------------------------------------------------------------------
+
+export function getFollowUps(): Promise<FollowUp[]> {
+  return call("get_follow_ups");
+}
+
+export function answerFollowUp(id: string, answer: string): Promise<FollowUp> {
+  return call("answer_follow_up", { id, answer });
+}
+
+export function getFollowUpSettings(): Promise<FollowUpSettings> {
+  return call("get_follow_up_settings");
+}
+
+export function saveFollowUpSettings(settings: FollowUpSettings): Promise<void> {
+  return call("save_follow_up_settings", { settings });
 }
 
 // ---- Activity log ---------------------------------------------------------------------------

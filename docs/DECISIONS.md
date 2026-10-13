@@ -2956,3 +2956,45 @@ are separated in [the optimization handoff](OPTIMIZATION_2026-10-11.md). No new 
   the 1st of that month (`YYYY-MM-01`). `birth_date` stays a full date on the server and in the
   DB, so no migration and no API change. A saved profile or member keeps its stored day until
   the user changes the year or month, so opening and saving an existing form doesn't move it.
+
+## 2026-10-13 — Proactive follow-ups
+
+The agent now asks on its own, for the hackathon's autonomy criterion, while every step stays
+controlled and recorded.
+
+- **Who decides to ask: code, not a model.** Each scheduler tick calls the new
+  `Plugin::follow_ups` hook on every enabled plugin with the logical date, local time and the
+  day's follow-ups so far. The diet plugin (`crates/plugin-diet/src/follow_ups.rs`) returns
+  `diet_meal_missed:<meal>` when today's plan has that main meal, its check time has passed and
+  no meal of that type is logged, and `diet_day_review` at the evening check time once every
+  main meal is logged or answered "skipped" and the day is off target: energy off by at least
+  max(15 %, 300 kcal) or protein short by at least max(20 %, 20 g). Deterministic, testable, no
+  tokens.
+- **Where they live.** `follow_ups` table (core migration 0006), one row per (logical date,
+  key), so a key is raised at most once a day. Status `open` → `answered` / `dismissed`, or
+  `cleared` when its candidate disappears (the meal was logged in chat). Clearing runs on every
+  tick and every list call; a plugin whose check errors keeps its open ones.
+- **Limits.** At most 4 a day (`MAX_PER_DAY`), a plugin can only raise keys with its own
+  prefix, a switch in Settings → Features (`follow_ups_enabled`, on by default), and an answer
+  only works on the same logical day. Yesterday's answer is refused (`action_not_pending`), so
+  "ate as planned" can't land on the wrong day.
+- **Answers are the user's call.** Kinds the UI words: `diet_log_planned` logs the planned meal
+  with nutrition from the food table (no model call), `diet_skipped`, `core_reply` (UI only:
+  opens the chat with a draft), `core_dismiss`, and `core_adjust_tomorrow`, which revises
+  tomorrow's plan (or generates it, if there is none yet) with an English instruction the diet
+  plugin built from the computed gaps. The planner runs only after the user taps it, so an
+  unwanted revision costs no Pro tokens, and the plan validator still applies.
+  `answer_follow_up` counts as a model command for the per-user rate limit.
+- **Observability.** A tick that raises anything is a `follow_up` run by the scheduler with a
+  `follow_up_raised` step per follow-up (reason and params). Each answer is a
+  `follow_up_answered` run by the user, and a plan adjustment's model calls and validation join
+  it. Cloud Logging gets kinds and answer kinds only.
+- **UI.** A panel on every page (top right; top on phones) lists open follow-ups with their
+  answers, refetching on `follow-ups-changed`, `data-changed` and `plan-ready`. It can be
+  minimized to a pill and reopens on a new one. Settings → Features has the switch and the four
+  check times (defaults: breakfast 10:30, lunch 14:30, dinner 20:30, evening review 21:30, after
+  the default 21:00 `plan_time` so tomorrow's plan exists to adjust).
+- **Not done.** The chat model isn't told about open follow-ups. Quiet hours aren't needed,
+  since check times are fixed and capped per day. There are no push notifications, so the user
+  sees follow-ups when the app is open.
+

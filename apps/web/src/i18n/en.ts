@@ -523,6 +523,8 @@ export const en: Strings = {
       plan_revision: "Adjust plan",
       action_approved: "Approved an action",
       action_rejected: "Rejected an action",
+      follow_up: "Check-in",
+      follow_up_answered: "Answered a check-in",
     },
     statuses: {
       running: "Running",
@@ -599,6 +601,8 @@ export const en: Strings = {
           ? `Plan check: ${d.violations.length} issues found, all fixed on a retry`
           : `Plan check: ${d.violations.length} issues found, ${d.violations_left} left (kept as warnings)`,
     planSavedStep: (date: string, version: number) => `Saved the plan for ${date} (version ${version})`,
+    followUpRaised: "Showed a check-in",
+    followUpAnswered: (label: string) => `You chose: ${label}`,
   },
   planNotes: {
     unmet: (text: string) => `Not fully met: ${text}`,
@@ -687,12 +691,46 @@ export const en: Strings = {
     multimember_out_of_age_range: (d: { name: string; age: number; min: number; max: number }) =>
       `${d.name} is ${d.age}, outside ${d.min}–${d.max}, and was left out of shared meals`,
   },
+  // Proactive check-ins (`FollowUp`, `crates/core/src/follow_ups.rs`), raised by the scheduler.
+  followUps: {
+    title: "Check-in from your assistant",
+    hint: "Found from your plan and logs. Tap an answer.",
+    minimize: "Hide",
+    show: (n: number) => `Check-ins: ${n}`,
+    mealMissed: (d: { meal: string; title: string; kcal: number | null }) =>
+      `${d.meal} isn't logged yet. Did you have the planned "${d.title}"${d.kcal !== null ? ` (${d.kcal} kcal)` : ""}?`,
+    dayOffTarget: {
+      intro: "Today ended far from its targets:",
+      kcal: (d: { kcal: number; target: number; diff: number }) =>
+        `Energy ${d.kcal} kcal (target ${d.target}, ${d.diff > 0 ? "+" : "−"}${Math.abs(d.diff)})`,
+      protein: (d: { protein: number; target: number; diff: number }) =>
+        `Protein ${d.protein} g (target ${d.target} g, −${Math.abs(d.diff)} g)`,
+      askAdjust: "Adjust tomorrow's plan for it?",
+      askGenerate: "Make tomorrow's plan with this in mind?",
+    },
+    // Keyed by answer kind; `generate_tomorrow` labels `core_adjust_tomorrow` when there is no
+    // plan for tomorrow yet.
+    answers: {
+      diet_log_planned: "Ate as planned",
+      core_reply: "Ate something else",
+      diet_skipped: "Skipped it",
+      core_dismiss: "Not now",
+      core_adjust_tomorrow: "Adjust tomorrow's plan",
+      generate_tomorrow: "Make tomorrow's plan",
+    } as Record<string, string>,
+    replyDraft: (meal: string) => `${meal}: I had `,
+    working: "Working…",
+    adjusting: "Adjusting tomorrow's plan…",
+    failed: "That didn't work",
+  },
   toolSummaries: {
     core_plan_viewed: (d: { date: string }) => `Viewed the plan for ${d.date}`,
     core_plan_generated: (d: { date: string; version: number }) =>
       `Made the plan for ${d.date} (version ${d.version})`,
     core_plan_revised: (d: { date: string; version: number }) =>
       `Adjusted the plan for ${d.date} (version ${d.version})`,
+    core_plan_adjusted: (d: { date: string; version: number }) =>
+      `Adjusted the plan for ${d.date} after a check-in (version ${d.version})`,
     core_weight_logged: (d: { kg: number }) => `Logged weight: ${d.kg} kg`,
     core_allergies_updated: (d: { allergies: string[] }) =>
       `Updated allergies: ${d.allergies.length > 0 ? d.allergies.join(", ") : "none"}`,
@@ -708,6 +746,8 @@ export const en: Strings = {
     core_entry_deleted: "Deleted an entry",
     diet_meal_logged: (d: { meal_type: "breakfast" | "lunch" | "dinner" | "snack"; kcal: number }) =>
       `Logged ${{ breakfast: "breakfast", lunch: "lunch", dinner: "dinner", snack: "a snack" }[d.meal_type]} · ${d.kcal} kcal`,
+    diet_meal_skipped: (d: { meal_type: "breakfast" | "lunch" | "dinner" | "snack" }) =>
+      `Noted that ${{ breakfast: "breakfast", lunch: "lunch", dinner: "dinner", snack: "snack" }[d.meal_type]} was skipped`,
     diet_intake_viewed: (d: { date: string }) => `Viewed meals for ${d.date}`,
     diet_label_calculated: (d: { portion_grams: number }) => `Calculated label nutrition for ${d.portion_grams} g; no intake recorded`,
     diet_food_updated: (d: { name: string }) => `Updated food: ${d.name}`,
@@ -796,6 +836,15 @@ export const en: Strings = {
       hint: "Optional features appear in the sidebar and join the daily plan once turned on.",
       activityTab: "Show the Assistant log page",
       activityTabHint: "The assistant's actions are always recorded; this only decides whether the page shows in the sidebar.",
+      followUps: "Check-ins",
+      followUpsHint: "The assistant asks on its own when a planned meal is still unlogged at its check time, or when a day ends far off its targets. At most 4 a day.",
+      followUpTimes: "Check times",
+      followUpTimeLabels: {
+        breakfast: "Breakfast",
+        lunch: "Lunch",
+        dinner: "Dinner",
+        evening: "Day review",
+      },
       names: {
         training: "Training log & plan",
         stock: "Stock",

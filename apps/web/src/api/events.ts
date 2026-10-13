@@ -51,6 +51,18 @@ export function onPlanGenerating(onChange: (generating: boolean | null) => void)
   return () => source.close();
 }
 
+/** Calls `onChange` whenever follow-ups may have changed (`follow-ups-changed`, or a
+ * `data-changed` that may clear one), and whenever the stream (re)opens. Returns an unsubscribe
+ * function. */
+export function onFollowUpsChanged(onChange: () => void): () => void {
+  const source = new EventSource("/api/events");
+  source.addEventListener("open", onChange);
+  source.addEventListener("follow-ups-changed", onChange);
+  source.addEventListener("data-changed", onChange);
+  source.addEventListener("plan-ready", onChange);
+  return () => source.close();
+}
+
 /** Calls `onRun` with the id of every agent run that ends (`activity-recorded`), and with `null`
  * whenever the stream (re)opens, since runs that ended meanwhile were missed. Returns an
  * unsubscribe function. */

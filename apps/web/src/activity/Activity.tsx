@@ -20,6 +20,7 @@ import { primaryButtonClass, secondaryButtonClass } from "../components/buttonSt
 import { HelpButton } from "../components/Guide";
 import {
   describeActionPreview,
+  describeFollowUp,
   describePlanNote,
   describeToolSummary,
   locale,
@@ -447,6 +448,31 @@ function StepItem({ step, onChanged }: { step: ActivityStep; onChanged: () => vo
                 </li>
               ))}
             </ul>
+          ) : null}
+        </li>
+      );
+    }
+    case "follow_up_raised":
+      return (
+        <li className="rounded-md bg-violet-50 px-2 py-1.5 text-violet-900 dark:bg-violet-950/40 dark:text-violet-200">
+          <span className="font-medium">{t.followUpRaised}</span>
+          {describeFollowUp(step.detail).map((line, i) => (
+            <span key={i} className="block [overflow-wrap:anywhere]">
+              {line}
+            </span>
+          ))}
+          <span className={"block text-xs " + muted}>{step.detail.reason}</span>
+        </li>
+      );
+    case "follow_up_answered": {
+      const d = step.detail;
+      return (
+        <li className="text-neutral-800 dark:text-neutral-200">
+          <span className="font-medium">
+            {t.followUpAnswered(strings.followUps.answers[d.answer] ?? d.answer)}
+          </span>
+          {d.result ? (
+            <span className="block [overflow-wrap:anywhere]">{describeToolSummary(d.result)}</span>
           ) : null}
         </li>
       );
