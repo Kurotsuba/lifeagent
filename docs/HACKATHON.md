@@ -461,7 +461,8 @@ To make that visible:
   prompts").
 - **Per-tool permissions and cost/token budgets**, built on the existing usage sink. Token
   budget and per-user request limit done 2026-10-05 (`docs/DECISIONS.md`, "Token budget and
-  request limit per user"); the budget is not switched on in `deploy/env.yaml` yet.
+  request limit per user"); the budget is set to 500k tokens per user per
+  rolling 24 hours in `deploy/env.yaml` (2026-10-13).
 - **More autonomy:** the scheduler already generates the next-day plan. Proactive follow-ups
   (e.g. "you haven't logged lunch") would show the agent acting on its own. Show this in the
   video.

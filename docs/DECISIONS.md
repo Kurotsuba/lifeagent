@@ -2764,8 +2764,9 @@ change and clicked Adjust lost it.
   `LlmError::BudgetExceeded` (`budget_exceeded`, HTTP 429, `token_budget_exceeded` in the UI)
   once the total reaches the budget. The call that crosses it still completes, since its size
   isn't known beforehand. If the usage query fails, the check fails closed. Configured with
-  `LIFEAGENT_DAILY_TOKEN_BUDGET` (`CoreAppBuilder::daily_token_budget`); **unset for now, so
-  no cap** — `deploy/env.yaml` has the line commented out.
+  `LIFEAGENT_DAILY_TOKEN_BUDGET` (`CoreAppBuilder::daily_token_budget`); switched on
+  at 500000 in `deploy/env.yaml` on 2026-10-13, sized from a week of production logs (most
+  users 2.5k–10k a day, heaviest chat day 312k).
 - **No `max_tokens` cap per call yet.** Left as before (no cap), by request.
 - **Request rate limit.** `send_message`, `generate_plan` and `revise_plan` are limited to 30
   per user per 10 minutes (`routes::LLM_COMMANDS`), in memory like the login limiter, which
