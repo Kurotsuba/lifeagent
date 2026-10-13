@@ -3027,5 +3027,7 @@ call on it once when the bound model answers 404 (retired or not available to th
 or 5xx after the provider's own retries. Auth, config, budget, timeouts and malformed responses
 are not retried: they would fail the same way on the fallback, or add a second long wait. Both
 calls are recorded in `llm_usage` and logged, with a WARN line naming the fallback. The deploy
-binds `google/gemini-2.5-pro` (GA, checked callable from the project on 2026-10-13) for the
-planner; parser and conversation are GA models and have none.
+binds `google/gemini-3.5-flash` (GA, checked callable from the project on 2026-10-13) for the
+planner; parser and conversation are GA models and have none. 2.5 Pro was the first choice and
+also works, but 3.5 Flash is a Gemini 3 model like the rest of the deploy and much faster, at
+the cost of a weaker plan on the rare day the preview is down.

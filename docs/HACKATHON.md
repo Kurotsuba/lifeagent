@@ -376,7 +376,7 @@ token comes from, the standard Application Default Credentials order:
   }],
   "parser":       { "provider_id": "vertex", "model": "google/gemini-3.5-flash-lite" },
   "planner":      { "provider_id": "vertex", "model": "google/gemini-3.1-pro-preview",
-                    "fallback_model": "google/gemini-2.5-pro" },
+                    "fallback_model": "google/gemini-3.5-flash" },
   "conversation": { "provider_id": "vertex", "model": "google/gemini-3.8-flash" }
 }
 ```
@@ -399,7 +399,7 @@ The first Cloud Run deploy used Gemini 2.5 Flash (parser, conversation) and 2.5 
 
 - The IDs were checked against Agent Platform's publisher-model metadata first. 3.8 Flash and
   3.5 Flash-Lite are GA; 3.1 Pro exists only as `-preview` (Public Preview), so it can change or
-  be retired on short notice. The planner binding therefore names `google/gemini-2.5-pro` (GA)
+  be retired on short notice. The planner binding therefore names `google/gemini-3.5-flash` (GA)
   as `fallback_model`: the router retries a call on it once when the preview answers 404, 429
   or 5xx (2026-10-13; see `docs/DECISIONS.md`, "Planner fallback model").
 - All three are Gemini 3, so the provider sends no temperature.
