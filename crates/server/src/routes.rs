@@ -16,7 +16,7 @@ use axum::http::HeaderMap;
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
-use futures_util::stream::{self, Stream};
+use futures_util::stream::{self, Stream, StreamExt};
 use lifeagent_api::events::payload_for;
 use lifeagent_api::ops::{self, ListFoods, NewStockDto, SettingsDto};
 use lifeagent_api::ErrorDetail;
@@ -521,9 +521,16 @@ pub async fn preview_food_import(
     reply(ops::preview_food_import(&tenant.app, &tenant.imports, &file_name, &body).await)
 }
 
+/// How long one `/api/events` connection stays open before the server ends it. Every open
+/// stream holds one of the instance's Cloud Run request slots, and a stream the browser has
+/// dropped can keep its slot for many minutes, so streams are cut short and `EventSource`
+/// reconnects by itself (the UI refetches on each reopen).
+const EVENT_STREAM_LIFETIME: Duration = Duration::from_secs(5 * 60);
+
 /// The user's `AppEvent`s as Server-Sent Events, with the names and payloads of
 /// `lifeagent_api::events`. Holding the tenant keeps it cached while
-/// the stream is open, so changes made by this user's other requests reach it.
+/// the stream is open, so changes made by this user's other requests reach it. Ends after
+/// [`EVENT_STREAM_LIFETIME`].
 pub async fn events(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
@@ -546,7 +553,8 @@ pub async fn events(
                 Err(RecvError::Closed) => return None,
             }
         }
-    });
+    })
+    .take_until(tokio::time::sleep(EVENT_STREAM_LIFETIME));
     Ok(Sse::new(stream).keep_alive(KeepAlive::new().interval(Duration::from_secs(20))))
 }
 

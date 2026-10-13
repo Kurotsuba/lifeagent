@@ -38,6 +38,8 @@ build() {
 deploy() {
   # One instance: per-user apps and live event streams are cached in the instance (see
   # docs/HACKATHON.md §1). Timeout 3600 s so an event stream lasts up to an hour per connection.
+  # Concurrency 1000: every open /api/events stream holds a request slot, and at the default 80
+  # one instance ran out of slots (all requests got 429 "no available instance", 2026-10-13).
   gcloud run deploy "$SERVICE" \
     --project "$PROJECT" \
     --region "$REGION" \
@@ -49,6 +51,7 @@ deploy() {
     --allow-unauthenticated \
     --min-instances 0 \
     --max-instances 1 \
+    --concurrency 1000 \
     --cpu 1 \
     --memory 512Mi \
     --timeout 3600
