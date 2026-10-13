@@ -2948,3 +2948,10 @@ The incoming source passed 664 tests; two added safety regressions failed agains
 The optimized source passed 685 tests (one existing Google ADC live test ignored), formatting,
 Clippy with warnings denied and the frontend build. Source/model/deployment evidence and limitations
 are separated in [the optimization handoff](OPTIMIZATION_2026-10-11.md). No new deployment was made.
+
+## 2026-10-13 — Birth date as year / month only
+
+- To collect less personal data, `BirthDateInput` drops the day select: users pick year and month, and a new pick is sent as
+  the 1st of that month (`YYYY-MM-01`). `birth_date` stays a full date on the server and in the
+  DB, so no migration and no API change. A saved profile or member keeps its stored day until
+  the user changes the year or month, so opening and saving an existing form doesn't move it.

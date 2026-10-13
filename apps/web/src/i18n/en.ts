@@ -6,7 +6,7 @@ export const en: Strings = {
     name: "HumanHealthHandler",
   },
   common: {
-    birthDate: { year: "Year", month: "Month", day: "Day" },
+    birthDate: { year: "Year", month: "Month" },
     next: "Next",
     back: "Back",
     finish: "Finish",
@@ -97,7 +97,7 @@ export const en: Strings = {
       title: "Basics",
       sex: "Sex",
       sexOptions: { male: "Male", female: "Female" },
-      birthDate: "Date of birth",
+      birthDate: "Month of birth",
       heightCm: "Height (cm)",
       weightKg: "Current weight (kg)",
       activityLevel: "Activity level",
@@ -149,7 +149,7 @@ export const en: Strings = {
     issues: {
       title: "To continue:",
       sexMissing: "Choose your sex",
-      birthDateMissing: "Pick your birth date (year, month and day)",
+      birthDateMissing: "Pick your birth year and month",
       heightMissing: "Enter your height",
       heightRange: (min: number, max: number) => `Height must be between ${min} and ${max} cm`,
       weightMissing: "Enter your current weight",
@@ -806,7 +806,7 @@ export const en: Strings = {
       weightKg: "Weight (kg)",
       weightHint: "Used to estimate what keeps their weight; update it by hand when it changes.",
       ageHint: "Aged 16–70",
-      invalid: "Enter a name, birth date, height and weight.",
+      invalid: "Enter a name, birth month, height and weight.",
     },
     attendance: {
       title: "Usual shared meals",

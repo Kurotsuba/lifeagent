@@ -11,7 +11,7 @@ export const zhCN = {
     name: "HumanHealthHandler",
   },
   common: {
-    birthDate: { year: "年", month: "月", day: "日" },
+    birthDate: { year: "年", month: "月" },
     next: "下一步",
     back: "上一步",
     finish: "完成",
@@ -103,7 +103,7 @@ export const zhCN = {
       title: "基本信息",
       sex: "性别",
       sexOptions: { male: "男", female: "女" },
-      birthDate: "出生日期",
+      birthDate: "出生年月",
       heightCm: "身高（厘米）",
       weightKg: "当前体重（千克）",
       activityLevel: "活动水平",
@@ -155,7 +155,7 @@ export const zhCN = {
     issues: {
       title: "继续之前还需：",
       sexMissing: "选择性别",
-      birthDateMissing: "选择出生日期（年、月、日）",
+      birthDateMissing: "选择出生年月",
       heightMissing: "填写身高",
       heightRange: (min: number, max: number) => `身高需在 ${min}–${max} 厘米之间`,
       weightMissing: "填写当前体重",
@@ -820,7 +820,7 @@ export const zhCN = {
       weightKg: "体重（千克）",
       weightHint: "用于估算维持体重所需的量，需要时手动更新。",
       ageHint: "16–70 岁",
-      invalid: "请填写名字、出生日期、身高和体重。",
+      invalid: "请填写名字、出生年月、身高和体重。",
     },
     attendance: {
       title: "平时一起吃的正餐",

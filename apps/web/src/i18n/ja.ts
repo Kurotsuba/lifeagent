@@ -6,7 +6,7 @@ export const ja: Strings = {
     name: "HumanHealthHandler",
   },
   common: {
-    birthDate: { year: "年", month: "月", day: "日" },
+    birthDate: { year: "年", month: "月" },
     next: "次へ",
     back: "戻る",
     finish: "完了",
@@ -97,7 +97,7 @@ export const ja: Strings = {
       title: "基本情報",
       sex: "性別",
       sexOptions: { male: "男性", female: "女性" },
-      birthDate: "生年月日",
+      birthDate: "生年月",
       heightCm: "身長（cm）",
       weightKg: "現在の体重（kg）",
       activityLevel: "活動レベル",
@@ -149,7 +149,7 @@ export const ja: Strings = {
     issues: {
       title: "次に進むには：",
       sexMissing: "性別を選択してください",
-      birthDateMissing: "生年月日（年・月・日）を選択してください",
+      birthDateMissing: "生まれた年と月を選択してください",
       heightMissing: "身長を入力してください",
       heightRange: (min: number, max: number) => `身長は ${min}〜${max} cm で入力してください`,
       weightMissing: "現在の体重を入力してください",
@@ -804,7 +804,7 @@ export const ja: Strings = {
       weightKg: "体重（kg）",
       weightHint: "体重を保つのに必要な量の目安に使います。変わったら手動で更新してください。",
       ageHint: "16〜70歳",
-      invalid: "名前、生年月日、身長、体重を入力してください。",
+      invalid: "名前、生年月、身長、体重を入力してください。",
     },
     attendance: {
       title: "いつも一緒に食べる食事",
