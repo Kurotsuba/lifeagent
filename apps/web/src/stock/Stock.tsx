@@ -18,6 +18,7 @@ import {
 } from "../api/types";
 import { primaryButtonClass } from "../components/buttonStyles";
 import { ConfirmDeleteButton } from "../components/ConfirmDeleteButton";
+import { HelpButton } from "../components/Guide";
 import { Field, inputClass } from "../components/Field";
 import { strings } from "../i18n";
 import { ShoppingList } from "./ShoppingList";
@@ -99,9 +100,12 @@ export function Stock() {
     <div className="h-full overflow-y-auto p-4 md:p-6">
       <div className="mx-auto flex max-w-2xl flex-col gap-6">
         <header className="space-y-3">
-          <h1 className="text-lg font-semibold text-neutral-900 dark:text-neutral-50">
-            {strings.nav.stock}
-          </h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-lg font-semibold text-neutral-900 dark:text-neutral-50">
+              {strings.nav.stock}
+            </h1>
+            <HelpButton topic="stock" />
+          </div>
           <SettingsToggles
             settings={view.settings}
             onChange={(next) => act(() => saveStockSettings(next))}

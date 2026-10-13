@@ -3,6 +3,7 @@ import { getMembersView } from "../api/commands";
 import { onAppDataEvent } from "../api/events";
 import { commandErrorMessage, type MembersView, type MemberView } from "../api/types";
 import { primaryButtonClass } from "../components/buttonStyles";
+import { HelpButton } from "../components/Guide";
 import { strings } from "../i18n";
 import { MemberCard } from "./MemberCard";
 import { MemberForm } from "./MemberForm";
@@ -65,9 +66,12 @@ export function Members() {
     <div className="h-full overflow-y-auto p-6">
       <div className="mx-auto flex max-w-2xl flex-col gap-6">
         <div>
-          <h1 className="text-lg font-semibold text-neutral-900 dark:text-neutral-50">
-            {t.title}
-          </h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-lg font-semibold text-neutral-900 dark:text-neutral-50">
+              {t.title}
+            </h1>
+            <HelpButton topic="members" />
+          </div>
           <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">{t.intro}</p>
         </div>
         {error ? <p className="text-sm text-red-600 dark:text-red-400">{error}</p> : null}

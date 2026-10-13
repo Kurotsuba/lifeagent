@@ -56,11 +56,13 @@ export const en: Strings = {
     open: "Guide",
     skip: "Skip",
     done: "Get started",
+    gotIt: "Got it",
+    pageHelp: "About this page",
     stepCounter: (n: number, total: number) => `${n} / ${total}`,
     steps: [
       {
         title: "Welcome to HumanHealthHandler",
-        body: "HHH logs what you eat and how you train, and every day makes a plan for the next one from your goals. Here's a quick look at each tab.",
+        body: "HHH logs what you eat and how you train, and every day makes a plan for the next one from your goals. Here's a quick look at the basics.",
       },
       {
         title: "Today: your day at a glance",
@@ -68,21 +70,121 @@ export const en: Strings = {
       },
       {
         title: "Chat: log things in a sentence",
-        body: "Tell the assistant what you ate or did, as you would a friend, e.g. \"ramen and a beer for lunch\". The app works out calories and nutrients itself.\nGot something wrong? Fix or delete it in chat too.",
+        body: "Tell the assistant what you ate or did, as you would a friend, e.g. \"ramen and a beer for lunch\". The app works out calories and nutrients itself.\nGot something wrong? Fix or delete it in chat too. With \"Ask without changing records\" on, the assistant only answers and never changes your records.",
       },
       {
-        title: "Nutrition: meals and tomorrow's plan",
-        body: "See today's calories, protein, carbs and fat, delete logged meals and log your weight.\nTomorrow's plan is made automatically at the time you set. You can also make it now, write a request and regenerate, or accept it.",
+        title: "Feature tabs: Nutrition, Training, Members, Stock",
+        body: "Each feature has its own tab. Nutrition is always there; Training, Members and Stock can be switched on or off in Settings.\nThe ? next to each page's title explains that page in detail.",
       },
       {
-        title: "Training and Stock",
-        body: "The Training tab shows the last 7 days and your training plan; the Stock tab keeps track of the food at home, and each shopping-list item can be marked done or cancelled. Both can be switched on or off in Settings.",
+        title: "Assistant log and approvals",
+        body: "Everything the assistant does is recorded in the Assistant log. Important changes, such as editing allergies or deleting past records, only happen after you press Approve.",
       },
       {
         title: "Settings",
-        body: "Change your profile and goal, switch features on or off, set when plans are made, list foods you dislike, and pick the language. The assistant replies in that language.\nThe ? button brings this guide back any time.",
+        body: "Change your profile and goal, switch features on or off, set when plans are made, list foods you dislike, and pick the language. The assistant replies in that language.\nThe ? button in the sidebar brings this guide back any time.",
       },
     ],
+    pages: {
+      nutrition: [
+        {
+          title: "Today's food",
+          body: "The top shows today's calories, protein, carbs and fat against your targets. The app computes the targets from your profile, weight and goal.\nMeals are logged in chat; an \"est.\" mark means the assistant estimated the nutrition. Delete entries you don't want from the list.",
+        },
+        {
+          title: "Log your weight",
+          body: "Use \"Log weight\" at the top right to enter today's weight. Your calorie target follows your latest weight, so log it regularly.",
+        },
+        {
+          title: "Today's plan",
+          body: "Shows today's meal plan, with meals you've already logged marked as eaten.",
+        },
+        {
+          title: "Tomorrow's plan",
+          body: "Tomorrow's plan is made automatically at the time you set, or press \"Create now\".\nWrite a request in the box (e.g. \"working late tomorrow, convenience-store food only\"): \"Regenerate\" makes a new plan that follows it, \"Adjust\" edits the current plan. When you're happy, press \"Accept plan\".",
+        },
+        {
+          title: "Notes and shared meals",
+          body: "Notes under the plan list things to watch, such as conditions it couldn't fully meet.\nWith Members on, shared meals show who's eating and the total portions; ingredient grams cover everyone, calories are your own share.",
+        },
+      ],
+      training: [
+        {
+          title: "Last 7 days",
+          body: "Each day's training over the last week, with session count, total time and estimated calories burned. Log training in chat, e.g. \"just did squats, 4 sets of 8 at 60 kg\"; delete mistakes here.",
+        },
+        {
+          title: "Today's training plan",
+          body: "If there's a plan for today, it shows the exercises, duration and intensity.",
+        },
+        {
+          title: "Tomorrow's training plan",
+          body: "Write how you'd like to train tomorrow (e.g. \"legs, 45 minutes\" or \"rest day\"), save it, then generate or regenerate the plan with it.\nThe training plan is made together with the meal plan, and tomorrow's calories are adjusted to the workout.",
+        },
+        {
+          title: "Training preferences",
+          body: "Set your goal, days per week, session length, the equipment or place you have, and notes such as injuries. The assistant sticks to these when planning.",
+        },
+      ],
+      members: [
+        {
+          title: "What members are",
+          body: "Members are the family or housemates you eat with (aged 16–70). For shared meals the plan makes one menu for the whole table, avoiding everyone's allergies and dislikes, and splits portions by what keeps each person's weight.",
+        },
+        {
+          title: "Adding and editing",
+          body: "Use \"Add member\" to enter a name, birth year and month, height, weight and allergies. Weight is used to estimate portions; update it by hand when it changes. Remove members you no longer eat with.",
+        },
+        {
+          title: "Usual shared meals",
+          body: "In the weekly grid, tick the meals (breakfast, lunch, dinner, Monday to Sunday) this person usually eats with you.",
+        },
+        {
+          title: "Next 7 days",
+          body: "For one-off changes (a trip, a dinner out), tap that meal to change only that day; a * marks a one-off change and \"Back to usual\" undoes it.\nEach member can also have their own dislikes.",
+        },
+      ],
+      activity: [
+        {
+          title: "What this page is",
+          body: "Everything the assistant does for you is recorded here: chats, scheduled plans, plan adjustments, and approved or rejected actions. Check what it actually did at any time.",
+        },
+        {
+          title: "Summary",
+          body: "The top shows, for the last few days, how many runs you started and how many ran automatically, approvals and rejections, safety blocks, and model token use.",
+        },
+        {
+          title: "Filters and steps",
+          body: "Filter by who started a run (you / automatic) and its status (done, needs approval, failed…). \"Show steps\" lists each model and tool call and its result.",
+        },
+        {
+          title: "Approvals and blocks",
+          body: "Actions waiting for you are marked as needing approval; approve or reject them here.\nActions that break the rules (a change in ask-only mode, an unsafe plan) are blocked, and the reason is recorded.",
+        },
+      ],
+      stock: [
+        {
+          title: "What Stock is",
+          body: "A record of the food you have at home. Plans can use up what you have first and list what you still need to buy.",
+        },
+        {
+          title: "The two switches",
+          body: "\"Take logged meals out of stock automatically\": when you log a meal in chat, the ingredients used come out of stock.\n\"Plan from stock and make a shopping list\": tomorrow's plan takes your stock into account and comes with a shopping list.",
+        },
+        {
+          title: "Managing stock",
+          body: "Fill in a name, quantity, unit (g, ml, piece) and best-before date in the form and press Add. Edit quantities in place and delete items you don't need; expired items show in red.\nYou can also tell the chat \"bought a box of eggs and 1 L of milk\".",
+        },
+        {
+          title: "Shopping list",
+          body: "Lists the ingredients tomorrow's plan needs, with what's already in stock. Press Done when you've bought something to add the planned amount to stock, or Cancel to skip it; Restore takes either back.",
+        },
+        {
+          title: "Recently used",
+          body: "Stock taken out by logged meals shows here. If it's wrong, Undo puts it back in stock and keeps the meal record.",
+        },
+      ],
+    },
   },
   mealType: {
     breakfast: "Breakfast",

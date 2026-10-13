@@ -17,6 +17,7 @@ import {
   type RunStatus,
 } from "../api/types";
 import { primaryButtonClass, secondaryButtonClass } from "../components/buttonStyles";
+import { HelpButton } from "../components/Guide";
 import {
   describeActionPreview,
   describePlanNote,
@@ -119,9 +120,12 @@ export function Activity() {
     <div className="h-full overflow-y-auto p-4 md:p-6">
       <div className="mx-auto flex max-w-2xl flex-col gap-5">
         <header className="space-y-2">
-          <h1 className="text-lg font-semibold text-neutral-900 dark:text-neutral-50">
-            {strings.nav.activity}
-          </h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-lg font-semibold text-neutral-900 dark:text-neutral-50">
+              {strings.nav.activity}
+            </h1>
+            <HelpButton topic="activity" />
+          </div>
           <p className="text-xs text-neutral-500 dark:text-neutral-400">{t.hint}</p>
           {error ? <p className="text-sm text-red-600 dark:text-red-400">{error}</p> : null}
         </header>

@@ -3,9 +3,11 @@ import { strings } from "../i18n";
 import { primaryButtonClass, secondaryButtonClass } from "./buttonStyles";
 
 /**
- * A short tour of the main tabs, shown once per account on this browser and again from the
- * sidebar's ? button. "Seen" lives in localStorage, like the locale: it is a view preference,
- * not account data, so a new browser shows the tour once more.
+ * A short step-by-step guide in a pop-up. The core tour of the main tabs is shown once per
+ * account on this browser and again from the sidebar's ? button; each plugin page has its own
+ * guide behind a small ? next to its title (`HelpButton`). "Seen" (core tour only) lives in
+ * localStorage, like the locale: it is a view preference, not account data, so a new browser
+ * shows the tour once more.
  */
 const SEEN_KEY_PREFIX = "lifeagent.guideSeen.";
 
@@ -18,7 +20,7 @@ export function guideSeen(username: string | null): boolean {
   }
 }
 
-function markGuideSeen(username: string | null) {
+export function markGuideSeen(username: string | null) {
   try {
     localStorage.setItem(SEEN_KEY_PREFIX + (username ?? ""), "1");
   } catch {
@@ -26,21 +28,23 @@ function markGuideSeen(username: string | null) {
   }
 }
 
+export interface GuideStep {
+  readonly title: string;
+  readonly body: string;
+}
+
 interface GuideProps {
-  username: string | null;
+  steps: readonly GuideStep[];
+  /** Label of the button on the last step. */
+  doneLabel: string;
   onClose: () => void;
 }
 
-export function Guide({ username, onClose }: GuideProps) {
-  const steps = strings.guide.steps;
+export function Guide({ steps, doneLabel, onClose }: GuideProps) {
   const [index, setIndex] = useState(0);
   const step = steps[index];
   const last = index === steps.length - 1;
-
-  function close() {
-    markGuideSeen(username);
-    onClose();
-  }
+  const close = onClose;
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -113,11 +117,41 @@ export function Guide({ username, onClose }: GuideProps) {
               className={primaryButtonClass}
               onClick={() => (last ? close() : setIndex(index + 1))}
             >
-              {last ? strings.guide.done : strings.common.next}
+              {last ? doneLabel : strings.common.next}
             </button>
           </div>
         </div>
       </div>
     </div>
+  );
+}
+
+interface HelpButtonProps {
+  /** Which page's guide to open. */
+  topic: keyof typeof strings.guide.pages;
+}
+
+/** A small ? beside a page title that opens that page's guide. */
+export function HelpButton({ topic }: HelpButtonProps) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button
+        type="button"
+        aria-label={strings.guide.pageHelp}
+        title={strings.guide.pageHelp}
+        onClick={() => setOpen(true)}
+        className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-neutral-400 align-middle text-xs font-medium text-neutral-500 transition-colors hover:border-neutral-700 hover:text-neutral-800 dark:border-neutral-500 dark:text-neutral-400 dark:hover:border-neutral-200 dark:hover:text-neutral-100"
+      >
+        ?
+      </button>
+      {open ? (
+        <Guide
+          steps={strings.guide.pages[topic]}
+          doneLabel={strings.guide.gotIt}
+          onClose={() => setOpen(false)}
+        />
+      ) : null}
+    </>
   );
 }

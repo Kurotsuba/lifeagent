@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { getTrainingView } from "../api/commands";
 import { onAppDataEvent } from "../api/events";
 import { commandErrorMessage, type TrainingView } from "../api/types";
+import { HelpButton } from "../components/Guide";
 import { strings } from "../i18n";
 import { PreferencesForm } from "./PreferencesForm";
 import { TomorrowTraining } from "./TomorrowTraining";
@@ -58,7 +59,10 @@ export function Training() {
   return (
     <div className="h-full overflow-y-auto p-6">
       <div className="mx-auto flex max-w-2xl flex-col gap-6">
-        <h1 className="text-lg font-semibold text-neutral-900 dark:text-neutral-50">{t.title}</h1>
+        <div className="flex items-center gap-2">
+          <h1 className="text-lg font-semibold text-neutral-900 dark:text-neutral-50">{t.title}</h1>
+          <HelpButton topic="training" />
+        </div>
         {error ? <p className="text-sm text-red-600 dark:text-red-400">{error}</p> : null}
 
         <Card>

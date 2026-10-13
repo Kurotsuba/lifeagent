@@ -6,7 +6,7 @@ import { isCommandError } from "./api/types";
 import { Activity } from "./activity/Activity";
 import { AuthScreen } from "./auth/AuthScreen";
 import { Chat } from "./chat/Chat";
-import { Guide, guideSeen } from "./components/Guide";
+import { Guide, guideSeen, markGuideSeen } from "./components/Guide";
 import { Members } from "./members/Members";
 import { Sidebar } from "./components/Sidebar";
 import { locale, strings } from "./i18n";
@@ -202,7 +202,16 @@ function MainShell({ username }: { username: string | null }) {
         ) : null}
       </main>
       {enabledPlugins?.includes("stock") ? <StockUseToast /> : null}
-      {showGuide ? <Guide username={username} onClose={() => setShowGuide(false)} /> : null}
+      {showGuide ? (
+        <Guide
+          steps={strings.guide.steps}
+          doneLabel={strings.guide.done}
+          onClose={() => {
+            markGuideSeen(username);
+            setShowGuide(false);
+          }}
+        />
+      ) : null}
     </div>
   );
 }

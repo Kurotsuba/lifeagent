@@ -1,7 +1,9 @@
+
 import { useEffect, useState } from "react";
 import { getSettings, getToday } from "../api/commands";
 import { onAppDataEvent } from "../api/events";
 import { commandErrorMessage, dietCard, type MealType, type TodayView } from "../api/types";
+import { HelpButton } from "../components/Guide";
 import { strings } from "../i18n";
 import { IntakeSummary } from "./IntakeSummary";
 import { MealList } from "./MealList";
@@ -63,12 +65,15 @@ export function Nutrition({ onAdjustPlan }: NutritionProps) {
     <div className="h-full overflow-y-auto p-4 md:p-6">
       <div className="mx-auto flex max-w-2xl flex-col gap-6">
         <header className="relative flex items-center justify-between gap-3">
-          <h1 className="shrink-0 text-lg font-semibold text-neutral-900 dark:text-neutral-50">
-            {strings.nav.nutrition}
-            <span className="ml-2 text-sm font-normal text-neutral-500 dark:text-neutral-400">
-              {view.logical_date}
-            </span>
-          </h1>
+          <div className="flex shrink-0 items-center gap-2">
+            <h1 className="text-lg font-semibold text-neutral-900 dark:text-neutral-50">
+              {strings.nav.nutrition}
+              <span className="ml-2 text-sm font-normal text-neutral-500 dark:text-neutral-400">
+                {view.logical_date}
+              </span>
+            </h1>
+            <HelpButton topic="nutrition" />
+          </div>
           <div className="relative">
             <button
               type="button"
