@@ -1048,6 +1048,7 @@ export type ErrorDetail =
   | { kind: "note_empty" }
   | { kind: "note_too_long"; got: number; max: number }
   | { kind: "plan_time_before_day_boundary"; plan_time: string; day_boundary: string }
+  | { kind: "check_time_before_day_boundary"; time: string; day_boundary: string }
   | { kind: "instruction_empty" }
   | { kind: "preference_dates_reversed"; valid_from: string; valid_until: string }
   | { kind: "food_data"; detail: ImportMessage }

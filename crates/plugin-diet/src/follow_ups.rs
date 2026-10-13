@@ -10,11 +10,13 @@
 //!   (`core_adjust_tomorrow`, with an instruction built here) or not now.
 
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
+use lifeagent_core::error::{CoreError, ValidationRule};
 use lifeagent_core::events::EventSource;
 use lifeagent_core::follow_ups::{
     FollowUp, FollowUpCandidate, ANSWER_ADJUST_TOMORROW, ANSWER_DISMISS, ANSWER_REPLY,
 };
 use lifeagent_core::plugin::{PluginContext, PluginError, ToolSummary};
+use lifeagent_core::time::parse_hhmm;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -74,9 +76,17 @@ impl FollowUpTimes {
         }
     }
 
-    fn validate(&self) -> Result<(), PluginError> {
+    /// Every time parses, and none is before `day_boundary`: such a time falls on the next
+    /// calendar morning, which the checks (comparing on the logical day itself) would read as
+    /// the start of the same day. Like `plan_time`'s rule (`docs/PHASE1_SPEC.md` §7.2).
+    pub fn validate(&self, day_boundary: NaiveTime) -> Result<(), CoreError> {
         for t in [&self.breakfast, &self.lunch, &self.dinner, &self.evening] {
-            parse_time(t)?;
+            let time = parse_hhmm(t)?;
+            if time < day_boundary {
+                return Err(CoreError::InvalidInput(
+                    ValidationRule::CheckTimeBeforeDayBoundary { time, day_boundary },
+                ));
+            }
         }
         Ok(())
     }
@@ -95,8 +105,10 @@ pub async fn times(ctx: &PluginContext) -> Result<FollowUpTimes, PluginError> {
         .unwrap_or_default())
 }
 
-pub async fn save_times(ctx: &PluginContext, times: &FollowUpTimes) -> Result<(), PluginError> {
-    times.validate()?;
+/// Errors with `CoreError::InvalidInput` for a time before the day boundary, so the UI can word
+/// it.
+pub async fn save_times(ctx: &PluginContext, times: &FollowUpTimes) -> Result<(), CoreError> {
+    times.validate(ctx.settings.day_boundary().await?)?;
     ctx.settings
         .set_json(TIMES_KEY, times, ctx.clock.now())
         .await?;
@@ -555,5 +567,14 @@ mod tests {
         assert_eq!(times(ctx).await.unwrap().lunch, "13:45");
         t.dinner = "25:00".into();
         assert!(save_times(ctx, &t).await.is_err());
+        // 01:00 is before the default 04:00 day boundary: the next calendar morning.
+        t.dinner = "01:00".into();
+        assert!(matches!(
+            save_times(ctx, &t).await,
+            Err(CoreError::InvalidInput(
+                ValidationRule::CheckTimeBeforeDayBoundary { .. }
+            ))
+        ));
+        assert_eq!(times(ctx).await.unwrap().dinner, "20:30");
     }
 }

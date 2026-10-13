@@ -873,7 +873,6 @@ export const en: Strings = {
     },
     plan: {
       planTime: "Plan creation time",
-      dayBoundary: "Day starts at",
     },
     preferences: {
       hint: "Foods you dislike and anything else your plans should follow. What you tell the assistant in chat is saved here too. Each one applies only for its dates.",
@@ -1014,7 +1013,9 @@ export const en: Strings = {
     note_too_long: (d: { got: number; max: number }) =>
       `This can be at most ${d.max} characters (it has ${d.got}).`,
     plan_time_before_day_boundary: (d: { plan_time: string; day_boundary: string }) =>
-      `The plan creation time (${d.plan_time}) can't be earlier than the start of the day (${d.day_boundary}). Change one of them.`,
+      `The plan creation time (${d.plan_time}) can't be earlier than ${d.day_boundary}. Pick a later time.`,
+    check_time_before_day_boundary: (d: { time: string; day_boundary: string }) =>
+      `A check time (${d.time}) can't be earlier than ${d.day_boundary}. Pick a later time.`,
     instruction_empty: "Describe how the plan should be adjusted.",
     preference_dates_reversed: (d: { valid_from: string; valid_until: string }) =>
       `The start date (${d.valid_from}) can't be after the end date (${d.valid_until}).`,

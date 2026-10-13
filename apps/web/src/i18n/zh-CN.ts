@@ -888,7 +888,6 @@ export const zhCN = {
     },
     plan: {
       planTime: "计划生成时间",
-      dayBoundary: "一天的分界时间",
     },
     preferences: {
       hint: "不喜欢的食物，以及希望计划遵循的其他要求。在对话中告诉助手的内容也会保存在这里。每条只在其有效期内生效。",
@@ -1029,7 +1028,9 @@ export const zhCN = {
     note_too_long: (d: { got: number; max: number }) =>
       `内容最多 ${d.max} 字，当前是 ${d.got} 字。`,
     plan_time_before_day_boundary: (d: { plan_time: string; day_boundary: string }) =>
-      `生成时间（${d.plan_time}）不能早于日界时间（${d.day_boundary}），请调整其中一项。`,
+      `生成时间（${d.plan_time}）不能早于 ${d.day_boundary}，请改晚一些。`,
+    check_time_before_day_boundary: (d: { time: string; day_boundary: string }) =>
+      `检查时间（${d.time}）不能早于 ${d.day_boundary}，请改晚一些。`,
     instruction_empty: "调整要求不能为空，请描述需要怎么调整。",
     preference_dates_reversed: (d: { valid_from: string; valid_until: string }) =>
       `开始日期（${d.valid_from}）不能晚于结束日期（${d.valid_until}）。`,

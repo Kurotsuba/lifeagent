@@ -88,6 +88,11 @@ pub enum ErrorDetail {
         plan_time: String,
         day_boundary: String,
     },
+    /// Both as `HH:MM`: a follow-up check time before the start of the day.
+    CheckTimeBeforeDayBoundary {
+        time: String,
+        day_boundary: String,
+    },
     InstructionEmpty,
     /// Both as `YYYY-MM-DD`.
     PreferenceDatesReversed {
@@ -171,8 +176,11 @@ impl std::fmt::Display for ErrorDetail {
                 day_boundary,
             } => write!(
                 f,
-                "生成时间（{plan_time}）不能早于日界时间（{day_boundary}），请调整其中一项。"
+                "生成时间（{plan_time}）不能早于 {day_boundary}，请改晚一些。"
             ),
+            CheckTimeBeforeDayBoundary { time, day_boundary } => {
+                write!(f, "检查时间（{time}）不能早于 {day_boundary}，请改晚一些。")
+            }
             InstructionEmpty => write!(f, "调整要求不能为空，请描述需要怎么调整。"),
             PreferenceDatesReversed {
                 valid_from,
@@ -257,6 +265,12 @@ fn invalid_input_detail(rule: ValidationRule) -> ErrorDetail {
             plan_time: format_hhmm(plan_time),
             day_boundary: format_hhmm(day_boundary),
         },
+        ValidationRule::CheckTimeBeforeDayBoundary { time, day_boundary } => {
+            ErrorDetail::CheckTimeBeforeDayBoundary {
+                time: format_hhmm(time),
+                day_boundary: format_hhmm(day_boundary),
+            }
+        }
         ValidationRule::InstructionEmpty => ErrorDetail::InstructionEmpty,
         ValidationRule::PreferenceDatesReversed {
             valid_from,
@@ -439,6 +453,10 @@ mod tests {
             ValidationRule::NoteTooLong { got: 350, max: 300 },
             ValidationRule::PlanTimeBeforeDayBoundary {
                 plan_time: NaiveTime::from_hms_opt(3, 0, 0).unwrap(),
+                day_boundary: NaiveTime::from_hms_opt(4, 0, 0).unwrap(),
+            },
+            ValidationRule::CheckTimeBeforeDayBoundary {
+                time: NaiveTime::from_hms_opt(1, 0, 0).unwrap(),
                 day_boundary: NaiveTime::from_hms_opt(4, 0, 0).unwrap(),
             },
             ValidationRule::InstructionEmpty,

@@ -2998,3 +2998,17 @@ controlled and recorded.
   since check times are fixed and capped per day. There are no push notifications, so the user
   sees follow-ups when the app is open.
 
+
+## 2026-10-13 — Day boundary hidden in the web UI
+
+Settings → 计划 no longer shows the day boundary (一天的分界时间). It was for the local desktop
+build; on the deployed web app it only confused users. The setting itself stays in core with
+its 04:00 default, and `save_settings` still sends the stored value back unchanged, so logical
+dates and the `plan_time ≥ day_boundary` check work as before. That check's error no longer
+mentions a setting the user can't see: it says the plan time can't be earlier than 04:00.
+
+Follow-up check times now follow the same rule as `plan_time`: none may be earlier than the day
+boundary. A time like 01:00 belongs to the next calendar morning, but the checks compare times
+on the logical day itself, so it would have counted as due right after 04:00 the same day (a
+missed-meal check-in at dawn). `FollowUpTimes::validate` rejects it with
+`ValidationRule::CheckTimeBeforeDayBoundary`, which the UI words in all three languages.

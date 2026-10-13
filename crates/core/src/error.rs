@@ -134,6 +134,12 @@ pub enum ValidationRule {
         day_boundary: NaiveTime,
     },
 
+    #[error("check time {time} must not be earlier than day_boundary {day_boundary}")]
+    CheckTimeBeforeDayBoundary {
+        time: NaiveTime,
+        day_boundary: NaiveTime,
+    },
+
     #[error("instruction must not be empty")]
     InstructionEmpty,
 

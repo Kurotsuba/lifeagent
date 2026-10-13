@@ -871,7 +871,6 @@ export const ja: Strings = {
     },
     plan: {
       planTime: "プランの作成時刻",
-      dayBoundary: "1 日の区切りの時刻",
     },
     preferences: {
       hint: "苦手な食べ物や、プランに反映してほしいことです。チャットで伝えた内容もここに保存されます。設定した期間だけ反映されます。",
@@ -1012,7 +1011,9 @@ export const ja: Strings = {
     note_too_long: (d: { got: number; max: number }) =>
       `内容は ${d.max} 文字以内で入力してください（現在 ${d.got} 文字）。`,
     plan_time_before_day_boundary: (d: { plan_time: string; day_boundary: string }) =>
-      `プランの作成時刻（${d.plan_time}）は 1 日の区切りの時刻（${d.day_boundary}）より前にできません。どちらかを調整してください。`,
+      `プランの作成時刻（${d.plan_time}）は ${d.day_boundary} より前にできません。もっと遅い時刻にしてください。`,
+    check_time_before_day_boundary: (d: { time: string; day_boundary: string }) =>
+      `チェック時刻（${d.time}）は ${d.day_boundary} より前にできません。もっと遅い時刻にしてください。`,
     instruction_empty: "調整内容を入力してください。どのように調整するかを書いてください。",
     preference_dates_reversed: (d: { valid_from: string; valid_until: string }) =>
       `開始日（${d.valid_from}）は終了日（${d.valid_until}）より後にできません。`,

@@ -8,7 +8,9 @@ import { LoadState } from "./LoadState";
 
 const t = strings.settings;
 
-/** §10.3's 计划 settings: plan time and day boundary, saved together by `save_settings`. */
+/** §10.3's 计划 settings: the plan time, saved by `save_settings`. The day boundary is not
+ * shown: it only mattered for the local desktop build, so the web build keeps its default and
+ * sends the stored value back unchanged. */
 export function GeneralSection() {
   const [draft, setDraft] = useState<SettingsDto | null>(null);
   const [saving, setSaving] = useState(false);
@@ -57,14 +59,6 @@ export function GeneralSection() {
             className={inputClass}
             value={draft.plan_time}
             onChange={(e) => update({ plan_time: e.target.value })}
-          />
-        </Field>
-        <Field label={t.plan.dayBoundary}>
-          <input
-            type="time"
-            className={inputClass}
-            value={draft.day_boundary}
-            onChange={(e) => update({ day_boundary: e.target.value })}
           />
         </Field>
       </div>
