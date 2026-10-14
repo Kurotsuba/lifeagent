@@ -1,6 +1,7 @@
 [package]
 name = "lifeagent-plugin-stock"
 version = "0.1.0"
+license = "MIT"
 edition = "2021"
 description = "Food stock plugin: pantry tracking, consumption from logged meals, stock-aware plan section."
 

@@ -1,6 +1,7 @@
 [package]
 name = "lifeagent-server"
 version = "0.1.0"
+license = "MIT"
 edition = "2021"
 description = "HTTP backend for the web build: accounts, per-user CoreApps, the shared command API."
 

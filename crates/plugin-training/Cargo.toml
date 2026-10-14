@@ -1,6 +1,7 @@
 [package]
 name = "lifeagent-plugin-training"
 version = "0.1.0"
+license = "MIT"
 edition = "2021"
 description = "Training plugin: workout logging, training preferences, training plan section."
 

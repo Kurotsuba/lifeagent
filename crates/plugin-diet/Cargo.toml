@@ -1,6 +1,7 @@
 [package]
 name = "lifeagent-plugin-diet"
 version = "0.1.0"
+license = "MIT"
 edition = "2021"
 description = "Diet tracking plugin: meal logging, nutrition targets, diet plan section."
 
