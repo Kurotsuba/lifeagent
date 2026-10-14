@@ -36,8 +36,8 @@ export function Sidebar({ tab, onChange, username, onShowGuide, isTabShown }: Si
   return (
     // Phones: a bottom tab bar (after `main` in the flex column), with logout in Settings'
     // account section. From `md` up: a left sidebar.
-    <nav className="order-last flex shrink-0 gap-1 border-t border-neutral-200 bg-neutral-50 px-2 pt-1 pb-[max(0.25rem,env(safe-area-inset-bottom))] md:order-none md:w-40 md:flex-col md:border-t-0 md:border-r md:p-3 dark:border-neutral-800 dark:bg-neutral-900">
-      <p className="mb-2 hidden px-2 text-sm font-semibold text-neutral-900 md:block dark:text-neutral-50">
+    <nav className="order-last flex shrink-0 gap-1 border-t border-neutral-200 bg-neutral-50 px-2 pt-1 pb-[max(0.25rem,env(safe-area-inset-bottom))] md:order-none md:w-48 md:flex-col md:border-t-0 md:border-r md:p-3 dark:border-neutral-800 dark:bg-neutral-900">
+      <p className="mb-2 hidden truncate px-2 text-sm font-semibold text-neutral-900 md:block dark:text-neutral-50">
         {strings.app.name}
       </p>
       {TABS.filter((item) => isTabShown(item.id)).map((item) => (
