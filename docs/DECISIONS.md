@@ -862,7 +862,7 @@ scheduler's own `tracing::warn!`, and per-cause zh-CN text is M8 work.
 **`PlanReady` only notifies for `trigger: Schedule`.** A manual or revision generation is
 something the user just did themselves in the UI (§10.3's 立即生成/重新生成 buttons) and already
 sees the result on screen; a toast for that would be redundant. This matches the cross-cutting
-plan already written down before starting M7 (`docs/M7_SCOPE.md`).
+plan already written down before starting M7 (`docs/archive/M7_SCOPE.md`).
 
 The event→title/date mapping (`notification_target`) and the summary-truncation helper
 (`first_sentence`) are pure functions with their own unit tests, for the same reason as step 3's
@@ -978,7 +978,7 @@ the message text, rather than duplicating that logic.
 
 **`autostart`'s OS-level registration is explicitly out of scope here.** `save_settings` persists
 the `autostart` boolean; actually calling `tauri_plugin_autostart`'s enable/disable needs an
-`AppHandle`-level autostart manager, which belongs with M7.5's tray work (per `docs/M7_SCOPE.md`),
+`AppHandle`-level autostart manager, which belongs with M7.5's tray work (per `docs/archive/M7_SCOPE.md`),
 not this step.
 
 Verification: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D
@@ -1064,7 +1064,7 @@ confirmed the layout fix by comparing before/after screenshots.
 ## 2026-09-26 — M7.3: Today + Chat pages
 
 `docs/PHASE1_SPEC.md` §10.3: main shell (sidebar + 今日/对话/设置 tabs) and the Today and Chat
-pages. Full breakdown in `docs/M7_SCOPE.md`'s M7.3 entry; the decisions worth recording here:
+pages. Full breakdown in `docs/archive/M7_SCOPE.md`'s M7.3 entry; the decisions worth recording here:
 
 **Activity chips are matched to a rendered message by content equality, not by index or id.**
 `get_history` doesn't reconstruct `activities` for past turns (M7.1's own decision), so `Chat`
@@ -1115,7 +1115,7 @@ mode. Screenshotted Today (kcal ring, macro bars, empty meal list, no-plan-yet s
 
 ## 2026-09-26 — M7.4: Settings page
 
-`docs/PHASE1_SPEC.md` §10.3's Settings section. Full breakdown in `docs/M7_SCOPE.md`'s M7.4
+`docs/PHASE1_SPEC.md` §10.3's Settings section. Full breakdown in `docs/archive/M7_SCOPE.md`'s M7.4
 entry; the decisions worth recording here:
 
 **A dedicated `ModelDraft` type for Settings, not a reused `OnboardingDraft`.** Onboarding's
@@ -1163,7 +1163,7 @@ one real memory note.
 ## 2026-09-26 — M7.5: Shell chrome (tray, single instance, autostart, quick-entry)
 
 `docs/PHASE1_SPEC.md` §10.1/§10.3's remaining desktop-shell pieces. Full breakdown in
-`docs/M7_SCOPE.md`'s M7.5 entry; the decisions worth recording here:
+`docs/archive/M7_SCOPE.md`'s M7.5 entry; the decisions worth recording here:
 
 **Quick-entry routes by window label, not a URL/hash.** The spec calls for the quick-entry
 popup to have "its own tiny route," which suggested a client-side router at first read. This
@@ -1539,7 +1539,7 @@ written.
 ## 2026-09-26 — M7.5/M7.6: autostart toggle confirmed on Windows
 
 The one Windows-only manual-check item M7.6's acceptance-pass progress note left open
-("Autostart toggle not yet reported," `docs/M7_SCOPE.md`) is now closed: the user confirmed
+("Autostart toggle not yet reported," `docs/archive/M7_SCOPE.md`) is now closed: the user confirmed
 enabling 开机自启动 in Settings actually registers LifeAgent with Windows startup (`save_settings`
 calling `tauri_plugin_autostart`'s `enable`, per M7.5). This was the last unconfirmed real-input
 item from M7.5's own "done when" (close-to-tray, single-instance relaunch, and quick-entry were
@@ -2948,7 +2948,7 @@ remain unchanged. ASCII food-term boundaries prevent `egg` from matching `eggpla
 The incoming source passed 664 tests; two added safety regressions failed against that source.
 The optimized source passed 685 tests (one existing Google ADC live test ignored), formatting,
 Clippy with warnings denied and the frontend build. Source/model/deployment evidence and limitations
-are separated in [the optimization handoff](OPTIMIZATION_2026-10-11.md). No new deployment was made.
+are separated in [the optimization handoff](archive/OPTIMIZATION_2026-10-11.md). No new deployment was made.
 
 ## 2026-10-13 — Birth date as year / month only
 

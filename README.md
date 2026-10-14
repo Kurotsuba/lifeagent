@@ -1,17 +1,33 @@
 # LifeAgent
 
-A web-based AI agent that assists with daily life. The AI core is a replaceable cloud
-LLM; functionality comes from plugins. Phase 1 ships one plugin: diet tracking and a next-day
-plan generated from your health goals.
+A web-based AI agent that assists with daily life, shown in the UI as **HumanHealthHandler**.
+The AI core is a replaceable cloud LLM (Gemini on Google Cloud's Agent Platform in the deployed
+build); functionality comes from plugins. This `g-hackathon` branch is the entry for the
+第5回 Agentic AI Hackathon with Google Cloud and ships the web build only, on Cloud Run
+(`docs/HACKATHON.md`).
 
-This README covers setup and day-to-day development commands. For what the app actually does,
-see `docs/ARCHITECTURE.md` (whole-project overview) and `docs/PHASE1_SPEC.md` (the detailed
-Phase 1 spec this codebase implements). `CLAUDE.md` has the repository conventions.
+What it does today:
 
-The 2026-10-11 local optimization adds in-scope label help, read-only chat, deterministic label
-nutrition calculations, and blocking validation for unsafe plans. See
-[`docs/OPTIMIZATION_2026-10-11.md`](docs/OPTIMIZATION_2026-10-11.md) for behavior, verification,
-compatibility and remaining limits. This source snapshot has not been deployed by REI.
+- **Diet** (always on): log meals in chat, nutrition computed in Rust from food tables (the
+  LLM never produces final totals), daily targets from your profile and goals, and a next-day
+  plan from the planner model, checked by a validator that blocks unsafe plans.
+- **Optional plugins**, switched on in Settings, each with its own tab:
+  - **Stock**: a pantry kept from chat, consumed by logged meals, used in plans and shopping lists.
+  - **Training**: a workout log and a training plan section; the diet plan follows it.
+  - **Members**: other people you eat with, their allergies and dislikes, and shared meals.
+- **Agent governance**: sensitive tool calls (allergy changes, past-day deletes, member
+  changes, …) wait for approval in the app; a read-only chat mode; an Assistant log of every
+  agent run and its steps; per-user rate limits and a daily token budget.
+- **Proactive follow-ups**: missed-meal check-ins and an evening review that offers to adjust
+  tomorrow's plan, decided by plain code and answered with one tap.
+- **Languages**: Japanese (default), English and Simplified Chinese; the assistant replies in
+  the UI's language.
+
+This README covers setup and day-to-day development commands. For design and behavior, see
+`docs/ARCHITECTURE.md` (whole-project overview), `docs/PHASE1_SPEC.md` (the Phase 1 spec),
+`docs/MULTIMEMBER_SPEC.md`, `docs/AUDIT_LOG_SPEC.md` and `docs/DECISIONS.md`. `CLAUDE.md` has the
+repository conventions. `docs/archive/OPTIMIZATION_2026-10-11.md` describes the daily-life chat scope,
+read-only chat, label nutrition calculations and blocking plan checks (merged in `437f2cf`).
 
 ## Prerequisites
 
@@ -89,9 +105,13 @@ UI to serve), `LIFEAGENT_TICK_TOKEN` (enables `/api/internal/tick`),
 (LLM tokens per user per 24 hours; unset means no cap), `LIFEAGENT_LOG_FORMAT=json` (Cloud
 Logging structured logs instead of text), `PORT`.
 
-Deploying to Cloud Run: `deploy/deploy.sh` (Cloud Build, Cloud Run, Cloud Scheduler), with the
-non-secret environment in `deploy/env.yaml`. The one-time Google Cloud setup it relies on is
-the console checklist in `docs/HACKATHON.md` §1.
+Deploying to Cloud Run: every push to `g-hackathon` runs `.github/workflows/ci.yml`, which
+runs fmt, clippy, the tests (against a Postgres 17 service) and the frontend build, then
+deploys with keyless Workload Identity Federation (set up once by `deploy/setup-ci.sh`).
+`deploy/deploy.sh` (Cloud Build, Cloud Run, Cloud Scheduler) does the same by hand. The
+non-secret environment, including the per-role Gemini models and the 500k daily token budget,
+is in `deploy/env.yaml`. The one-time Google Cloud setup is the console checklist in
+`docs/HACKATHON.md` §1.
 
 ### Configuring a model provider for the CLI
 
@@ -134,23 +154,33 @@ Cargo.toml              # workspace
 crates/llm/              lifeagent-llm: model abstraction, providers, router
 crates/core/             lifeagent-core: storage, plugin API, orchestrator, planner, scheduler
 crates/plugin-diet/      lifeagent-plugin-diet: diet tracking + diet plan section
+crates/plugin-stock/     lifeagent-plugin-stock: optional pantry, consumption, stock-aware plan section
+crates/plugin-training/  lifeagent-plugin-training: optional training log + training plan section
+crates/plugin-multimember/ lifeagent-plugin-multimember: optional other members + shared-meal section
 crates/api/              lifeagent-api: command surface + error mapping used by the server
 crates/cli/              lifeagent-cli: developer harness (chat, plan, inspect data)
 crates/server/           lifeagent-server: HTTP backend for the web build (accounts, per-user apps)
-apps/web/                Vite + React + TypeScript, thin view layer
-docs/                    ARCHITECTURE.md, PHASE1_SPEC.md, DECISIONS.md, ...
+apps/web/                Vite + React + TypeScript, thin view layer (i18n tables in src/i18n/)
+deploy/                  Cloud Run deploy script, environment and CI setup
+docs/                    ARCHITECTURE.md, PHASE1_SPEC.md, DECISIONS.md, HACKATHON.md, ...
 ```
 
 Dependency rule: `llm` <- `core` <- `plugin-*` <- `api` <- `server`; `cli` uses `core` and
-the plugins directly.
-`core` never depends on any plugin crate.
+the plugins directly. `core` never depends on any plugin crate, and plugins never depend on each
+other (they share data only by event type and plan section name). Plugins are registered in
+`crates/cli/src/main.rs` and `crates/server/src/lib.rs`.
 
 ## Troubleshooting
 
 - **`secret store error: ...`** from `lifeagent-cli models set-key` on Linux/WSL2 — see
   "Configuring a model provider for the CLI" above.
-- **A command fails with "尚未完成模型配置..."** — no model is configured: set
+- **A command fails with a "model not configured" error** (`NotConfigured`) — set
   `LIFEAGENT_MODELS` (server) or run `lifeagent-cli models set-json` (CLI).
 - Logs go to stdout (Cloud Logging on Cloud Run), INFO by default; set `RUST_LOG=debug` for the
   server or `LIFEAGENT_LOG=debug` for the CLI (any `tracing_subscriber::EnvFilter` string). Per `CLAUDE.md`, API keys and full prompts never appear at INFO or above —
   DEBUG can be more verbose but still never logs a key.
+
+## License
+
+LifeAgent is released under the [MIT License](LICENSE). Third-party Rust crates and npm packages
+keep their own licenses; see each package's metadata (`cargo metadata`, `apps/web/node_modules`).
