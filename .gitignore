@@ -23,3 +23,10 @@ gha-creds-*.json
 # Editors, OS
 .DS_Store
 *.swp
+
+images/*
+
+ZENN_ARTICLE.md
+SUBMISSION_FORM.md
+
+.claude/
