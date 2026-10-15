@@ -3034,3 +3034,17 @@ the cost of a weaker plan on the rare day the preview is down.
 - The chat follows the same rule: the multimember tools describe `birth_date` as `YYYY-MM` and
   tell the assistant to ask only for the year and month. A `YYYY-MM` value is stored as the 1st
   (a full date is still accepted), and an update with the stored year and month keeps the day.
+
+## 2026-10-14 — Bigger Cloud SQL tier for judging
+
+Every scheduler tick opens a tenant pool (up to 2 connections) for each user, and with the
+judge accounts added the `db-f1-micro` instance's `max_connections=50` ran out: ticks logged
+`tick: could not open tenant … pool timed out`, and a registration failed with "remaining
+connection slots are reserved". A missed tick can skip a user's nightly plan or follow-ups.
+
+- **Change.** `gcloud sql instances patch lifeagent --tier=db-g1-small
+  --database-flags=cloudsql.iam_authentication=on,max_connections=100` (one restart, a few
+  minutes down). `--database-flags` replaces the whole list, so the IAM flag is repeated.
+- **Cost.** About $25/month instead of about $10. Downgrade after judging.
+- **Not done.** The code fix (ticking tenants one at a time, or closing each pool after its
+  tick) would remove the dependence on the connection limit; left for after the hackathon.

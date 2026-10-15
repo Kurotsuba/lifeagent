@@ -223,7 +223,10 @@ closing registration after judging.
 
 Cloud Run's free tier covers hackathon traffic. Cloud SQL is the only always-on part: an
 instance runs constantly even at the smallest tier (shared-core `db-f1-micro`, roughly
-$10/month). New GCP accounts get trial credit. Stop or delete the instance after judging.
+$10/month). Since 2026-10-14 it runs on `db-g1-small` (roughly $25/month) with
+`max_connections=100`, because 50 connections ran out during scheduler ticks (`docs/DECISIONS.md`,
+"Bigger Cloud SQL tier for judging"). New GCP accounts get trial credit. Downgrade, stop or
+delete the instance after judging.
 
 #### Steps
 
